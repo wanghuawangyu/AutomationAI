@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -62,7 +62,15 @@
   .search:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
 
   /* 列表行 */
-  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
+  .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
+  .row.expanded .expand-arrow{transform:rotate(90deg)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-table{width:100%;border-collapse:collapse;font-size:13px}
+  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
+  .detail-table .dt-k{color:var(--text-3);width:80px;white-space:nowrap;font-weight:500}
+  .detail-table .dt-v{color:var(--text-1)}
+  .detail-table .mono{font-family:var(--mono);font-size:12px}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -186,7 +194,7 @@
         </div>
         <div class="head-actions">
           <button class="btn btn-primary" onclick="openEditor()">＋ 新建</button>
-          <button class="btn" onclick="openModal('importModal')">导入</button>
+          <button class="btn" onclick="openImportModal()">导入</button>
         </div>
       </div>
 
@@ -198,7 +206,9 @@
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">check_tests <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'check_tests','v2')">
+              <span class="expand-arrow">▶</span> check_tests <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 3 · 超时 300s · 2 天前</div>
           </div>
           <div class="row-actions">
@@ -208,12 +218,15 @@
             <button class="btn btn-sm" onclick="openExport('check_tests','v2')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">review <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'review','v2')">
+              <span class="expand-arrow">▶</span> review <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 600s · 1 周前</div>
           </div>
           <div class="row-actions">
@@ -223,12 +236,15 @@
             <button class="btn btn-sm" onclick="openExport('review','v2')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">deploy <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'deploy','v2')">
+              <span class="expand-arrow">▶</span> deploy <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 120s · 2 天前</div>
           </div>
           <div class="row-actions">
@@ -238,12 +254,15 @@
             <button class="btn btn-sm" onclick="openExport('deploy','v2')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">notify <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'notify','v1')">
+              <span class="expand-arrow">▶</span> notify <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 0 · 超时 60s · 2 天前</div>
           </div>
           <div class="row-actions">
@@ -253,12 +272,15 @@
             <button class="btn btn-sm" onclick="openExport('notify','v1')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">notify_fail <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'notify_fail','v1')">
+              <span class="expand-arrow">▶</span> notify_fail <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span>
+            </div>
             <div class="row-desc">入参 0 · 出参 0 · 超时 60s · 2 天前</div>
           </div>
           <div class="row-actions">
@@ -268,12 +290,15 @@
             <button class="btn btn-sm" onclick="openExport('notify_fail','v1')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">clean_logs <span class="tag tag-powershell">powershell</span> <span class="tag tag-ver">v3</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'clean_logs','v3')">
+              <span class="expand-arrow">▶</span> clean_logs <span class="tag tag-powershell">powershell</span> <span class="tag tag-ver">v3</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 0 · 超时 120s · 1 周前</div>
           </div>
           <div class="row-actions">
@@ -283,12 +308,15 @@
             <button class="btn btn-sm" onclick="openExport('clean_logs','v3')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">process_data <span class="tag tag-python">python</span> <span class="tag tag-ver">v3</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'process_data','v3')">
+              <span class="expand-arrow">▶</span> process_data <span class="tag tag-python">python</span> <span class="tag tag-ver">v3</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 300s · 1 个月前</div>
           </div>
           <div class="row-actions">
@@ -298,12 +326,15 @@
             <button class="btn btn-sm" onclick="openExport('process_data','v3')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">health_check <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'health_check','v1')">
+              <span class="expand-arrow">▶</span> health_check <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v1</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 180s · 1 个月前</div>
           </div>
           <div class="row-actions">
@@ -313,12 +344,15 @@
             <button class="btn btn-sm" onclick="openExport('health_check','v1')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">collect_metrics <span class="tag tag-python">python</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'collect_metrics','v1')">
+              <span class="expand-arrow">▶</span> collect_metrics <span class="tag tag-python">python</span> <span class="tag tag-ver">v1</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 240s · 1 个月前</div>
           </div>
           <div class="row-actions">
@@ -328,12 +362,15 @@
             <button class="btn btn-sm" onclick="openExport('collect_metrics','v1')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📦</div>
           <div class="row-body">
-            <div class="row-name">run_lint <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'run_lint','v2')">
+              <span class="expand-arrow">▶</span> run_lint <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v2</span>
+            </div>
             <div class="row-desc">入参 1 · 出参 1 · 超时 180s · 1 个月前</div>
           </div>
           <div class="row-actions">
@@ -343,6 +380,7 @@
             <button class="btn btn-sm" onclick="openExport('run_lint','v2')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
       </div>
@@ -513,41 +551,22 @@
   <div class="modal" style="max-width:480px">
     <div class="modal-head">导入 OP</div>
     <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件</div>
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件（在系统文件对话框中导航到目录并选中）</div>
       <div class="file-row">
         <span>📦</span>
-        <span class="mono">check_tests-v2.yaml</span>
-        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+        <span class="mono" id="importFileName">未选择文件</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="triggerImportFile()">选择文件</button>
+        <input type="file" id="importFile" accept=".yaml,.yml" style="display:none" onchange="onImportFileChange(this)" />
       </div>
       <div class="info-box warn" style="margin-top:12px">
         <span>⚠</span>
         <span>若同名 OP 已存在，导入时将提示冲突处理。</span>
       </div>
-      <div class="tree">check_tests-v2.yaml
-name: check_tests
-description: 运行测试并报告结果
-type: prompt
-timeout: 300
-inputs:
-  - name: test_cmd
-    type: string
-    required: true
-    description: 测试命令
-outputs:
-  - name: passed
-    type: string
-    description: 测试是否通过
-  - name: count
-    type: string
-    description: 通过用例数
-  - name: result
-    type: string
-    description: 测试结果详情
-content: 在当前工作区运行测试，并输出结果 JSON</div>
+      <div class="tree" id="importTree" style="display:none"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('importModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+      <button class="btn btn-primary" id="confirmImportBtn" disabled onclick="confirmImport()">导入</button>
     </div>
   </div>
 </div>
@@ -564,15 +583,39 @@ content: 在当前工作区运行测试，并输出结果 JSON</div>
       <div class="field">
         <label>导出目录</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="exportDir" value="/path/to/export" style="flex:1" />
-          <button class="btn">选择</button>
+          <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
+          <button class="btn" onclick="pickExportDirectory()">选择</button>
         </div>
-        <div class="hint">导出为 YAML 文件到所选目录下</div>
+        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
       </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('exportModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('exportModal')">导出</button>
+      <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="confirmExport()">导出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
+<div class="overlay" id="dirPickerModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">选择导出目录</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
+      <div class="field">
+        <label>目录绝对路径</label>
+        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
+        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
+        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
     </div>
   </div>
 </div>
@@ -702,8 +745,71 @@ content: 在当前工作区运行测试，并输出结果 JSON</div>
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    execute: document.getElementById('view-execute')
+    execute: document.getElementById('view-execute'),
+    detail: document.getElementById('view-detail')
   };
+  var currentDetail = { name: '', version: '' };
+
+  function toggleDetail(el, name, version) {
+    var row = el.closest('.row');
+    var panel = row.querySelector('.detail-panel');
+    var isOpen = panel.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.row.expanded').forEach(function(r) {
+      r.classList.remove('expanded');
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    if (!isOpen) {
+      if (!panel.dataset.loaded) {
+        panel.innerHTML = buildDetailTable(name, version);
+        panel.dataset.loaded = '1';
+      }
+      row.classList.add('expanded');
+      panel.style.display = 'block';
+    }
+  }
+  function buildDetailTable(name, version) {
+    var data = {
+      'check_tests': { desc: '运行测试并报告结果', type: 'prompt', timeout: 300, inputs: [['test_cmd','string','测试命令']], outputs: [['passed','string','是否通过'],['count','string','通过用例数']], content: '在当前工作区运行测试，并输出结果 JSON' },
+      'review': { desc: '代码审查', type: 'prompt', timeout: 120, inputs: [['test_result','string','测试结果']], outputs: [['approved','string','是否通过']], content: '审查测试结果并给出结论' },
+      'deploy': { desc: '部署到目标环境', type: 'prompt', timeout: 300, inputs: [['target_env','string','目标环境']], outputs: [['url','string','部署后的 URL']], content: '部署到指定环境并返回访问地址' },
+      'notify': { desc: '发送通知', type: 'prompt', timeout: 30, inputs: [['message','string','通知内容']], outputs: [], content: '发送通知消息' },
+      'notify_fail': { desc: '发送失败通知', type: 'prompt', timeout: 30, inputs: [], outputs: [], content: '发送失败告警通知' },
+      'clean_logs': { desc: '清理日志', type: 'powershell', timeout: 60, inputs: [['endpoint','string','服务地址']], outputs: [], content: '清理指定服务的历史日志' },
+      'process_data': { desc: '处理数据', type: 'python', timeout: 120, inputs: [['source','string','数据源']], outputs: [['count','string','处理条数']], content: '读取数据源并处理' },
+      'health_check': { desc: '健康检查', type: 'bash', timeout: 30, inputs: [['endpoint','string','服务地址']], outputs: [['healthy','string','是否健康']], content: '检查服务健康状态' },
+      'collect_metrics': { desc: '采集指标', type: 'python', timeout: 60, inputs: [['endpoint','string','服务地址']], outputs: [['metrics','string','指标数据']], content: '采集服务运行指标' },
+      'run_lint': { desc: '运行 lint', type: 'bash', timeout: 120, inputs: [['target','string','检查目标']], outputs: [['issues','string','问题数']], content: '对目标运行静态检查' }
+    };
+    var s = data[name] || { desc: name, type: 'prompt', timeout: 60, inputs: [], outputs: [], content: '...' };
+    var html = '<table class="detail-table">';
+    html += '<tr><td class="dt-k">类型</td><td class="dt-v">' + s.type + '</td><td class="dt-k">超时</td><td class="dt-v">' + s.timeout + 's</td><td class="dt-k">描述</td><td class="dt-v">' + s.desc + '</td></tr>';
+    // 入参子表格
+    html += '<tr><td class="dt-k">入参</td><td colspan="5">';
+    if (s.inputs.length) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+      s.inputs.forEach(function(i) {
+        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + i[0] + ' (' + i[1] + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + i[2] + '</td></tr>';
+      });
+      html += '</table>';
+    } else { html += '<span style="color:var(--text-3)">无</span>'; }
+    html += '</td></tr>';
+    // 出参子表格
+    html += '<tr><td class="dt-k">出参</td><td colspan="5">';
+    if (s.outputs.length) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+      s.outputs.forEach(function(o) {
+        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + o[0] + ' (' + o[1] + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + o[2] + '</td></tr>';
+      });
+      html += '</table>';
+    } else { html += '<span style="color:var(--text-3)">无</span>'; }
+    html += '</td></tr>';
+    html += '<tr><td class="dt-k">正文</td><td class="dt-v mono" colspan="5">' + s.content + '</td></tr>';
+    html += '</table>';
+    return html;
+  }
+
 
   function showView(name) {
     Object.keys(views).forEach(function (k) {
@@ -931,10 +1037,64 @@ content: 在当前工作区运行测试，并输出结果 JSON</div>
     closeView('execute');
   }
 
-  /* ---------- 导出（选择目录） ---------- */
+  /* ---------- 导出（选择目录并下载文件） ---------- */
+  var exportTargetName = '';
+  var exportTargetVersion = '';
+
   function openExport(name, version) {
+    exportTargetName = name;
+    exportTargetVersion = version;
     document.getElementById('exportFileName').value = name + '-' + version + '.yaml';
+    document.getElementById('exportDir').value = '';
+    document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
+  }
+  function pickExportDirectory() {
+    window.showDirectoryPicker().then(function (dirHandle) {
+      document.getElementById('exportDir').value = dirHandle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () {
+      // 用户取消选择
+    });
+  }
+  function buildOpYaml(name, version) {
+    var samples = {
+      'check_tests': { desc: '运行测试并报告结果', inputs: [['test_cmd','测试命令']], outputs: [['passed','测试是否通过'],['count','通过用例数'],['result','测试结果详情']], content: '在当前工作区运行测试，并输出结果 JSON' },
+      'review': { desc: '代码审查', inputs: [['test_result','测试结果']], outputs: [['approved','是否通过']], content: '审查测试结果并给出结论' },
+      'deploy': { desc: '部署到目标环境', inputs: [['target_env','目标环境']], outputs: [['url','部署后的 URL']], content: '部署到指定环境并返回访问地址' },
+      'notify': { desc: '发送通知', inputs: [['message','通知内容']], outputs: [], content: '发送通知消息' },
+      'notify_fail': { desc: '发送失败通知', inputs: [], outputs: [], content: '发送失败告警通知' },
+      'clean_logs': { desc: '清理日志', inputs: [['endpoint','服务地址']], outputs: [], content: '清理指定服务的历史日志' },
+      'process_data': { desc: '处理数据', inputs: [['source','数据源']], outputs: [['count','处理条数']], content: '读取数据源并处理' },
+      'health_check': { desc: '健康检查', inputs: [['endpoint','服务地址']], outputs: [['healthy','是否健康']], content: '检查服务健康状态' },
+      'collect_metrics': { desc: '采集指标', inputs: [['endpoint','服务地址']], outputs: [['metrics','指标数据']], content: '采集服务运行指标' },
+      'run_lint': { desc: '运行 lint', inputs: [['target','检查目标']], outputs: [['issues','问题数']], content: '对目标运行静态检查' }
+    };
+    var s = samples[name] || { desc: name, inputs: [], outputs: [], content: '...' };
+    var yaml = 'name: ' + name + '\nversion: ' + version + '\ndescription: ' + s.desc + '\ntype: prompt\ntimeout: 300\n';
+    yaml += 'inputs:\n';
+    if (s.inputs.length === 0) { yaml += '  []\n'; }
+    s.inputs.forEach(function (i) { yaml += '  - name: ' + i[0] + '\n    type: string\n    required: true\n    description: ' + i[1] + '\n'; });
+    yaml += 'outputs:\n';
+    if (s.outputs.length === 0) { yaml += '  []\n'; }
+    s.outputs.forEach(function (o) { yaml += '  - name: ' + o[0] + '\n    type: string\n    description: ' + o[1] + '\n'; });
+    yaml += 'content: |\n  ' + s.content + '\n';
+    return yaml;
+  }
+  function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value;
+    var dir = document.getElementById('exportDir').value;
+    var yaml = buildOpYaml(exportTargetName, exportTargetVersion);
+    var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    alert('已导出：' + dir + '\\' + fileName);
+    closeModal('exportModal');
   }
 
   /* ---------- 弹窗控制 ---------- */
@@ -949,6 +1109,39 @@ content: 在当前工作区运行测试，并输出结果 JSON</div>
       if (e.target === ov) ov.classList.remove('active');
     });
   });
+
+  /* ---------- 导入文件选择 ---------- */
+  function openImportModal() {
+    document.getElementById('importFileName').textContent = '未选择文件';
+    document.getElementById('importFile').value = '';
+    document.getElementById('confirmImportBtn').disabled = true;
+    document.getElementById('importTree').style.display = 'none';
+    document.getElementById('importTree').textContent = '';
+    openModal('importModal');
+  }
+  function triggerImportFile() {
+    document.getElementById('importFile').click();
+  }
+  function onImportFileChange(input) {
+    var file = input.files[0];
+    if (!file) return;
+    document.getElementById('importFileName').textContent = file.name;
+    document.getElementById('confirmImportBtn').disabled = false;
+    var tree = document.getElementById('importTree');
+    tree.style.display = 'block';
+    if (/\.ya?ml$/.test(file.name)) {
+      var reader = new FileReader();
+      reader.onload = function (e) { tree.textContent = file.name + '\n' + e.target.result; };
+      reader.readAsText(file);
+    } else {
+      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    }
+  }
+  function confirmImport() {
+    var name = document.getElementById('importFileName').textContent;
+    alert('已导入：' + name + '（模拟）');
+    closeModal('importModal');
+  }
 
   /* ---------- 初始化 ---------- */
   switchType('prompt');

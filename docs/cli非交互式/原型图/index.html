@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>运行历史 · AI 自动化</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -269,6 +270,7 @@
           <span class="last-updated" id="lastUpdated">最后更新 12:03:41</span>
           <button class="btn" onclick="manualRefresh()">刷新</button>
           <button class="btn toggle on" id="autoRefresh">自动刷新: 开</button>
+          <button class="btn btn-primary" onclick="exportAll()">全部导出</button>
         </div>
       </div>
 
@@ -282,7 +284,7 @@
             <select class="select"><option>全部状态</option><option>成功</option><option>失败</option><option>运行中</option><option>超时</option></select>
             <select class="select"><option>全部工作区</option><option>/path/to/workspace</option></select>
             <select class="select"><option>全部版本</option><option>v1</option><option>v2</option><option>v3</option></select>
-            <select class="select"><option>时间 ▾</option><option>最近 1 小时</option><option>最近 24 小时</option><option>最近 7 天</option></select>
+            <select class="select"><option>时间 ▾</option><option>最近 1 小时</option><option>最近 24 小时</option><option>最近 2 天</option><option>最近 3 天</option><option>最近 5 天</option><option>最近 7 天</option></select>
           </div>
         </div>
 
@@ -293,7 +295,7 @@
             <div class="run-icon">📦</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">check_tests</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openOpDetail('check_tests','v2','v2','from-list')">check_tests</span>
                 <span class="tag tag-op">OP v2</span>
                 <span class="badge badge-success">✓ 成功</span>
                 <span class="meta">12.3s</span>
@@ -306,7 +308,6 @@
               </div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openOpDetail('check_tests','v2','v2','from-list')">查看</button>
               <button class="btn btn-sm" onclick="openRerun('check_tests')">重跑</button>
             </div>
           </article>
@@ -316,7 +317,7 @@
             <div class="run-icon">📋</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">deploy_workflow</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openWfDetail('running')">deploy_workflow</span>
                 <span class="tag tag-wf">Workflow v2</span>
                 <span class="badge badge-running">● 运行中</span>
                 <span class="meta">step 3/5</span>
@@ -330,7 +331,6 @@
               <div class="progress"><i style="width:60%"></i></div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openWfDetail('running')">查看</button>
               <button class="btn btn-sm btn-danger" onclick="openTerminate('deploy_workflow')">终止</button>
             </div>
           </article>
@@ -340,7 +340,7 @@
             <div class="run-icon">⏰</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">hourly_check</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openWfDetail('failed')">hourly_check</span>
                 <span class="tag tag-job">Job v1</span>
                 <span class="badge badge-failed">✗ 失败</span>
                 <span class="meta">8.1s</span>
@@ -355,7 +355,6 @@
               <div class="run-note note-warn">⚠ 需要更新，无法重试。请使用 [重跑]。</div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openWfDetail('failed')">查看</button>
               <button class="btn btn-sm" disabled title="需要更新后才能重试">重试</button>
               <button class="btn btn-sm" onclick="openRerun('hourly_check')">重跑</button>
             </div>
@@ -366,7 +365,7 @@
             <div class="run-icon">📋</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">deploy_workflow</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openWfDetail('timeout')">deploy_workflow</span>
                 <span class="tag tag-wf">Workflow v2</span>
                 <span class="badge badge-timeout">⏱ 超时</span>
                 <span class="meta">137.5s</span>
@@ -380,7 +379,6 @@
               <div class="run-note note-timeout">⏱ 超时节点：node_deploy · 引用 OP deploy（timeout = 120s）· 已终止整个 Run</div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openWfDetail('timeout')">查看</button>
               <button class="btn btn-sm disabled" disabled title="超时不可重试">重试</button>
               <button class="btn btn-sm" onclick="openRerun('deploy_workflow')">重跑</button>
             </div>
@@ -391,7 +389,7 @@
             <div class="run-icon">⏰</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">daily_cleanup</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openOpDetail('clean_logs','v2','v3','from-list')">daily_cleanup</span>
                 <span class="tag tag-job">Job v2</span>
                 <span class="badge badge-success">✓ 成功</span>
                 <span class="meta">3.2s</span>
@@ -404,7 +402,6 @@
               </div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openOpDetail('clean_logs','v2','v3','from-list')">查看</button>
               <button class="btn btn-sm" onclick="openRerun('daily_cleanup')">重跑</button>
             </div>
           </article>
@@ -414,7 +411,7 @@
             <div class="run-icon">⏰</div>
             <div class="run-main">
               <div class="run-title">
-                <span class="run-name">data_sync</span>
+                <span class="run-name" style="cursor:pointer;text-decoration:underline" onclick="openOpDetail('process_data','v2','v3','from-list')">data_sync</span>
                 <span class="tag tag-job">Job v2</span>
                 <span class="badge badge-failed">✗ 失败</span>
                 <span class="meta">4.1s</span>
@@ -428,7 +425,6 @@
               <div class="run-note note-warn">⚠ 版本已更新（失败时 v2 / 当前 v3），无法重试，请使用 [重跑]</div>
             </div>
             <div class="run-actions">
-              <button class="btn btn-sm" onclick="openOpDetail('process_data','v2','v3','from-list')">查看</button>
               <button class="btn btn-sm" onclick="openRerun('data_sync')">重跑</button>
             </div>
           </article>
@@ -467,6 +463,15 @@
         <div class="info-item"><div class="info-k">耗时</div><div class="info-v">12.3s</div></div>
         <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono">/path/to/workspace</div></div>
         <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="opInfoTrigger">虚拟 Job / 单次执行</div></div>
+      </div>
+
+      <!-- 执行历史：同一 step 的多次执行记录 -->
+      <div class="section" id="opHistorySection">
+        <div class="section-title">执行历史</div>
+        <select class="select" style="max-width:360px" onchange="switchOpHistory(this.value)">
+          <option value="1" selected>第 2 次 · 12:01:35 · 成功（12.3s）← 当前</option>
+          <option value="0">第 1 次 · 12:01:23 · 失败（5.2s）</option>
+        </select>
       </div>
 
       <div class="section">
@@ -532,7 +537,7 @@
         <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="wfInfoTrigger">持久 Job / 手动</div></div>
       </div>
 
-      <!-- 画布 + 节点详情（无 OP 库；只读展示执行状态，含固定 Start / End 节点） -->
+      <!-- 画布（只读展示执行状态，点击 node 直接进入 OP 执行详情） -->
       <div class="exec-dag" id="execDag">
         <div class="exec-dag-wrap">
           <div class="exec-dag-toolbar">
@@ -549,7 +554,7 @@
 
           <div class="exec-dag-scroll">
             <div class="exec-dag-canvas" id="execCanvas">
-              <!-- 连线（SVG，静态示例：执行到 node_deploy 失败） -->
+              <!-- 连线（SVG） -->
               <svg class="exec-edges" id="execEdges" width="1100" height="360" viewBox="0 0 1100 360">
                 <defs>
                   <marker id="x-arr-g" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
@@ -566,37 +571,37 @@
                   </marker>
                 </defs>
 
-                <!-- Start 🟢 → node_check（已执行） -->
+                <!-- Start → node_check -->
                 <path d="M130 180 C 150 180 150 76 180 76"
                       stroke="#16a34a" stroke-width="2" fill="none"
                       marker-end="url(#x-arr-g)"/>
 
-                <!-- node_check 🟢 → node_review（已执行） -->
+                <!-- node_check → node_review -->
                 <path d="M310 76 L360 76"
                       stroke="#16a34a" stroke-width="2" fill="none"
                       marker-end="url(#x-arr-g)"/>
 
-                <!-- node_check 🔴 → node_notify_fail（未执行，灰色虚线） -->
+                <!-- node_check → node_notify_fail（灰色虚线） -->
                 <path d="M310 96 C 330 96 330 256 360 256"
                       stroke="#c3c8d0" stroke-width="2" fill="none"
                       stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
 
-                <!-- node_review 🟢 → node_deploy（已执行） -->
+                <!-- node_review → node_deploy -->
                 <path d="M490 76 L540 76"
                       stroke="#16a34a" stroke-width="2" fill="none"
                       marker-end="url(#x-arr-g)"/>
 
-                <!-- node_deploy 🟢 → node_notify（未执行，灰色虚线） -->
+                <!-- node_deploy → node_notify（灰色虚线） -->
                 <path d="M670 76 L720 76"
                       stroke="#c3c8d0" stroke-width="2" fill="none"
                       stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
 
-                <!-- node_notify 🟢 → End（未到达，灰色虚线） -->
+                <!-- node_notify → End（灰色虚线） -->
                 <path d="M850 76 C 920 76 920 180 940 180"
                       stroke="#c3c8d0" stroke-width="2" fill="none"
                       stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
 
-                <!-- node_notify_fail 🟢 → End（未到达，灰色虚线） -->
+                <!-- node_notify_fail → End（灰色虚线） -->
                 <path d="M490 256 C 750 256 750 180 940 180"
                       stroke="#c3c8d0" stroke-width="2" fill="none"
                       stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
@@ -605,20 +610,9 @@
             </div>
           </div>
         </div>
-
-        <aside class="exec-node-panel" id="execNodePanel">
-          <div class="panel-resizer" id="execPanelResizer"></div>
-          <div class="panel-head">
-            <span>节点详情</span>
-            <button class="panel-collapse" onclick="toggleExecPanel()" title="收起面板">⇥</button>
-          </div>
-          <div class="panel-body" id="execNodePanelBody"></div>
-        </aside>
       </div>
 
-      <div style="text-align:right">
-        <button class="btn" onclick="toggleExecPanel()" id="execExpandBtn" style="display:none">⇤ 展开节点详情</button>
-      </div>
+      <div style="margin-top:12px;font-size:12.5px;color:var(--text-2)">点击画布中的节点可查看该 OP 的执行详情</div>
     </div>
 
   </main>
@@ -707,6 +701,35 @@
   </div>
 </div>
 
+<!-- ==================== 全部导出弹窗 ==================== -->
+<div class="overlay" id="exportModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导出运行历史</div>
+    <div class="modal-body">
+      <div class="field">
+        <label>文件名</label>
+        <input type="text" id="exportFileName" value="job_result-20261005120000000.xlsx" />
+      </div>
+      <div class="field">
+        <label>导出条数</label>
+        <div style="padding:8px 0;font-size:14px">共 <strong id="exportCount">5</strong> 条运行历史（含 8 条运行明细）</div>
+      </div>
+      <div class="field">
+        <label>导出目录</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
+          <button class="btn" onclick="pickExportDirectory()">选择</button>
+        </div>
+        <div class="hint">点击 [选择] 弹出系统文件夹选择框，选中后回填目录名</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('exportModal')">取消</button>
+      <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="doExport()">导出</button>
+    </div>
+  </div>
+</div>
+
 <script>
   /* ==================== 视图切换 ==================== */
   var views = {
@@ -740,6 +763,70 @@
     el.textContent = '最后更新 ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
   }
 
+  /* ==================== 全部导出为 Excel ==================== */
+  function exportAll() {
+    // 生成文件名
+    var now = new Date();
+    function pad(n, w) { return String(n).padStart(w || 2, '0'); }
+    var fileName = 'job_result-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + pad(now.getMilliseconds(), 3) + '.xlsx';
+    document.getElementById('exportFileName').value = fileName;
+    document.getElementById('exportCount').textContent = '5';
+    document.getElementById('exportDir').value = '';
+    document.getElementById('confirmExportBtn').disabled = true;
+    openModal('exportModal');
+  }
+  function pickExportDirectory() {
+    window.showDirectoryPicker().then(function (dirHandle) {
+      document.getElementById('exportDir').value = dirHandle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () {});
+  }
+  function doExport() {
+    if (typeof XLSX === 'undefined') {
+      alert('Excel 库未加载成功，请检查网络连接后刷新页面');
+      return;
+    }
+    // 运行历史 sheet
+    var historyHeader = ['id', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'duration'];
+    var historyRows = [historyHeader];
+    var historyData = [
+      { id: 'run-001', jobId: 'job-check-tests', jobKind: 'virtual', jobVersion: 2, triggeredBy: 'single_op', workspace: '/path/ws-001', status: 'success', terminatedBy: '', startedAtMs: 1728105683000, finishedAtMs: 1728105695300, duration: 12.3 },
+      { id: 'run-002', jobId: 'job-deploy', jobKind: 'virtual', jobVersion: 2, triggeredBy: 'manual', workspace: '/path/ws-002', status: 'success', terminatedBy: '', startedAtMs: 1728104710000, finishedAtMs: 1728104755600, duration: 45.6 },
+      { id: 'run-003', jobId: 'job-hourly-check', jobKind: 'persistent', jobVersion: 1, triggeredBy: 'schedule', workspace: '/path/ws-003', status: 'failed', terminatedBy: 'error', startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2 },
+      { id: 'run-004', jobId: 'job-review', jobKind: 'virtual', jobVersion: 1, triggeredBy: 'single_op', workspace: '/path/ws-001', status: 'success', terminatedBy: '', startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1 },
+      { id: 'run-005', jobId: 'job-notify', jobKind: 'persistent', jobVersion: 2, triggeredBy: 'retry', workspace: '/path/ws-004', status: 'timeout', terminatedBy: 'timeout', startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0 }
+    ];
+    historyData.forEach(function (r) {
+      historyRows.push([r.id, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace, r.status, r.terminatedBy, r.startedAtMs, r.finishedAtMs, r.duration]);
+    });
+
+    // 运行明细 sheet
+    var detailHeader = ['ResultId', 'jobId', 'stepId', 'opId', 'opVersion', 'clientId', 'status', 'exitCode', 'inputs', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'duration'];
+    var detailRows = [detailHeader];
+    var detailData = [
+      { resultId: 'step-001', jobId: 'job-check-tests', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, outputs: { passed: 'true', count: '42' }, rawOutput: '42 tests passed', timedOut: false, startedAtMs: 1728105683000, finishedAtMs: 1728105695300, duration: 12.3 },
+      { resultId: 'step-002', jobId: 'job-deploy', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2 },
+      { resultId: 'step-003', jobId: 'job-deploy', stepId: 'step-2', opId: 'review', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728104720200, finishedAtMs: 1728104728700, duration: 8.5 },
+      { resultId: 'step-004', jobId: 'job-deploy', stepId: 'step-3', opId: 'deploy', opVersion: 1, clientId: 'client-bash', status: 'success', exitCode: 0, inputs: { target_env: 'prod' }, outputs: { url: 'https://prod.example.com' }, rawOutput: 'Deployed successfully', timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104753800, duration: 25.1 },
+      { resultId: 'step-005', jobId: 'job-deploy', stepId: 'step-4', opId: 'notify', opVersion: 2, clientId: 'client-bash', status: 'success', exitCode: 0, inputs: { message: '部署完成' }, outputs: {}, rawOutput: 'Notification sent', timedOut: false, startedAtMs: 1728104753800, finishedAtMs: 1728104755600, duration: 1.8 },
+      { resultId: 'step-006', jobId: 'job-hourly-check', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2 },
+      { resultId: 'step-007', jobId: 'job-review', stepId: 'step-1', opId: 'review', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1 },
+      { resultId: 'step-008', jobId: 'job-notify', stepId: 'step-1', opId: 'notify', opVersion: 2, clientId: 'client-bash', status: 'timeout', exitCode: null, inputs: { message: '告警' }, outputs: {}, rawOutput: 'Timeout after 300s', timedOut: true, startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0 }
+    ];
+    detailData.forEach(function (r) {
+      detailRows.push([r.resultId, r.jobId, r.stepId, r.opId, r.opVersion, r.clientId, r.status, r.exitCode, JSON.stringify(r.inputs), JSON.stringify(r.outputs), r.rawOutput, r.timedOut, r.startedAtMs, r.finishedAtMs, r.duration]);
+    });
+
+    var fileName = document.getElementById('exportFileName').value;
+    var wb = XLSX.utils.book_new();
+    var ws1 = XLSX.utils.aoa_to_sheet(historyRows);
+    var ws2 = XLSX.utils.aoa_to_sheet(detailRows);
+    XLSX.utils.book_append_sheet(wb, ws1, '运行历史');
+    XLSX.utils.book_append_sheet(wb, ws2, '运行明细');
+    XLSX.writeFile(wb, fileName);
+    closeModal('exportModal');
+  }
+
   /* ==================== OP 执行详情 ==================== */
   function openOpDetail(name, execVer, curVer, from) {
     document.getElementById('opDetailName').textContent = name;
@@ -770,6 +857,40 @@
     };
 
     showView('opDetail');
+  }
+
+  /* ---------- OP 执行历史切换（同一 step 多次执行记录） ---------- */
+  var opHistoryData = [
+    {
+      time: '12:01:23', status: '失败', duration: '5.2s',
+      statusBadge: '<span class="badge badge-failed">✗ 失败</span>',
+      error: 'Error: Connection timeout after 5000ms\n  at Client._timeout (claude.js:128)\n  at process._tickCallback (internal/process/next_tick.js:61)',
+      output: '', exitCode: '1'
+    },
+    {
+      time: '12:01:35', status: '成功', duration: '12.3s',
+      statusBadge: '<span class="badge badge-success">✓ 成功</span>',
+      error: '', output: '23 tests passed, 0 failed', exitCode: '0'
+    }
+  ];
+  function switchOpHistory(idx) {
+    // 更新按钮高亮
+    var btns = document.querySelectorAll('#opHistorySection .btn');
+    btns.forEach(function (b, i) {
+      b.classList.toggle('btn-primary', i === idx);
+    });
+    var h = opHistoryData[idx];
+    // 更新状态、耗时
+    var infoVals = document.querySelectorAll('#view-op-detail .info-grid .info-v');
+    infoVals[2].innerHTML = h.statusBadge;
+    infoVals[3].textContent = h.duration;
+    // 更新输出
+    var outputBlocks = document.querySelectorAll('#view-op-detail .pre-block');
+    if (h.status === '失败') {
+      outputBlocks[1].textContent = h.error;
+    } else {
+      outputBlocks[1].textContent = h.output;
+    }
   }
 
   /* ==================== Workflow 执行详情 ==================== */
@@ -910,14 +1031,9 @@
       headActions.innerHTML = '<button class="btn" onclick="openRerun(\'deploy_workflow\')">重跑</button>';
     }
 
-    /* 渲染画布 + 节点详情 */
+    /* 渲染画布（点击 node 直接进入 OP 执行详情） */
     renderExecCanvas();
-    execSelectedNode = 'node_deploy';
-    renderExecNodePanel(execSelectedNode);
-
-    document.getElementById('execDag').classList.remove('panel-collapsed');
-    document.getElementById('execExpandBtn').style.display = 'none';
-    document.getElementById('execNodePanel').style.display = 'flex';
+    execSelectedNode = null;
 
     showView('wfDetail');
   }
@@ -960,11 +1076,9 @@
 
       el.addEventListener('click', function (e) {
         e.stopPropagation();
-        execSelectedNode = id;
-        document.querySelectorAll('.exec-node').forEach(function (x) {
-          x.classList.toggle('selected', x.dataset.node === id);
-        });
-        renderExecNodePanel(id);
+        if (n.kind === 'start' || n.kind === 'end') return;
+        // 点击 node → 直接进入 OP 执行详情
+        openOpDetail(n.op, 'v' + n.opVersion, 'v' + n.opVersion, 'from-wf');
       });
 
       canvas.appendChild(el);
@@ -1159,7 +1273,6 @@
 
   /* ==================== 初始化 ==================== */
   renderExecCanvas();
-  renderExecNodePanel('node_deploy');
 </script>
 </body>
 </html>

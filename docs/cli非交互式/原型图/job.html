@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Job 管理 · AI 自动化</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -67,7 +68,15 @@
   .chip.active{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
 
   /* Job 列表卡片 */
-  .job-card{display:flex;align-items:flex-start;gap:13px;padding:15px 16px;border-bottom:1px solid var(--border-soft);transition:background .12s}
+  .job-card{display:flex;align-items:flex-start;gap:13px;padding:15px 16px;border-bottom:1px solid var(--border-soft);transition:background .12s;flex-wrap:wrap}
+  .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
+  .job-card.expanded .expand-arrow{transform:rotate(90deg)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-table{width:100%;border-collapse:collapse;font-size:13px}
+  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
+  .detail-table .dt-k{color:var(--text-3);width:80px;white-space:nowrap;font-weight:500}
+  .detail-table .dt-v{color:var(--text-1)}
+  .detail-table .mono{font-family:var(--mono);font-size:12px}
   .job-card:last-child{border-bottom:0}
   .job-card:hover{background:#fafbfd}
   .job-icon{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:15px}
@@ -204,7 +213,7 @@
         </div>
         <div class="head-actions">
           <button class="btn btn-primary" onclick="openEditor('')">＋ 新建</button>
-          <button class="btn" onclick="openModal('importModal')">导入</button>
+          <button class="btn" onclick="openImportModal()">导入</button>
         </div>
       </div>
 
@@ -224,7 +233,7 @@
           <div class="job-icon">⏰</div>
           <div class="job-main">
             <div class="job-title">
-              <span class="job-name">daily_cleanup</span>
+              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'daily_cleanup','v2','op')"><span class="expand-arrow">▶</span> daily_cleanup</span>
               <span class="tag tag-ver">v2</span>
               <span class="badge badge-success">✅ 启用</span>
               <span class="tag tag-warn">⚠ 需要更新</span>
@@ -245,6 +254,7 @@
             <button class="btn btn-sm">禁用</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </article>
 
         <!-- hourly_check：定时 Workflow Job，需要更新，失败 -->
@@ -252,7 +262,7 @@
           <div class="job-icon">⏰</div>
           <div class="job-main">
             <div class="job-title">
-              <span class="job-name">hourly_check</span>
+              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'hourly_check','v1','workflow')"><span class="expand-arrow">▶</span> hourly_check</span>
               <span class="tag tag-ver">v1</span>
               <span class="badge badge-success">✅ 启用</span>
               <span class="tag tag-warn">⚠ 需要更新</span>
@@ -274,6 +284,7 @@
             <button class="btn btn-sm">禁用</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </article>
 
         <!-- manual_deploy：手动 Workflow Job -->
@@ -281,7 +292,7 @@
           <div class="job-icon">📌</div>
           <div class="job-main">
             <div class="job-title">
-              <span class="job-name">manual_deploy</span>
+              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'manual_deploy','v2','workflow')"><span class="expand-arrow">▶</span> manual_deploy</span>
               <span class="tag tag-ver">v2</span>
             </div>
             <div class="job-sub">
@@ -299,6 +310,7 @@
             <button class="btn btn-sm" onclick="openExport('manual_deploy','v2','workflow')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </article>
 
         <!-- weekly_report：定时 Workflow Job，已禁用 + 需要更新 -->
@@ -306,7 +318,7 @@
           <div class="job-icon">⏰</div>
           <div class="job-main">
             <div class="job-title">
-              <span class="job-name">weekly_report</span>
+              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'weekly_report','v1','op')"><span class="expand-arrow">▶</span> weekly_report</span>
               <span class="tag tag-ver">v1</span>
               <span class="badge badge-off">⏸ 已禁用</span>
               <span class="tag tag-warn">⚠ 需要更新</span>
@@ -327,6 +339,7 @@
             <button class="btn btn-sm">启用</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </article>
 
         <!-- data_sync：定时 OP Job，启用，需要更新，失败 -->
@@ -334,7 +347,7 @@
           <div class="job-icon">⏰</div>
           <div class="job-main">
             <div class="job-title">
-              <span class="job-name">data_sync</span>
+              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'data_sync','v3','op')"><span class="expand-arrow">▶</span> data_sync</span>
               <span class="tag tag-ver">v2</span>
               <span class="badge badge-success">✅ 启用</span>
               <span class="tag tag-warn">⚠ 需要更新</span>
@@ -355,6 +368,7 @@
             <button class="btn btn-sm">禁用</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </article>
 
       </div>
@@ -562,28 +576,22 @@
   <div class="modal" style="max-width:480px">
     <div class="modal-head">导入 Job</div>
     <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 ZIP 文件</div>
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 ZIP 文件（在系统文件对话框中导航到目录并选中）</div>
       <div class="file-row">
         <span>📦</span>
-        <span class="mono">manual_deploy-v2.zip</span>
-        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+        <span class="mono" id="importFileName">未选择文件</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="triggerImportFile()">选择文件</button>
+        <input type="file" id="importFile" accept=".zip" style="display:none" onchange="onImportFileChange(this)" />
       </div>
       <div class="info-box warn" style="margin-top:12px">
         <span>⚠</span>
         <span>若同名 Job 已存在，导入时将提示冲突处理。</span>
       </div>
-      <div class="tree">manual_deploy-v2.zip
-├── manifest.json
-├── job.yaml
-├── workflows/
-│   └── deploy_workflow.yaml
-└── ops/
-    ├── check_tests.yaml
-    └── ...</div>
+      <div class="tree" id="importTree" style="display:none"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('importModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+      <button class="btn btn-primary" id="confirmImportBtn" disabled onclick="confirmImport()">导入</button>
     </div>
   </div>
 </div>
@@ -605,10 +613,42 @@
 └── ops/
     ├── health_check.yaml
     └── ...</div>
+      <div class="field" style="margin-top:14px">
+        <label>导出目录</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
+          <button class="btn" onclick="pickExportDirectory()">选择</button>
+        </div>
+        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('exportModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('exportModal')">导出</button>
+      <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="confirmExport()">导出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
+<div class="overlay" id="dirPickerModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">选择导出目录</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
+      <div class="field">
+        <label>目录绝对路径</label>
+        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
+        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
+        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
     </div>
   </div>
 </div>
@@ -618,8 +658,54 @@
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    run: document.getElementById('view-run')
+    run: document.getElementById('view-run'),
+    detail: document.getElementById('view-detail')
   };
+  var currentDetail = { name: '', version: '', type: '' };
+
+  function toggleDetail(el, name, version, type) {
+    var card = el.closest('.job-card');
+    var panel = card.querySelector('.detail-panel');
+    var isOpen = panel.style.display !== 'none';
+    document.querySelectorAll('.job-card.expanded').forEach(function(r) {
+      r.classList.remove('expanded');
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    if (!isOpen) {
+      if (!panel.dataset.loaded) {
+        panel.innerHTML = buildDetailTable(name, version, type);
+        panel.dataset.loaded = '1';
+      }
+      card.classList.add('expanded');
+      panel.style.display = 'block';
+    }
+  }
+  function buildDetailTable(name, version, type) {
+    var data = {
+      'daily_cleanup': { target: 'OP clean_logs v2', cron: '0 2 * * *', enabled: true, note: '需要更新', params: { endpoint: 'localhost:8080' } },
+      'hourly_check': { target: 'Workflow deploy_workflow v1', cron: '0 * * * *', enabled: true, note: '需要更新', params: {} },
+      'manual_deploy': { target: 'Workflow deploy_workflow v2', cron: '手动触发', enabled: true, note: '', params: { target_env: 'production' } },
+      'weekly_report': { target: 'OP report v1', cron: '0 0 * * 1', enabled: true, note: '', params: {} },
+      'data_sync': { target: 'OP process_data v2', cron: '0 */6 * * *', enabled: false, note: '', params: { source: 'db://primary' } }
+    };
+    var s = data[name] || { target: type, cron: '-', enabled: true, note: '', params: {} };
+    var html = '<table class="detail-table">';
+    html += '<tr><td class="dt-k">类型</td><td class="dt-v">' + type + '</td><td class="dt-k">状态</td><td class="dt-v">' + (s.enabled ? '✅ 启用' : '⏸ 禁用') + '</td><td class="dt-k">备注</td><td class="dt-v">' + (s.note || '-') + '</td></tr>';
+    html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + s.target + '</td></tr>';
+    html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + s.cron + '</td></tr>';
+    if (Object.keys(s.params).length) {
+      html += '<tr><td class="dt-k">入参</td><td colspan="5">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+      Object.keys(s.params).forEach(function(k) {
+        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + k + '</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + s.params[k] + '</td></tr>';
+      });
+      html += '</table>';
+      html += '</td></tr>';
+    }
+    html += '</table>';
+    return html;
+  }
 
   function showView(name) {
     Object.keys(views).forEach(function (k) {
@@ -721,8 +807,15 @@
     closeView();
   }
 
-  /* ==================== 导出 ==================== */
+  /* ==================== 导出（选择目录并下载 ZIP） ==================== */
+  var exportTargetName = '';
+  var exportTargetVersion = '';
+  var exportTargetType = '';
+
   function openExport(name, version, type) {
+    exportTargetName = name;
+    exportTargetVersion = version;
+    exportTargetType = type;
     document.getElementById('exportFileName').value = name + '-' + version + '.zip';
 
     var tree = name + '-' + version + '.zip\n' +
@@ -742,7 +835,42 @@
     }
 
     document.getElementById('exportTree').textContent = tree;
+    document.getElementById('exportDir').value = '';
+    document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
+  }
+  function pickExportDirectory() {
+    window.showDirectoryPicker().then(function (dirHandle) {
+      document.getElementById('exportDir').value = dirHandle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () {
+      // 用户取消选择
+    });
+  }
+  async function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value;
+    var dir = document.getElementById('exportDir').value;
+    try {
+      var zip = new JSZip();
+      zip.file('manifest.json', JSON.stringify({ name: exportTargetName, version: exportTargetVersion, kind: 'job' }, null, 2));
+      zip.file('job.yaml', 'name: ' + exportTargetName + '\nversion: ' + exportTargetVersion + '\ntarget: ' + exportTargetType + '\ntrigger: schedule\n');
+      if (exportTargetType === 'workflow') {
+        zip.folder('workflows').file('deploy_workflow.yaml', 'name: deploy_workflow\nversion: v2\n');
+      }
+      zip.folder('ops').file('check_tests.yaml', 'name: check_tests\nversion: v2\n');
+      var blob = await zip.generateAsync({ type: 'blob' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      alert('已导出：' + dir + '\\' + fileName);
+      closeModal('exportModal');
+    } catch (e) {
+      alert('导出失败：' + e.message);
+    }
   }
 
   /* ==================== 弹窗控制 ==================== */
@@ -757,6 +885,33 @@
       if (e.target === ov) ov.classList.remove('active');
     });
   });
+
+  /* ==================== 导入文件选择 ==================== */
+  function openImportModal() {
+    document.getElementById('importFileName').textContent = '未选择文件';
+    document.getElementById('importFile').value = '';
+    document.getElementById('confirmImportBtn').disabled = true;
+    document.getElementById('importTree').style.display = 'none';
+    document.getElementById('importTree').textContent = '';
+    openModal('importModal');
+  }
+  function triggerImportFile() {
+    document.getElementById('importFile').click();
+  }
+  function onImportFileChange(input) {
+    var file = input.files[0];
+    if (!file) return;
+    document.getElementById('importFileName').textContent = file.name;
+    document.getElementById('confirmImportBtn').disabled = false;
+    var tree = document.getElementById('importTree');
+    tree.style.display = 'block';
+    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+  }
+  function confirmImport() {
+    var name = document.getElementById('importFileName').textContent;
+    alert('已导入：' + name + '（模拟）');
+    closeModal('importModal');
+  }
 
   /* ==================== 初始化 ==================== */
   switchTarget('workflow');

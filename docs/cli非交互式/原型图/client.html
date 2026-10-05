@@ -65,7 +65,15 @@
   .chip.active{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
 
   /* 列表行 */
-  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
+  .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
+  .row.expanded .expand-arrow{transform:rotate(90deg)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-table{width:100%;border-collapse:collapse;font-size:13px}
+  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
+  .detail-table .dt-k{color:var(--text-3);width:100px;white-space:nowrap;font-weight:500}
+  .detail-table .dt-v{color:var(--text-1)}
+  .detail-table .mono{font-family:var(--mono);font-size:12px}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -172,7 +180,7 @@
         </div>
         <div class="head-actions">
           <button class="btn btn-primary" onclick="openEditor()">＋ 新建</button>
-          <button class="btn" onclick="openModal('importModal')">导入</button>
+          <button class="btn" onclick="openImportModal()">导入</button>
         </div>
       </div>
 
@@ -188,68 +196,115 @@
           </div>
         </div>
 
-        <div class="row">
+        <div class="row" data-detail="Claude Code">
           <div class="row-icon">🧩</div>
           <div class="row-body">
-            <div class="row-name">Claude Code <span class="tag tag-prompt">prompt</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'Claude Code','prompt')">
+              <span class="expand-arrow">▶</span> Claude Code <span class="tag tag-prompt">prompt</span>
+            </div>
             <div class="row-desc"><span class="mono">claude</span> · 输出解析 json · 2 天前</div>
           </div>
           <div class="row-actions">
             <button class="btn btn-sm" onclick="editClient('Claude Code','prompt')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('Claude Code','prompt')">导出</button>
             <button class="btn btn-sm">复制</button>
             <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+          <div class="detail-panel" style="display:none">
+            <table class="detail-table">
+              <tr><td class="dt-k">类型</td><td class="dt-v">prompt</td><td class="dt-k">格式</td><td class="dt-v">json</td><td class="dt-k">描述</td><td class="dt-v">Claude Code CLI</td></tr>
+              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">claude</td></tr>
+              <tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">--print --output-format json --model sonnet</td></tr>
+            </table>
           </div>
         </div>
 
         <div class="row">
           <div class="row-icon">🧩</div>
           <div class="row-body">
-            <div class="row-name">Codex CLI <span class="tag tag-prompt">prompt</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'Codex CLI','prompt')">
+              <span class="expand-arrow">▶</span> Codex CLI <span class="tag tag-prompt">prompt</span>
+            </div>
             <div class="row-desc"><span class="mono">codex</span> · 输出解析 text · 1 周前</div>
           </div>
           <div class="row-actions">
             <button class="btn btn-sm" onclick="editClient('Codex CLI','prompt')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('Codex CLI','prompt')">导出</button>
             <button class="btn btn-sm">复制</button>
             <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+          <div class="detail-panel" style="display:none">
+            <table class="detail-table">
+              <tr><td class="dt-k">类型</td><td class="dt-v">prompt</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">OpenAI Codex CLI</td></tr>
+              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">codex</td></tr>
+              <tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">exec --silent</td></tr>
+            </table>
           </div>
         </div>
 
         <div class="row">
           <div class="row-icon">🧩</div>
           <div class="row-body">
-            <div class="row-name">本地 Bash <span class="tag tag-bash">bash</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 Bash','bash')">
+              <span class="expand-arrow">▶</span> 本地 Bash <span class="tag tag-bash">bash</span>
+            </div>
             <div class="row-desc"><span class="mono">/usr/bin/bash</span> · 1 周前</div>
           </div>
           <div class="row-actions">
             <button class="btn btn-sm" onclick="editClient('本地 Bash','bash')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('本地 Bash','bash')">导出</button>
             <button class="btn btn-sm">复制</button>
             <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+          <div class="detail-panel" style="display:none">
+            <table class="detail-table">
+              <tr><td class="dt-k">类型</td><td class="dt-v">bash</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">本地 Bash Shell</td></tr>
+              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">/usr/bin/bash</td></tr>
+            </table>
           </div>
         </div>
 
         <div class="row">
           <div class="row-icon">🧩</div>
           <div class="row-body">
-            <div class="row-name">本地 Python <span class="tag tag-python">python</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 Python','python')">
+              <span class="expand-arrow">▶</span> 本地 Python <span class="tag tag-python">python</span>
+            </div>
             <div class="row-desc"><span class="mono">/usr/bin/python3</span> · 1 周前</div>
           </div>
           <div class="row-actions">
             <button class="btn btn-sm" onclick="editClient('本地 Python','python')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('本地 Python','python')">导出</button>
             <button class="btn btn-sm">复制</button>
             <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+          <div class="detail-panel" style="display:none">
+            <table class="detail-table">
+              <tr><td class="dt-k">类型</td><td class="dt-v">python</td><td class="dt-k">格式</td><td class="dt-v">json</td><td class="dt-k">描述</td><td class="dt-v">本地 Python</td></tr>
+              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">/usr/bin/python3</td></tr>
+            </table>
           </div>
         </div>
 
         <div class="row">
           <div class="row-icon">🧩</div>
           <div class="row-body">
-            <div class="row-name">本地 PowerShell <span class="tag tag-powershell">powershell</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 PowerShell','powershell')">
+              <span class="expand-arrow">▶</span> 本地 PowerShell <span class="tag tag-powershell">powershell</span>
+            </div>
             <div class="row-desc"><span class="mono">C:\Program Files\PowerShell\7\pwsh.exe</span> · 1 周前</div>
           </div>
           <div class="row-actions">
             <button class="btn btn-sm" onclick="editClient('本地 PowerShell','powershell')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('本地 PowerShell','powershell')">导出</button>
             <button class="btn btn-sm">复制</button>
             <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+          <div class="detail-panel" style="display:none">
+            <table class="detail-table">
+              <tr><td class="dt-k">类型</td><td class="dt-v">powershell</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">本地 PowerShell</td></tr>
+              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">C:\Program Files\PowerShell\7\pwsh.exe</td></tr>
+            </table>
           </div>
         </div>
       </div>
@@ -426,36 +481,47 @@
   <div class="modal" style="max-width:480px">
     <div class="modal-head">导入 Client</div>
     <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件</div>
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件（在系统文件对话框中导航到目录并选中）</div>
       <div class="file-row">
         <span>📦</span>
-        <span class="mono">claude-code.yaml</span>
-        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+        <span class="mono" id="importFileName">未选择文件</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="triggerImportFile()">选择文件</button>
+        <input type="file" id="importFile" accept=".yaml,.yml" style="display:none" onchange="onImportFileChange(this)" />
       </div>
       <div class="info-box warn" style="margin-top:12px">
         <span>⚠</span>
         <span>若同名 Client 已存在，导入时将提示冲突处理。</span>
       </div>
-      <div class="tree">claude-code.yaml
-type: prompt
-name: Claude Code
-description: Claude Code CLI 适配
-command: claude
-argsTemplate:
-  - "-p"
-  - "{{prompt}}"
-  - "--output-format"
-  - "json"
-inputMode: arg
-outputParser:
-  mode: json
-  jsonPath: "$.result"
-exitCodeMap:
-  success: [0]</div>
+      <div class="tree" id="importTree" style="display:none"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('importModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+      <button class="btn btn-primary" id="confirmImportBtn" disabled onclick="confirmImport()">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导出弹窗 ==================== -->
+<div class="overlay" id="exportModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导出 Client</div>
+    <div class="modal-body">
+      <div class="field">
+        <label>文件名</label>
+        <input type="text" id="exportFileName" value="claude_code.yaml" />
+      </div>
+      <div class="field">
+        <label>导出目录</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
+          <button class="btn" onclick="pickExportDirectory()">选择</button>
+        </div>
+        <div class="hint">点击 [选择] 弹出系统文件夹选择框，选中后回填目录名</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('exportModal')">取消</button>
+      <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="confirmExport()">导出</button>
     </div>
   </div>
 </div>
@@ -464,7 +530,25 @@ exitCodeMap:
   // ---------- 视图切换 ----------
   var listView = document.getElementById('view-list');
   var editorView = document.getElementById('view-editor');
+  var detailView = document.getElementById('view-detail');
   var editorTitle = document.getElementById('editorTitle');
+  var currentDetail = { name: '', type: '' };
+
+  function toggleDetail(el, name, type) {
+    var row = el.closest('.row');
+    var panel = row.querySelector('.detail-panel');
+    var isOpen = panel.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.row.expanded').forEach(function(r) {
+      r.classList.remove('expanded');
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    if (!isOpen) {
+      row.classList.add('expanded');
+      panel.style.display = 'block';
+    }
+  }
 
   function openEditor() {
     listView.classList.remove('active');
@@ -560,6 +644,95 @@ exitCodeMap:
       if (e.target === ov) ov.classList.remove('active');
     });
   });
+
+  // ---------- 导入文件选择 ----------
+  function openImportModal() {
+    document.getElementById('importFileName').textContent = '未选择文件';
+    document.getElementById('importFile').value = '';
+    document.getElementById('confirmImportBtn').disabled = true;
+    document.getElementById('importTree').style.display = 'none';
+    document.getElementById('importTree').textContent = '';
+    openModal('importModal');
+  }
+  function triggerImportFile() {
+    document.getElementById('importFile').click();
+  }
+  function onImportFileChange(input) {
+    var file = input.files[0];
+    if (!file) return;
+    document.getElementById('importFileName').textContent = file.name;
+    document.getElementById('confirmImportBtn').disabled = false;
+    var tree = document.getElementById('importTree');
+    tree.style.display = 'block';
+    if (/\.ya?ml$/.test(file.name)) {
+      var reader = new FileReader();
+      reader.onload = function (e) { tree.textContent = file.name + '\n' + e.target.result; };
+      reader.readAsText(file);
+    } else {
+      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    }
+  }
+  function confirmImport() {
+    var name = document.getElementById('importFileName').textContent;
+    alert('已导入：' + name + '（模拟）');
+    closeModal('importModal');
+  }
+
+  // ---------- 导出 ----------
+  var exportTargetName = '';
+  var exportTargetType = '';
+
+  function openExport(name, type) {
+    exportTargetName = name;
+    exportTargetType = type;
+    var fileNameMap = {
+      'Claude Code': 'claude_code',
+      'Codex CLI': 'codex_cli',
+      '本地 Bash': 'local_bash',
+      '本地 Python': 'local_python',
+      '本地 PowerShell': 'local_powershell'
+    };
+    document.getElementById('exportFileName').value = (fileNameMap[name] || 'client') + '.yaml';
+    document.getElementById('exportDir').value = '';
+    document.getElementById('confirmExportBtn').disabled = true;
+    openModal('exportModal');
+  }
+  function pickExportDirectory() {
+    window.showDirectoryPicker().then(function (dirHandle) {
+      document.getElementById('exportDir').value = dirHandle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () {});
+  }
+  function buildClientYaml(name, type) {
+    var samples = {
+      'Claude Code': { bin: 'claude', format: 'json', args: '--print --output-format json --model sonnet' },
+      'Codex CLI': { bin: 'codex', format: 'text', args: 'exec --silent' },
+      '本地 Bash': { bin: '/usr/bin/bash', format: 'text', args: '-c' },
+      '本地 Python': { bin: '/usr/bin/python3', format: 'json', args: '-c' },
+      '本地 PowerShell': { bin: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', format: 'text', args: '-Command' }
+    };
+    var s = samples[name] || { bin: name, format: 'text', args: '' };
+    var yaml = 'name: ' + name + '\ntype: ' + type + '\n';
+    yaml += 'bin: ' + s.bin + '\n';
+    if (s.args) yaml += 'argsTemplate: "' + s.args + '"\n';
+    yaml += 'outputFormat: ' + s.format + '\n';
+    return yaml;
+  }
+  function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value;
+    var dir = document.getElementById('exportDir').value;
+    var yaml = buildClientYaml(exportTargetName, exportTargetType);
+    var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    alert('已导出：' + dir + '\\' + fileName);
+    closeModal('exportModal');
+  }
 
   // 初始化
   switchType('prompt');

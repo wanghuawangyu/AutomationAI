@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Workflow 管理 · AI 自动化</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -65,7 +66,19 @@
   .chip.active{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
 
   /* 列表行 */
-  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
+  .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
+  .row.expanded .expand-arrow{transform:rotate(90deg)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-canvas{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;height:420px}
+  .detail-canvas .dc-body{display:flex;flex:1;overflow:hidden}
+  .detail-canvas .dc-left{flex:1;overflow:auto;position:relative;background:var(--bg)}
+  .detail-canvas .dc-right{width:260px;border-left:1px solid var(--border);overflow:auto;padding:14px 16px}
+  .dc-node{position:absolute;width:130px;padding:8px 12px;background:#fff;border:2px solid #3b6ef6;border-radius:8px;cursor:pointer;font-size:12px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .dc-node.sys{border-color:#16a34a;color:#16a34a}
+  .dc-node:hover{box-shadow:0 2px 8px rgba(59,110,246,.3)}
+  .dc-node .en-title{font-weight:600}
+  .dc-node .en-meta{font-size:10px;color:var(--text-3);margin-top:2px}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -147,6 +160,7 @@
   .dag-canvas{position:relative;width:1000px;height:400px}
   .dag-canvas.drop-hover{box-shadow:inset 0 0 0 2px rgba(59,110,246,.35)}
   .dag-edges{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
+  .dag-edges path{pointer-events:stroke}
 
   .dag-node{position:absolute;width:130px;height:46px;background:#fff;border:1.5px solid #d8dde6;border-radius:9px;padding:5px 10px;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;transition:border-color .15s,box-shadow .15s}
   .dag-node:hover{border-color:#b9cbfb}
@@ -289,7 +303,7 @@
         </div>
         <div class="head-actions">
           <button class="btn btn-primary" onclick="openEditor('')">＋ 新建</button>
-          <button class="btn" onclick="openModal('importModal')">导入</button>
+          <button class="btn" onclick="openImportModal()">导入</button>
         </div>
       </div>
 
@@ -306,7 +320,9 @@
         <div class="row">
           <div class="row-icon">📋</div>
           <div class="row-body">
-            <div class="row-name">deploy_workflow <span class="tag tag-ver">v2</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'deploy_workflow','v2')">
+              <span class="expand-arrow">▶</span> deploy_workflow <span class="tag tag-ver">v2</span>
+            </div>
             <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 2 天前</div>
           </div>
           <div class="row-actions">
@@ -316,12 +332,15 @@
             <button class="btn btn-sm" onclick="openExport('deploy_workflow','v2')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📋</div>
           <div class="row-body">
-            <div class="row-name">log_analysis <span class="tag tag-ver">v1</span> <span class="tag tag-warn">⚠ 需要更新</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'log_analysis','v1')">
+              <span class="expand-arrow">▶</span> log_analysis <span class="tag tag-ver">v1</span> <span class="tag tag-warn">⚠ 需要更新</span>
+            </div>
             <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 1 周前 · 2 个节点引用的 OP 已升级</div>
           </div>
           <div class="row-actions">
@@ -331,12 +350,15 @@
             <button class="btn btn-sm" onclick="openExport('log_analysis','v1')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
 
         <div class="row">
           <div class="row-icon">📋</div>
           <div class="row-body">
-            <div class="row-name">code_review <span class="tag tag-ver">v3</span></div>
+            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'code_review','v3')">
+              <span class="expand-arrow">▶</span> code_review <span class="tag tag-ver">v3</span>
+            </div>
             <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 1 个月前</div>
           </div>
           <div class="row-actions">
@@ -346,6 +368,7 @@
             <button class="btn btn-sm" onclick="openExport('code_review','v3')">导出</button>
             <button class="btn btn-sm btn-danger">删除</button>
           </div>
+          <div class="detail-panel" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -587,27 +610,21 @@
   <div class="modal" style="max-width:480px">
     <div class="modal-head">导入 Workflow</div>
     <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 ZIP 文件</div>
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 ZIP 文件（在系统文件对话框中导航到目录并选中）</div>
       <div class="file-row">
         <span>📦</span>
-        <span class="mono">deploy_workflow-v2.zip</span>
-        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+        <span class="mono" id="importFileName">未选择文件</span>
+        <button class="btn btn-sm" style="margin-left:auto" onclick="triggerImportFile()">选择文件</button>
+        <input type="file" id="importFile" accept=".zip" style="display:none" onchange="onImportFileChange(this)" />
       </div>
       <div style="margin-top:12px;font-size:12.5px;color:#96660a;background:#fff8e9;border:1px solid #f3e4bd;border-radius:8px;padding:10px 13px">
         ⚠ 若同名 Workflow 已存在，导入时将提示冲突处理。
       </div>
-      <div class="tree">deploy_workflow-v2.zip
-├── manifest.json
-├── workflow.yaml
-└── ops/
-    ├── check_tests.yaml
-    ├── review.yaml
-    ├── deploy.yaml
-    └── notify.yaml</div>
+      <div class="tree" id="importTree" style="display:none"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('importModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+      <button class="btn btn-primary" id="confirmImportBtn" disabled onclick="confirmImport()">导入</button>
     </div>
   </div>
 </div>
@@ -629,12 +646,49 @@
     ├── review.yaml
     ├── deploy.yaml
     └── notify.yaml</div>
+      <div class="field" style="margin-top:14px">
+        <label>导出目录</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
+          <button class="btn" onclick="pickExportDirectory()">选择</button>
+        </div>
+        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('exportModal')">取消</button>
-      <button class="btn btn-primary" onclick="closeModal('exportModal')">导出</button>
+      <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="confirmExport()">导出</button>
     </div>
   </div>
+</div>
+
+<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
+<div class="overlay" id="dirPickerModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">选择导出目录</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
+      <div class="field">
+        <label>目录绝对路径</label>
+        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
+        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
+        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
+        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
+    </div>
+  </div>
+</div>
+
+<!-- 连线右键菜单 -->
+<div id="edgeCtxMenu" style="position:fixed;display:none;background:#fff;border:1px solid #e4e7ec;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:200;min-width:120px;overflow:hidden">
+  <div onclick="deleteEdgeFromMenu()" style="padding:9px 16px;cursor:pointer;font-size:13px;color:#dc2626">删除连线</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -779,8 +833,139 @@
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    execute: document.getElementById('view-execute')
+    execute: document.getElementById('view-execute'),
+    detail: document.getElementById('view-detail')
   };
+  var currentDetail = { name: '', version: '' };
+
+  function toggleDetail(el, name, version) {
+    var row = el.closest('.row');
+    var panel = row.querySelector('.detail-panel');
+    var isOpen = panel.style.display !== 'none';
+    document.querySelectorAll('.row.expanded').forEach(function(r) {
+      r.classList.remove('expanded');
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    if (!isOpen) {
+      if (!panel.dataset.loaded) {
+        panel.innerHTML = buildDetailPanel(name, version);
+        panel.dataset.loaded = '1';
+      }
+      row.classList.add('expanded');
+      panel.style.display = 'block';
+    }
+  }
+  function buildDetailPanel(name, version) {
+    var nodeData = {
+      node_start: { x: 30, y: 140, label: '▶ Start', kind: 'sys' },
+      node_check: { x: 180, y: 50, label: 'check_tests', op: 'check_tests', opVersion: 'v2', client: 'Claude Code', params: { test_cmd: 'npm run test' }, retry: null },
+      node_review: { x: 350, y: 50, label: 'review', op: 'review', opVersion: 'v1', client: 'Claude Code', params: { test_result: '${node_check.result}' }, retry: { max: 3, backoff: 'exponential', interval: 1000 } },
+      node_deploy: { x: 520, y: 50, label: 'deploy', op: 'deploy', opVersion: 'v1', client: 'Claude Code', params: { target_env: '${workflow.target_env}' }, retry: { max: 2, backoff: 'linear', interval: 2000 } },
+      node_notify: { x: 690, y: 50, label: 'notify', op: 'notify', opVersion: 'v2', client: 'Claude Code', params: { message: '${node_deploy.url}' }, retry: null },
+      node_notify_fail: { x: 350, y: 220, label: 'notify_fail', op: 'notify_fail', opVersion: 'v1', client: 'Claude Code', params: {}, retry: null },
+      node_end: { x: 860, y: 140, label: 'End ◉', kind: 'sys' }
+    };
+    var edges = [
+      ['node_start','node_check','on_success'],
+      ['node_check','node_review','on_success'],
+      ['node_check','node_notify_fail','on_failure'],
+      ['node_review','node_deploy','on_success'],
+      ['node_review','node_notify','always'],
+      ['node_deploy','node_notify','on_success'],
+      ['node_notify','node_end','on_success'],
+      ['node_notify_fail','node_end','on_success']
+    ];
+    var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
+
+    var html = '<div class="detail-canvas">';
+    html += '<div style="width:100%;background:#fff;border-bottom:1px solid var(--border);padding:10px 16px;font-size:13px">';
+    html += '<table class="detail-table" style="margin:0">';
+    html += '<tr><td class="dt-k" style="width:60px">入参</td><td style="width:50%">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">target_env (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">目标环境</td></tr>';
+    html += '</table>';
+    html += '</td><td class="dt-k" style="width:60px">出参</td><td>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">deploy_url (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">部署后的访问地址</td></tr>';
+    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">status (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">最终状态</td></tr>';
+    html += '</table>';
+    html += '</td></tr>';
+    html += '</table>';
+    html += '</div>';
+    html += '<div class="dc-body">';
+    html += '<div class="dc-left" id="dcLeft_' + name + '">';
+    html += '<svg width="950" height="300" style="position:absolute;top:0;left:0">';
+    edges.forEach(function(e) {
+      var p1 = nodeData[e[0]], p2 = nodeData[e[1]];
+      var x1 = p1.x + 65, y1 = p1.y + 23, x2 = p2.x, y2 = p2.y + 23;
+      var dx = Math.max(30, Math.abs(x2 - x1) * 0.5);
+      var color = EDGE_COLOR[e[2]] || '#16a34a';
+      html += '<path d="M' + x1 + ' ' + y1 + ' C' + (x1+dx) + ' ' + y1 + ' ' + (x2-dx) + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" stroke="' + color + '" stroke-width="2" fill="none"/>';
+    });
+    html += '</svg>';
+    Object.keys(nodeData).forEach(function(id) {
+      var n = nodeData[id];
+      var cls = n.kind === 'sys' ? 'dc-node sys' : 'dc-node';
+      var style = 'left:' + n.x + 'px;top:' + n.y + 'px';
+      var onclick = n.kind === 'sys' ? '' : 'onclick="showDcNode(this,\'' + id + '\')"';
+      html += '<div class="' + cls + '" style="' + style + '" ' + onclick + '>';
+      if (n.kind === 'sys') {
+        html += '<div class="en-title">' + n.label + '</div>';
+      } else {
+        html += '<div class="en-title">' + n.label + '</div><div class="en-meta">v' + n.opVersion + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="dc-right" id="dcRight_' + name + '">';
+    html += '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:40px 0">点击左侧节点<br>查看节点配置</div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+  function showDcNode(el, id) {
+    // 高亮选中节点
+    el.closest('.detail-panel').querySelectorAll('.dc-node').forEach(function(n) {
+      n.style.borderColor = '';
+      n.style.boxShadow = '';
+    });
+    el.style.borderColor = '#f59e0b';
+    el.style.boxShadow = '0 0 0 3px rgba(245,158,11,.3)';
+    var panel = el.closest('.detail-panel').querySelector('.dc-right');
+    var nodeData = {
+      node_check: { label: 'check_tests', op: 'check_tests', opVersion: 'v2', client: 'Claude Code', params: { test_cmd: 'npm run test' }, retry: null },
+      node_review: { label: 'review', op: 'review', opVersion: 'v1', client: 'Claude Code', params: { test_result: '${node_check.result}' }, retry: { max: 3, backoff: 'exponential', interval: 1000 } },
+      node_deploy: { label: 'deploy', op: 'deploy', opVersion: 'v1', client: 'Claude Code', params: { target_env: '${workflow.target_env}' }, retry: { max: 2, backoff: 'linear', interval: 2000 } },
+      node_notify: { label: 'notify', op: 'notify', opVersion: 'v2', client: 'Claude Code', params: { message: '${node_deploy.url}' }, retry: null },
+      node_notify_fail: { label: 'notify_fail', op: 'notify_fail', opVersion: 'v1', client: 'Claude Code', params: {}, retry: null }
+    };
+    var n = nodeData[id];
+    if (!n) return;
+    var html = '<div style="font-weight:600;margin-bottom:12px">' + n.label + '</div>';
+    html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">OP 配置</div>';
+    html += '<div style="font-size:13px;line-height:2">';
+    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + n.op + '</span></div>';
+    html += '<div><span style="color:var(--text-3)">版本：</span>v' + n.opVersion + '</div>';
+    html += '<div><span style="color:var(--text-3)">Client：</span>' + n.client + '</div>';
+    html += '</div>';
+    html += '<div style="font-size:12px;color:var(--text-3);margin:14px 0 8px">节点参数</div>';
+    html += '<div style="font-size:13px;line-height:2">';
+    Object.keys(n.params).forEach(function(k) {
+      html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + n.params[k] + '</span></div>';
+    });
+    html += '</div>';
+    html += '<div style="font-size:13px;line-height:2">';
+    if (n.retry) {
+      var backoffText = { constant: '固定间隔', linear: '线性退避', exponential: '指数退避' };
+      html += '<div><span style="color:var(--text-3)">重试策略：</span>失败时重试 ' + n.retry.max + ' 次，' + (backoffText[n.retry.backoff] || n.retry.backoff) + '，间隔 ' + (n.retry.interval/1000) + 's</div>';
+    } else {
+      html += '<div><span style="color:var(--text-3)">重试策略：</span><span style="color:var(--text-3)">未配置</span></div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+  }
 
   function showView(name) {
     Object.keys(views).forEach(function (k) {
@@ -1005,6 +1190,12 @@
       path.setAttribute('stroke-width', '2');
       path.setAttribute('fill', 'none');
       path.setAttribute('marker-end', 'url(#' + (EDGE_MARKER[edge.condition] || 'arr-g') + ')');
+      path.style.cursor = 'pointer';
+      path.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        showEdgeContextMenu(e.clientX, e.clientY, edge);
+      });
       svg.appendChild(path);
     });
   }
@@ -1014,6 +1205,33 @@
       n.classList.toggle('selected', n.dataset.node === id);
     });
   }
+
+  /* ==================== 连线右键菜单 ==================== */
+  var ctxMenuEdge = null;
+  function showEdgeContextMenu(x, y, edge) {
+    ctxMenuEdge = edge;
+    var menu = document.getElementById('edgeCtxMenu');
+    menu.style.display = 'block';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  }
+  function deleteEdgeFromMenu() {
+    var menu = document.getElementById('edgeCtxMenu');
+    menu.style.display = 'none';
+    if (!ctxMenuEdge) return;
+    var edge = ctxMenuEdge;
+    ctxMenuEdge = null;
+    if (confirm('删除连线：' + edge.from + ' → ' + edge.to + '？')) {
+      var edges = curEdges();
+      var idx = edges.indexOf(edge);
+      if (idx >= 0) edges.splice(idx, 1);
+      renderEdges();
+    }
+  }
+  // 点击其他位置关闭右键菜单
+  document.addEventListener('click', function () {
+    document.getElementById('edgeCtxMenu').style.display = 'none';
+  });
 
   /* ==================== 拖动创建 OP 节点 ==================== */
   (function bindCanvasDrop() {
@@ -1289,19 +1507,20 @@
     } else {
       html += '<div class="retry-grid">';
       html += '<div class="rg-row"><span class="rg-k">on</span><select class="ps-select ps-select-sm" onchange="setRetry(\'' + id + '\',\'on\',this.value)">';
-      html += '<option' + (n.retry.on === 'failure' ? ' selected' : '') + '>failure</option>';
-      html += '<option' + (n.retry.on === 'success' ? ' selected' : '') + '>success</option>';
+      html += '<option value="failure"' + (n.retry.on === 'failure' ? ' selected' : '') + '>失败时</option>';
+      html += '<option value="success"' + (n.retry.on === 'success' ? ' selected' : '') + '>成功时</option>';
       html += '</select></div>';
       html += '<div class="rg-row"><span class="rg-k">max</span>' +
               '<input class="ps-input ps-input-sm" type="number" value="' + n.retry.max + '" onchange="setRetry(\'' + id + '\',\'max\',this.value)"/></div>';
       html += '<div class="rg-row"><span class="rg-k">backoff</span><select class="ps-input ps-select-sm" onchange="setRetry(\'' + id + '\',\'backoff\',this.value)">';
-      html += '<option' + (n.retry.backoff === 'constant' ? ' selected' : '') + '>constant</option>';
-      html += '<option' + (n.retry.backoff === 'linear' ? ' selected' : '') + '>linear</option>';
-      html += '<option' + (n.retry.backoff === 'exponential' ? ' selected' : '') + '>exponential</option>';
+      html += '<option value="constant"' + (n.retry.backoff === 'constant' ? ' selected' : '') + '>固定间隔</option>';
+      html += '<option value="linear"' + (n.retry.backoff === 'linear' ? ' selected' : '') + '>线性退避</option>';
+      html += '<option value="exponential"' + (n.retry.backoff === 'exponential' ? ' selected' : '') + '>指数退避</option>';
       html += '</select></div>';
       html += '<div class="rg-row"><span class="rg-k">interval</span>' +
               '<input class="ps-input ps-input-sm" type="number" value="' + n.retry.interval + '" onchange="setRetry(\'' + id + '\',\'interval\',this.value)"/></div>';
       html += '</div>';
+      html += '<button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="removeRetry(\'' + id + '\')">删除重试</button>';
     }
     html += '<div class="panel-note">ℹ 超时由 OP 定义（' + n.timeout +
             's），超时是终止信号，不参与重试</div>';
@@ -1367,6 +1586,10 @@
 
   function addRetry(id) {
     curNodes()[id].retry = { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 };
+    renderNodePanel(id);
+  }
+  function removeRetry(id) {
+    curNodes()[id].retry = null;
     renderNodePanel(id);
   }
 
@@ -1450,8 +1673,13 @@
     closeView();
   }
 
-  /* ==================== 导出 ==================== */
+  /* ==================== 导出（选择目录并下载 ZIP） ==================== */
+  var exportTargetName = '';
+  var exportTargetVersion = '';
+
   function openExport(name, version) {
+    exportTargetName = name;
+    exportTargetVersion = version;
     document.getElementById('exportFileName').value = name + '-' + version + '.zip';
     document.getElementById('exportTree').textContent =
       name + '-' + version + '.zip\n' +
@@ -1462,7 +1690,42 @@
       '    ├── review.yaml\n' +
       '    ├── deploy.yaml\n' +
       '    └── notify.yaml';
+    document.getElementById('exportDir').value = '';
+    document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
+  }
+  function pickExportDirectory() {
+    window.showDirectoryPicker().then(function (dirHandle) {
+      document.getElementById('exportDir').value = dirHandle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () {
+      // 用户取消选择
+    });
+  }
+  async function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value;
+    var dir = document.getElementById('exportDir').value;
+    try {
+      var zip = new JSZip();
+      zip.file('manifest.json', JSON.stringify({ name: exportTargetName, version: exportTargetVersion, kind: 'workflow' }, null, 2));
+      zip.file('workflow.yaml', 'name: ' + exportTargetName + '\nversion: ' + exportTargetVersion + '\nnodes: 5\n');
+      var ops = zip.folder('ops');
+      ['check_tests', 'review', 'deploy', 'notify'].forEach(function (op) {
+        ops.file(op + '.yaml', 'name: ' + op + '\nversion: v2\n');
+      });
+      var blob = await zip.generateAsync({ type: 'blob' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      alert('已导出：' + dir + '\\' + fileName);
+      closeModal('exportModal');
+    } catch (e) {
+      alert('导出失败：' + e.message);
+    }
   }
 
   /* ==================== 弹窗控制 ==================== */
@@ -1473,6 +1736,33 @@
       if (e.target === ov) ov.classList.remove('active');
     });
   });
+
+  /* ==================== 导入文件选择 ==================== */
+  function openImportModal() {
+    document.getElementById('importFileName').textContent = '未选择文件';
+    document.getElementById('importFile').value = '';
+    document.getElementById('confirmImportBtn').disabled = true;
+    document.getElementById('importTree').style.display = 'none';
+    document.getElementById('importTree').textContent = '';
+    openModal('importModal');
+  }
+  function triggerImportFile() {
+    document.getElementById('importFile').click();
+  }
+  function onImportFileChange(input) {
+    var file = input.files[0];
+    if (!file) return;
+    document.getElementById('importFileName').textContent = file.name;
+    document.getElementById('confirmImportBtn').disabled = false;
+    var tree = document.getElementById('importTree');
+    tree.style.display = 'block';
+    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+  }
+  function confirmImport() {
+    var name = document.getElementById('importFileName').textContent;
+    alert('已导入：' + name + '（模拟）');
+    closeModal('importModal');
+  }
 
   /* ==================== 初始化 ==================== */
   renderOpLib();
