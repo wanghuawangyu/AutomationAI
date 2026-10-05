@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Client 管理 · AI 自动化</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
+    --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --accent:#3b6ef6;--accent-soft:#eaf0ff;
+    --sidebar:#171b25;--sidebar-hover:#232838;
+    --failed:#dc2626;--success:#16a34a;--success-bg:#e8f7ee;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- 左侧固定菜单栏 ---------- */
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:#c8cedb;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid #0f131b}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4b7dff,#7a4bff);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 34px}
+  .brand-name{color:#fff;font-size:15px;font-weight:600;letter-spacing:.3px}
+  .brand-desc{font-size:11px;color:#7d8598;margin-top:1px}
+  .menu{padding:12px 10px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13.5px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .menu-item:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .mi-icon{font-size:15px;width:18px;text-align:center}
+  .star{margin-left:auto;color:#ffcb45;font-size:12px}
+  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ---------- 右侧内容区 ---------- */
+  .content{flex:1;min-width:0;padding:22px 26px 40px}
+
+  /* 视图切换 */
+  .view{display:none}
+  .view.active{display:block}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+  .page-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .head-actions{display:flex;align-items:center;gap:8px}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;margin-bottom:12px}
+  .back-link:hover{color:var(--accent)}
+
+  /* 按钮 */
+  .btn{font-family:inherit;font-size:12.5px;padding:7px 13px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+  .btn:hover{background:#f7f8fa;border-color:#d2d7de}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn-primary:hover{background:#2f5fe0;border-color:#2f5fe0}
+  .btn-danger{color:var(--failed);border-color:#f3cfcf;background:#fff}
+  .btn-danger:hover{background:#fdf2f2}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* 卡片 */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .toolbar{padding:14px 16px;border-bottom:1px solid var(--border-soft)}
+  .search{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .search:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{font-family:inherit;font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text-2);cursor:pointer}
+  .chip:hover{border-color:#c9d3e5;color:var(--text)}
+  .chip.active{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
+
+  /* 列表行 */
+  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:#fafbfd}
+  .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
+  .row-body{flex:1;min-width:0}
+  .row-name{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .row-desc{font-size:12.5px;color:var(--text-3);margin-top:2px}
+  .row-actions{display:flex;gap:6px}
+
+  .tag{font-size:11px;padding:2px 7px;border-radius:5px;background:#f1f3f7;color:#5b6474;border:1px solid #e6e9ef;white-space:nowrap}
+  .tag-prompt{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-bash{background:#eefaf3;color:#12a150;border-color:#d6f0e2}
+  .tag-python{background:#fff7e8;color:#b4740a;border-color:#f5e5c4}
+  .tag-powershell{background:#f3eeff;color:#7a4bff;border-color:#e5dbff}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+
+  /* ---------- 编辑器 ---------- */
+  .editor-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:0;overflow:hidden;max-width:780px}
+  .editor-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border-soft)}
+  .editor-head h2{font-size:16px;font-weight:620}
+  .editor-body{padding:20px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .field input[type=text],.field input[type=number],.field select,.field textarea{
+    width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;
+    font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .field textarea{resize:vertical;min-height:60px}
+  .field .hint{font-size:11.5px;color:var(--text-3);margin-top:4px}
+  .radio-group{display:flex;gap:16px;flex-wrap:wrap;padding:4px 0}
+  .radio-group label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;font-weight:400}
+  .radio-group input[type=radio]{accent-color:var(--accent);width:15px;height:15px}
+  .section-title{font-size:13px;font-weight:600;color:var(--text-2);margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border-soft)}
+  .section-title:first-of-type{margin-top:0}
+  .form-row{display:flex;gap:12px;flex-wrap:wrap}
+  .form-row .field{flex:1;min-width:180px}
+  .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+
+  .type-config{display:none}
+  .type-config.active{display:block}
+
+  .info-box{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:10px 13px;font-size:12.5px;color:#4a5a7a;margin-top:8px;display:flex;gap:8px;align-items:flex-start}
+  .info-box.warn{background:#fff8e9;border-color:#f3e4bd;color:#96660a}
+
+  /* ---------- 弹窗 ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.active{display:flex}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:520px;box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;max-height:90vh;display:flex;flex-direction:column}
+  .modal-head{padding:16px 20px;border-bottom:1px solid var(--border-soft);font-size:15px;font-weight:620}
+  .modal-body{padding:20px;overflow-y:auto}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+  .modal .field{margin-bottom:14px}
+  .modal .field:last-child{margin-bottom:0}
+  .modal .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .modal .field input,.modal .field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .modal .field input:focus,.modal .field select:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  .summary{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.9}
+  .summary .k{color:var(--text-3);display:inline-block;min-width:78px}
+  .summary .v{color:var(--text)}
+
+  .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+
+  .test-result{display:none;margin-top:12px;font-size:12.5px;border-radius:8px;padding:10px 13px}
+  .test-result.show{display:block}
+  .test-result.ok{background:#e8f7ee;border:1px solid #c9ead7;color:#12693a}
+  .test-result.fail{background:#fdecec;border:1px solid #f7d4d4;color:#a32222}
+
+  .required{color:var(--failed);margin-left:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== 左侧固定菜单栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>
+        <div class="brand-name">AI 自动化</div>
+        <div class="brand-desc">CLI 工作流编排器</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item active" href="client.html"><span class="mi-icon">🧩</span>Client 管理</a>
+      <a class="menu-item" href="op.html"><span class="mi-icon">📦</span>OP 管理</a>
+      <a class="menu-item" href="workflow.html"><span class="mi-icon">📋</span>Workflow 管理</a>
+      <a class="menu-item" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
+      <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
+    </nav>
+    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+  </aside>
+
+  <!-- ==================== 右侧内容区 ==================== -->
+  <main class="content">
+
+    <!-- ========== 列表视图 ========== -->
+    <div class="view active" id="view-list">
+      <div class="page-head">
+        <div>
+          <h1>Client 管理</h1>
+          <p class="sub">管理 CLI 适配配置（仅非交互式）· 编排器与执行器的唯一契约</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn btn-primary" onclick="openEditor()">＋ 新建</button>
+          <button class="btn" onclick="openModal('importModal')">导入</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <input class="search" placeholder="🔍 搜索..." />
+          <div class="filters">
+            <button class="chip active">全部类型</button>
+            <button class="chip">prompt</button>
+            <button class="chip">bash</button>
+            <button class="chip">python</button>
+            <button class="chip">powershell</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">🧩</div>
+          <div class="row-body">
+            <div class="row-name">Claude Code <span class="tag tag-prompt">prompt</span></div>
+            <div class="row-desc"><span class="mono">claude</span> · 输出解析 json · 2 天前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" onclick="editClient('Claude Code','prompt')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">🧩</div>
+          <div class="row-body">
+            <div class="row-name">Codex CLI <span class="tag tag-prompt">prompt</span></div>
+            <div class="row-desc"><span class="mono">codex</span> · 输出解析 text · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" onclick="editClient('Codex CLI','prompt')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">🧩</div>
+          <div class="row-body">
+            <div class="row-name">本地 Bash <span class="tag tag-bash">bash</span></div>
+            <div class="row-desc"><span class="mono">/usr/bin/bash</span> · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" onclick="editClient('本地 Bash','bash')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">🧩</div>
+          <div class="row-body">
+            <div class="row-name">本地 Python <span class="tag tag-python">python</span></div>
+            <div class="row-desc"><span class="mono">/usr/bin/python3</span> · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" onclick="editClient('本地 Python','python')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">🧩</div>
+          <div class="row-body">
+            <div class="row-name">本地 PowerShell <span class="tag tag-powershell">powershell</span></div>
+            <div class="row-desc"><span class="mono">C:\Program Files\PowerShell\7\pwsh.exe</span> · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm" onclick="editClient('本地 PowerShell','powershell')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 编辑器视图 ========== -->
+    <div class="view" id="view-editor">
+      <button class="back-link" onclick="closeEditor()">← 返回</button>
+
+      <div class="editor-card">
+        <div class="editor-head">
+          <h2 id="editorTitle">编辑: Claude Code</h2>
+        </div>
+
+        <div class="editor-body">
+          <div class="form-row">
+            <div class="field">
+              <label>名称</label>
+              <input type="text" id="clientName" value="Claude Code" />
+            </div>
+            <div class="field">
+              <label>描述</label>
+              <input type="text" id="clientDesc" value="Claude Code CLI 适配" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>类型</label>
+            <div class="radio-group" id="typeRadios">
+              <label><input type="radio" name="clientType" value="prompt" checked onchange="switchType('prompt')" /> Prompt</label>
+              <label><input type="radio" name="clientType" value="bash" onchange="switchType('bash')" /> Bash</label>
+              <label><input type="radio" name="clientType" value="python" onchange="switchType('python')" /> Python</label>
+              <label><input type="radio" name="clientType" value="powershell" onchange="switchType('powershell')" /> PowerShell</label>
+            </div>
+          </div>
+
+          <!-- Prompt 类型配置 -->
+          <div class="type-config active" id="config-prompt">
+            <div class="section-title">Prompt 类型配置</div>
+
+            <div class="form-row">
+              <div class="field">
+                <label>命令</label>
+                <input type="text" value="claude" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label>参数模板</label>
+              <input type="text" value='["-p","{{prompt}}","--output-format","json"]' />
+              <div class="hint">JSON 数组格式，支持 {{prompt}}、{{workspace}} 等占位符（{{workspace}} 运行时由 Job 工作区注入）</div>
+            </div>
+
+            <div class="form-row">
+              <div class="field">
+                <label>输入方式</label>
+                <select>
+                  <option>arg</option>
+                  <option>stdin</option>
+                  <option>file</option>
+                </select>
+                <div class="hint">只决定 prompt 的投递方式，内容源统一来自 OP.content</div>
+              </div>
+              <div class="field">
+                <label>输出解析 mode</label>
+                <select>
+                  <option>json</option>
+                  <option>text</option>
+                  <option>jsonl</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>jsonPath</label>
+                <input type="text" value="$.result" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="field">
+                <label>退出码语义（成功）</label>
+                <input type="text" value="0" />
+              </div>
+            </div>
+
+            <div class="info-box">
+              <span>ℹ</span>
+              <span>Client 不含超时字段，超时只属于 OP</span>
+            </div>
+          </div>
+
+          <!-- Bash 类型配置 -->
+          <div class="type-config" id="config-bash">
+            <div class="section-title">Bash 类型配置</div>
+            <div class="field">
+              <label>二进制路径</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" value="/usr/bin/bash" style="flex:1" />
+                <button class="btn">浏览</button>
+              </div>
+            </div>
+            <div class="info-box">
+              <span>ℹ</span>
+              <span>入参 / 出参的注入与提取由 APP 内部的包装脚本处理</span>
+            </div>
+          </div>
+
+          <!-- Python 类型配置 -->
+          <div class="type-config" id="config-python">
+            <div class="section-title">Python 类型配置</div>
+            <div class="field">
+              <label>二进制路径</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" value="/usr/bin/python3" style="flex:1" />
+                <button class="btn">浏览</button>
+              </div>
+            </div>
+            <div class="info-box">
+              <span>ℹ</span>
+              <span>入参 / 出参的注入与提取由 APP 内部的包装脚本处理</span>
+            </div>
+          </div>
+
+          <!-- PowerShell 类型配置 -->
+          <div class="type-config" id="config-powershell">
+            <div class="section-title">PowerShell 类型配置</div>
+            <div class="field">
+              <label>二进制路径</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" value="C:\Program Files\PowerShell\7\pwsh.exe" style="flex:1" />
+                <button class="btn">浏览</button>
+              </div>
+            </div>
+            <div class="info-box">
+              <span>ℹ</span>
+              <span>入参 / 出参的注入与提取由 APP 内部的包装脚本处理</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="editor-foot">
+          <button class="btn" onclick="closeEditor()">取消</button>
+          <button class="btn btn-primary" onclick="closeEditor()">保存</button>
+          <button class="btn" id="testBtn" onclick="openTestDialog()">测试命令</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ==================== 测试对话框 ==================== -->
+<div class="overlay" id="testModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">测试 Client: <span id="testClientName">Claude Code</span></div>
+    <div class="modal-body">
+      <div class="summary" id="testSummary">
+        <div><span class="k">类型:</span><span class="v" id="testType">prompt</span></div>
+        <div><span class="k">命令:</span><span class="v mono" id="testCommand">claude</span></div>
+        <div><span class="k">参数:</span><span class="v mono" id="testArgs">["-p","hello","--output-format","json"]</span></div>
+      </div>
+      <div style="margin-top:14px;display:flex;justify-content:flex-end">
+        <button class="btn btn-primary btn-sm" onclick="runTest()">运行测试</button>
+      </div>
+      <div class="test-result" id="testResult"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('testModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导入弹窗 ==================== -->
+<div class="overlay" id="importModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导入 Client</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件</div>
+      <div class="file-row">
+        <span>📦</span>
+        <span class="mono">claude-code.yaml</span>
+        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+      </div>
+      <div class="info-box warn" style="margin-top:12px">
+        <span>⚠</span>
+        <span>若同名 Client 已存在，导入时将提示冲突处理。</span>
+      </div>
+      <div class="tree">claude-code.yaml
+type: prompt
+name: Claude Code
+description: Claude Code CLI 适配
+command: claude
+argsTemplate:
+  - "-p"
+  - "{{prompt}}"
+  - "--output-format"
+  - "json"
+inputMode: arg
+outputParser:
+  mode: json
+  jsonPath: "$.result"
+exitCodeMap:
+  success: [0]</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('importModal')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- 视图切换 ----------
+  var listView = document.getElementById('view-list');
+  var editorView = document.getElementById('view-editor');
+  var editorTitle = document.getElementById('editorTitle');
+
+  function openEditor() {
+    listView.classList.remove('active');
+    editorView.classList.add('active');
+    editorTitle.textContent = '新建 Client';
+    document.getElementById('clientName').value = '';
+    document.getElementById('clientDesc').value = '';
+    switchType('prompt');
+    document.querySelector('input[name="clientType"][value="prompt"]').checked = true;
+  }
+
+  function editClient(name, type) {
+    listView.classList.remove('active');
+    editorView.classList.add('active');
+    editorTitle.textContent = '编辑: ' + name;
+    document.getElementById('clientName').value = name;
+    document.getElementById('clientDesc').value = name + ' 适配';
+    document.querySelector('input[name="clientType"][value="' + type + '"]').checked = true;
+    switchType(type);
+  }
+
+  function closeEditor() {
+    editorView.classList.remove('active');
+    listView.classList.add('active');
+  }
+
+  // ---------- 类型切换 ----------
+  function switchType(type) {
+    // 隐藏所有配置
+    document.querySelectorAll('.type-config').forEach(function (el) {
+      el.classList.remove('active');
+    });
+    // 显示对应配置
+    var target = document.getElementById('config-' + type);
+    if (target) target.classList.add('active');
+
+    // 更新测试按钮文案
+    var testBtn = document.getElementById('testBtn');
+    if (type === 'prompt') {
+      testBtn.textContent = '测试命令';
+    } else {
+      testBtn.textContent = '测试路径';
+    }
+  }
+
+  // ---------- 测试对话框 ----------
+  function openTestDialog() {
+    var name = document.getElementById('clientName').value || '(未命名)';
+    var type = document.querySelector('input[name="clientType"]:checked').value;
+
+    document.getElementById('testClientName').textContent = name;
+    document.getElementById('testType').textContent = type;
+
+    if (type === 'prompt') {
+      document.getElementById('testCommand').textContent = 'claude';
+      document.getElementById('testArgs').textContent = '["-p","hello","--output-format","json"]';
+    } else if (type === 'bash') {
+      document.getElementById('testCommand').textContent = '/usr/bin/bash';
+      document.getElementById('testArgs').textContent = '—';
+    } else if (type === 'python') {
+      document.getElementById('testCommand').textContent = '/usr/bin/python3';
+      document.getElementById('testArgs').textContent = '—';
+    } else {
+      document.getElementById('testCommand').textContent = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+      document.getElementById('testArgs').textContent = '—';
+    }
+
+    // 重置结果
+    var result = document.getElementById('testResult');
+    result.className = 'test-result';
+    result.textContent = '';
+
+    openModal('testModal');
+  }
+
+  function runTest() {
+    var result = document.getElementById('testResult');
+    // 模拟测试成功
+    result.className = 'test-result show ok';
+    result.innerHTML = '✓ 命令可用（模拟测试结果）';
+  }
+
+  // ---------- 弹窗控制 ----------
+  function openModal(id) {
+    document.getElementById(id).classList.add('active');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+  // 点击遮罩关闭
+  document.querySelectorAll('.overlay').forEach(function (ov) {
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) ov.classList.remove('active');
+    });
+  });
+
+  // 初始化
+  switchType('prompt');
+</script>
+</body>
+</html>

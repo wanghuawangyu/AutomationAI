@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OP 管理 · AI 自动化</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
+    --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --accent:#3b6ef6;--accent-soft:#eaf0ff;
+    --sidebar:#171b25;--sidebar-hover:#232838;
+    --failed:#dc2626;--success:#16a34a;--success-bg:#e8f7ee;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- 左侧固定菜单栏 ---------- */
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:#c8cedb;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid #0f131b}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4b7dff,#7a4bff);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 34px}
+  .brand-name{color:#fff;font-size:15px;font-weight:600;letter-spacing:.3px}
+  .brand-desc{font-size:11px;color:#7d8598;margin-top:1px}
+  .menu{padding:12px 10px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13.5px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .menu-item:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .mi-icon{font-size:15px;width:18px;text-align:center}
+  .star{margin-left:auto;color:#ffcb45;font-size:12px}
+  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ---------- 右侧内容区 ---------- */
+  .content{flex:1;min-width:0;padding:22px 26px 40px}
+
+  .view{display:none}
+  .view.active{display:block}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+  .page-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .head-actions{display:flex;align-items:center;gap:8px}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;margin-bottom:12px}
+  .back-link:hover{color:var(--accent)}
+
+  /* 按钮 */
+  .btn{font-family:inherit;font-size:12.5px;padding:7px 13px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+  .btn:hover{background:#f7f8fa;border-color:#d2d7de}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn-primary:hover{background:#2f5fe0;border-color:#2f5fe0}
+  .btn-ghost-primary{color:var(--accent);border-color:#c6d6fd;background:var(--accent-soft)}
+  .btn-ghost-primary:hover{background:#dde8ff}
+  .btn-danger{color:var(--failed);border-color:#f3cfcf;background:#fff}
+  .btn-danger:hover{background:#fdf2f2}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* 卡片 */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .toolbar{padding:14px 16px;border-bottom:1px solid var(--border-soft)}
+  .search{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .search:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  /* 列表行 */
+  .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:#fafbfd}
+  .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
+  .row-body{flex:1;min-width:0}
+  .row-name{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .row-desc{font-size:12.5px;color:var(--text-3);margin-top:2px}
+  .row-actions{display:flex;gap:6px}
+
+  .tag{font-size:11px;padding:2px 7px;border-radius:5px;background:#f1f3f7;color:#5b6474;border:1px solid #e6e9ef;white-space:nowrap}
+  .tag-ver{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-prompt{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-bash{background:#eefaf3;color:#12a150;border-color:#d6f0e2}
+  .tag-python{background:#fff7e8;color:#b4740a;border-color:#f5e5c4}
+  .tag-powershell{background:#f3eeff;color:#7a4bff;border-color:#e5dbff}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+
+  /* ---------- 编辑器 ---------- */
+  .editor-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;max-width:960px}
+  .editor-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border-soft)}
+  .editor-head h2{font-size:16px;font-weight:620}
+  .editor-body{padding:20px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .field input[type=text],.field input[type=number],.field select,.field textarea{
+    width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;
+    font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .field textarea{resize:vertical;min-height:70px}
+  .field .hint{font-size:11.5px;color:var(--text-3);margin-top:4px}
+  .radio-group{display:flex;gap:16px;flex-wrap:wrap;padding:4px 0}
+  .radio-group label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;font-weight:400}
+  .radio-group input[type=radio]{accent-color:var(--accent);width:15px;height:15px}
+  .section-title{font-size:13px;font-weight:600;color:var(--text-2);margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:space-between}
+  .section-title:first-of-type{margin-top:0}
+  .form-row{display:flex;gap:12px;flex-wrap:wrap}
+  .form-row .field{flex:1;min-width:180px}
+  .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+
+  /* 入参 / 出参 表格 */
+  .param-table{width:100%;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:12.5px}
+  .param-table .pt-head,.param-table .pt-row{display:grid;gap:8px;padding:8px 10px;align-items:center}
+  .param-table .pt-head{background:#f7f8fb;color:var(--text-3);font-weight:600;font-size:11.5px;border-bottom:1px solid var(--border)}
+  .param-table .pt-row{border-bottom:1px solid var(--border-soft);background:#fff}
+  .param-table .pt-row:last-child{border-bottom:0}
+  .param-table .pt-row input,.param-table .pt-row select{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:12.5px;outline:none;background:#fbfbfd}
+  .param-table .pt-row input:focus,.param-table .pt-row select:focus{border-color:#b9cbfb;background:#fff}
+  .pt-in{grid-template-columns:1.2fr .9fr .7fr 1.1fr 1.4fr 34px}
+  .pt-out{grid-template-columns:1.2fr 1fr 2.2fr 34px}
+  .param-table .pt-del{width:26px;height:26px;border:0;background:#fff;color:#c3c8d0;border-radius:5px;cursor:pointer;font-size:15px;line-height:1}
+  .param-table .pt-del:hover{background:#fdf2f2;color:var(--failed)}
+
+  .type-config{display:none}
+  .type-config.active{display:block}
+
+  .info-box{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:10px 13px;font-size:12.5px;color:#4a5a7a;margin-top:8px;display:flex;gap:8px;align-items:flex-start}
+  .info-box.warn{background:#fff8e9;border-color:#f3e4bd;color:#96660a}
+
+  /* ---------- 弹窗 ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.active{display:flex}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:520px;box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;max-height:90vh;display:flex;flex-direction:column}
+  .modal-head{padding:16px 20px;border-bottom:1px solid var(--border-soft);font-size:15px;font-weight:620}
+  .modal-body{padding:20px;overflow-y:auto}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+  .modal .field{margin-bottom:14px}
+  .modal .field:last-child{margin-bottom:0}
+  .modal .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .modal .field input[type=text],.modal .field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .modal .field input:focus,.modal .field select:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  .option-list{display:flex;flex-direction:column;gap:10px}
+  .option-item{display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;cursor:pointer;transition:border-color .15s,background .15s}
+  .option-item:hover{border-color:#c9d3e5}
+  .option-item.selected{border-color:#b9cbfb;background:#f5f8ff}
+  .option-item input[type=radio]{accent-color:var(--accent);width:15px;height:15px;margin-top:2px}
+  .option-item .opt-title{font-size:13.5px;font-weight:600}
+  .option-item .opt-desc{font-size:12px;color:var(--text-3);margin-top:2px}
+
+  .summary{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.9}
+  .summary .k{color:var(--text-3);display:inline-block;min-width:78px}
+  .summary .v{color:var(--text)}
+
+  .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+
+  .required{color:var(--failed);margin-left:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== 左侧固定菜单栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>
+        <div class="brand-name">AI 自动化</div>
+        <div class="brand-desc">CLI 工作流编排器</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item" href="client.html"><span class="mi-icon">🧩</span>Client 管理</a>
+      <a class="menu-item active" href="op.html"><span class="mi-icon">📦</span>OP 管理</a>
+      <a class="menu-item" href="workflow.html"><span class="mi-icon">📋</span>Workflow 管理</a>
+      <a class="menu-item" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
+      <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
+    </nav>
+    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+  </aside>
+
+  <!-- ==================== 右侧内容区 ==================== -->
+  <main class="content">
+
+    <!-- ========== 列表视图 ========== -->
+    <div class="view active" id="view-list">
+      <div class="page-head">
+        <div>
+          <h1>OP 管理</h1>
+          <p class="sub">最小可执行单元 · 唯一有超时的层级 · 不含 retry · 不与 Client 绑定</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn btn-primary" onclick="openEditor()">＋ 新建</button>
+          <button class="btn" onclick="openModal('importModal')">导入</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <input class="search" placeholder="🔍 搜索..." />
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">check_tests <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-desc">入参 1 · 出参 3 · 超时 300s · 2 天前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('check_tests')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('check_tests','prompt','v2')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('check_tests','v2')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">review <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 600s · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('review')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('review','prompt','v2')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('review','v2')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">deploy <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 120s · 2 天前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('deploy')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('deploy','prompt','v2')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('deploy','v2')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">notify <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-desc">入参 1 · 出参 0 · 超时 60s · 2 天前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('notify')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('notify','prompt','v1')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('notify','v1')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">notify_fail <span class="tag tag-prompt">prompt</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-desc">入参 0 · 出参 0 · 超时 60s · 2 天前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('notify_fail')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('notify_fail','prompt','v1')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('notify_fail','v1')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">clean_logs <span class="tag tag-powershell">powershell</span> <span class="tag tag-ver">v3</span></div>
+            <div class="row-desc">入参 1 · 出参 0 · 超时 120s · 1 周前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('clean_logs')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('clean_logs','powershell','v3')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('clean_logs','v3')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">process_data <span class="tag tag-python">python</span> <span class="tag tag-ver">v3</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 300s · 1 个月前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('process_data')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('process_data','python','v3')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('process_data','v3')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">health_check <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 180s · 1 个月前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('health_check')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('health_check','bash','v1')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('health_check','v1')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">collect_metrics <span class="tag tag-python">python</span> <span class="tag tag-ver">v1</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 240s · 1 个月前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('collect_metrics')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('collect_metrics','python','v1')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('collect_metrics','v1')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="row-icon">📦</div>
+          <div class="row-body">
+            <div class="row-name">run_lint <span class="tag tag-bash">bash</span> <span class="tag tag-ver">v2</span></div>
+            <div class="row-desc">入参 1 · 出参 1 · 超时 180s · 1 个月前</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('run_lint')">执行</button>
+            <button class="btn btn-sm" onclick="openEditor('run_lint','bash','v2')">编辑</button>
+            <button class="btn btn-sm">复制</button>
+            <button class="btn btn-sm" onclick="openExport('run_lint','v2')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========== 编辑器视图 ========== -->
+    <div class="view" id="view-editor">
+      <button class="back-link" onclick="closeView('editor')">← 返回</button>
+
+      <div class="editor-card">
+        <div class="editor-head">
+          <h2 id="editorTitle">编辑: check_tests <span class="tag tag-ver" id="editorVersion">v2</span></h2>
+        </div>
+
+        <div class="editor-body">
+          <!-- 名称 / 描述 -->
+          <div class="form-row">
+            <div class="field">
+              <label>名称<span class="required">*</span></label>
+              <input type="text" id="opName" value="check_tests" />
+              <div class="hint">OP 名称全局唯一</div>
+            </div>
+            <div class="field">
+              <label>描述</label>
+              <input type="text" id="opDesc" value="运行测试并报告结果" />
+            </div>
+          </div>
+
+          <!-- 超时 -->
+          <div class="field" style="max-width:220px">
+            <label>超时（秒）</label>
+            <input type="number" id="opTimeout" value="300" />
+            <div class="hint">超时是终止信号，不参与重试</div>
+          </div>
+
+          <!-- 入参 -->
+          <div class="section-title">
+            <span>入参</span>
+            <button class="btn btn-sm" onclick="addInputRow()">＋ 添加</button>
+          </div>
+          <div class="param-table" id="inputTable"></div>
+
+          <!-- 出参 -->
+          <div class="section-title">
+            <span>出参</span>
+            <button class="btn btn-sm" onclick="addOutputRow()">＋ 添加</button>
+          </div>
+          <div class="param-table" id="outputTable"></div>
+
+          <!-- 类型 -->
+          <div class="section-title">类型</div>
+          <div class="radio-group" id="typeRadios">
+            <label><input type="radio" name="opType" value="prompt" checked onchange="switchType('prompt')" /> Prompt</label>
+            <label><input type="radio" name="opType" value="bash" onchange="switchType('bash')" /> Bash</label>
+            <label><input type="radio" name="opType" value="python" onchange="switchType('python')" /> Python</label>
+            <label><input type="radio" name="opType" value="powershell" onchange="switchType('powershell')" /> PowerShell</label>
+          </div>
+
+          <!-- 内容 -->
+          <div class="field" style="margin-top:16px">
+            <label id="contentLabel">内容（Prompt）</label>
+            <textarea id="contentArea" placeholder="在当前工作区运行测试，并输出结果 JSON">在当前工作区运行测试，并输出结果 JSON</textarea>
+            <div class="hint" id="contentHint">prompt 模板，支持 {{workspace}}、入参变量等占位符</div>
+          </div>
+        </div>
+
+        <div class="editor-foot">
+          <button class="btn" onclick="closeView('editor')">取消</button>
+          <button class="btn btn-primary" onclick="openVersionDialog()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 单次执行：参数对话框 ========== -->
+    <div class="view" id="view-execute">
+      <button class="back-link" onclick="closeView('execute')">← 返回</button>
+
+      <div class="editor-card" style="max-width:620px">
+        <div class="editor-head">
+          <h2>执行: <span id="execOpName">check_tests</span></h2>
+        </div>
+        <div class="editor-body">
+          <div class="field">
+            <label>工作区<span class="required">*</span></label>
+            <div style="display:flex;gap:8px">
+              <input type="text" value="/path/to/workspace" style="flex:1" />
+              <button class="btn">选择</button>
+            </div>
+          </div>
+
+          <div class="section-title">入参</div>
+          <div id="execInputs"></div>
+
+          <div class="field">
+            <label>选择 Client<span class="required">*</span></label>
+            <select id="execClientSelect"></select>
+            <div class="hint">按 OP 类型过滤可选 Client</div>
+          </div>
+        </div>
+        <div class="editor-foot">
+          <button class="btn" onclick="closeView('execute')">取消</button>
+          <button class="btn btn-primary" onclick="openConfirm()">执行</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ==================== 二次确认弹窗 ==================== -->
+<div class="overlay" id="confirmModal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-head">二次确认</div>
+    <div class="modal-body">
+      <div class="summary">
+        <div><span class="k">即将执行:</span><span class="v" id="confirmOpName">check_tests</span></div>
+        <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
+        <div><span class="k">Client:</span><span class="v" id="confirmClient">Claude Code</span></div>
+        <div><span class="k">入参:</span><span class="v" id="confirmInputs">test_cmd: npm run test</span></div>
+      </div>
+      <div class="info-box" style="margin-top:14px">
+        <span>ℹ</span>
+        <span>确认后将创建虚拟 Job 并后台执行，执行记录进入运行历史。</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('confirmModal')">取消</button>
+      <button class="btn btn-primary" onclick="doExecute()">确认执行</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 保存版本确认弹窗 ==================== -->
+<div class="overlay" id="versionModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head">保存 OP: <span id="versionOpName">check_tests</span></div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px">
+        当前版本: <strong id="versionCurrent" style="color:var(--text)">v2</strong>
+      </div>
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:10px">是否更新版本？</div>
+      <div class="option-list">
+        <label class="option-item" onclick="selectVersionOption(this)">
+          <input type="radio" name="versionOpt" value="update" />
+          <div>
+            <div class="opt-title">更新版本（v2 → v3）</div>
+            <div class="opt-desc">创建新版本，历史运行记录保留旧版本快照</div>
+          </div>
+        </label>
+        <label class="option-item selected" onclick="selectVersionOption(this)">
+          <input type="radio" name="versionOpt" value="keep" checked />
+          <div>
+            <div class="opt-title">不更新版本（覆盖 v2）</div>
+            <div class="opt-desc">默认选项，覆盖当前版本定义</div>
+          </div>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('versionModal')">取消</button>
+      <button class="btn btn-primary" onclick="doSave()">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导入弹窗 ==================== -->
+<div class="overlay" id="importModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导入 OP</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 YAML 文件</div>
+      <div class="file-row">
+        <span>📦</span>
+        <span class="mono">check_tests-v2.yaml</span>
+        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+      </div>
+      <div class="info-box warn" style="margin-top:12px">
+        <span>⚠</span>
+        <span>若同名 OP 已存在，导入时将提示冲突处理。</span>
+      </div>
+      <div class="tree">check_tests-v2.yaml
+name: check_tests
+description: 运行测试并报告结果
+type: prompt
+timeout: 300
+inputs:
+  - name: test_cmd
+    type: string
+    required: true
+    description: 测试命令
+outputs:
+  - name: passed
+    type: string
+    description: 测试是否通过
+  - name: count
+    type: string
+    description: 通过用例数
+  - name: result
+    type: string
+    description: 测试结果详情
+content: 在当前工作区运行测试，并输出结果 JSON</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('importModal')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导出弹窗（选择目录） ==================== -->
+<div class="overlay" id="exportModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导出 OP</div>
+    <div class="modal-body">
+      <div class="field">
+        <label>文件名</label>
+        <input type="text" id="exportFileName" value="check_tests-v2.yaml" />
+      </div>
+      <div class="field">
+        <label>导出目录</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="exportDir" value="/path/to/export" style="flex:1" />
+          <button class="btn">选择</button>
+        </div>
+        <div class="hint">导出为 YAML 文件到所选目录下</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('exportModal')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('exportModal')">导出</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ==================== OP 数据 ==================== */
+  var OP_DATA = {
+    check_tests: {
+      version: 'v2', type: 'prompt', timeout: 300,
+      description: '运行测试并报告结果',
+      inputs: [
+        { name: 'test_cmd', type: 'string', required: '是', def: '', desc: '测试命令' }
+      ],
+      outputs: [
+        { name: 'passed', type: 'string', desc: '测试是否通过' },
+        { name: 'count', type: 'string', desc: '通过用例数' },
+        { name: 'result', type: 'string', desc: '测试结果详情' }
+      ],
+      content: '在当前工作区运行测试，并输出结果 JSON'
+    },
+    review: {
+      version: 'v2', type: 'prompt', timeout: 600,
+      description: '审查测试结果',
+      inputs: [
+        { name: 'test_result', type: 'string', required: '是', def: '', desc: '测试结果' }
+      ],
+      outputs: [
+        { name: 'approved', type: 'string', desc: '是否通过审查' }
+      ],
+      content: '审查测试结果并给出结论'
+    },
+    deploy: {
+      version: 'v2', type: 'prompt', timeout: 120,
+      description: '部署到目标环境',
+      inputs: [
+        { name: 'target_env', type: 'string', required: '是', def: '', desc: '目标环境' }
+      ],
+      outputs: [
+        { name: 'url', type: 'string', desc: '部署后的 URL' }
+      ],
+      content: '将当前工作区部署到指定环境，并返回访问 URL'
+    },
+    notify: {
+      version: 'v1', type: 'prompt', timeout: 60,
+      description: '发送成功通知',
+      inputs: [
+        { name: 'message', type: 'string', required: '是', def: '', desc: '通知内容' }
+      ],
+      outputs: [],
+      content: '发送通知消息'
+    },
+    notify_fail: {
+      version: 'v1', type: 'prompt', timeout: 60,
+      description: '发送失败通知',
+      inputs: [],
+      outputs: [],
+      content: '发送失败告警通知'
+    },
+    clean_logs: {
+      version: 'v3', type: 'powershell', timeout: 120,
+      description: '清理历史日志',
+      inputs: [
+        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '日志服务地址' }
+      ],
+      outputs: [],
+      content: 'Get-ChildItem -Path $env:WORKSPACE -Recurse -Filter *.log | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item'
+    },
+    process_data: {
+      version: 'v3', type: 'python', timeout: 300,
+      description: '处理数据',
+      inputs: [
+        { name: 'source', type: 'string', required: '是', def: '', desc: '数据源' }
+      ],
+      outputs: [
+        { name: 'count', type: 'string', desc: '处理条数' }
+      ],
+      content: 'import json\n# 处理数据源并输出结果'
+    },
+    health_check: {
+      version: 'v1', type: 'bash', timeout: 180,
+      description: '健康检查',
+      inputs: [
+        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '服务地址' }
+      ],
+      outputs: [
+        { name: 'healthy', type: 'string', desc: '是否健康' }
+      ],
+      content: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"'
+    },
+    collect_metrics: {
+      version: 'v1', type: 'python', timeout: 240,
+      description: '采集指标',
+      inputs: [
+        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '服务地址' }
+      ],
+      outputs: [
+        { name: 'metrics', type: 'string', desc: '指标数据' }
+      ],
+      content: 'import json\n# 采集指标'
+    },
+    run_lint: {
+      version: 'v2', type: 'bash', timeout: 180,
+      description: '运行代码检查',
+      inputs: [
+        { name: 'target', type: 'string', required: '是', def: '', desc: '检查目标' }
+      ],
+      outputs: [
+        { name: 'issues', type: 'string', desc: '问题列表' }
+      ],
+      content: '#!/usr/bin/env bash\nnpm run lint'
+    }
+  };
+
+  /* OP 类型 → 可选 Client 列表 */
+  var CLIENT_BY_TYPE = {
+    prompt: ['Claude Code', 'Codex CLI'],
+    bash: ['本地 Bash'],
+    python: ['本地 Python'],
+    powershell: ['本地 PowerShell']
+  };
+
+  var TYPE_TAG = {
+    prompt: 'tag-prompt', bash: 'tag-bash', python: 'tag-python', powershell: 'tag-powershell'
+  };
+
+  /* ---------- 视图切换 ---------- */
+  var views = {
+    list: document.getElementById('view-list'),
+    editor: document.getElementById('view-editor'),
+    execute: document.getElementById('view-execute')
+  };
+
+  function showView(name) {
+    Object.keys(views).forEach(function (k) {
+      views[k].classList.toggle('active', k === name);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeView(name) {
+    showView('list');
+  }
+
+  /* ---------- 编辑器 ---------- */
+  var editorVersion = 'v2';
+  var currentOpName = 'check_tests';
+  var currentOpType = 'prompt';
+
+  function openEditor(name, type, version) {
+    var isNew = !name;
+
+    if (isNew) {
+      document.getElementById('editorTitle').innerHTML = '新建 OP';
+      document.getElementById('opName').value = '';
+      document.getElementById('opDesc').value = '';
+      document.getElementById('opTimeout').value = 300;
+      editorVersion = 'v1';
+      currentOpName = '';
+      currentOpType = 'prompt';
+      renderParams({ inputs: [], outputs: [] });
+      document.querySelector('input[name="opType"][value="prompt"]').checked = true;
+      switchType('prompt');
+      document.getElementById('contentArea').value = '';
+    } else {
+      var data = OP_DATA[name];
+      document.getElementById('editorTitle').innerHTML =
+        '编辑: ' + name + ' <span class="tag tag-ver" id="editorVersion">' + data.version + '</span>';
+      document.getElementById('opName').value = name;
+      document.getElementById('opDesc').value = data.description || '';
+      document.getElementById('opTimeout').value = data.timeout;
+      editorVersion = data.version;
+      currentOpName = name;
+      currentOpType = data.type;
+      renderParams(data);
+      document.querySelector('input[name="opType"][value="' + data.type + '"]').checked = true;
+      switchType(data.type);
+      document.getElementById('contentArea').value = data.content || '';
+    }
+
+    showView('editor');
+  }
+
+  /* 渲染入参 / 出参表格 */
+  function renderParams(data) {
+    // 入参表格：name | type | required | default | description | 删除
+    var inputHtml =
+      '<div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>';
+
+    (data.inputs || []).forEach(function (p) {
+      inputHtml +=
+        '<div class="pt-row pt-in">' +
+          '<input type="text" value="' + (p.name || '') + '" />' +
+          '<select><option>string</option></select>' +
+          '<select>' +
+            '<option' + (p.required === '是' ? ' selected' : '') + '>是</option>' +
+            '<option' + (p.required === '否' ? ' selected' : '') + '>否</option>' +
+          '</select>' +
+          '<input type="text" value="' + (p.def || '') + '" placeholder="default" />' +
+          '<input type="text" value="' + (p.desc || '') + '" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+    });
+
+    if (!(data.inputs || []).length) {
+      inputHtml += '<div class="pt-row pt-in" style="color:var(--text-3)">无入参</div>';
+    }
+
+    document.getElementById('inputTable').innerHTML = inputHtml;
+
+    // 出参表格：name | type | description | 删除
+    var outputHtml =
+      '<div class="pt-head pt-out"><span>name</span><span>type</span><span>description</span><span></span></div>';
+
+    (data.outputs || []).forEach(function (p) {
+      outputHtml +=
+        '<div class="pt-row pt-out">' +
+          '<input type="text" value="' + (p.name || '') + '" />' +
+          '<select><option>string</option></select>' +
+          '<input type="text" value="' + (p.desc || '') + '" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+    });
+
+    if (!(data.outputs || []).length) {
+      outputHtml += '<div class="pt-row pt-out" style="color:var(--text-3)">无出参</div>';
+    }
+
+    document.getElementById('outputTable').innerHTML = outputHtml;
+  }
+
+  function addInputRow() {
+    var table = document.getElementById('inputTable');
+    var row = document.createElement('div');
+    row.className = 'pt-row pt-in';
+    row.innerHTML =
+      '<input type="text" placeholder="name" />' +
+      '<select><option>string</option></select>' +
+      '<select><option>是</option><option>否</option></select>' +
+      '<input type="text" placeholder="default" />' +
+      '<input type="text" placeholder="description" />' +
+      '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>';
+    table.appendChild(row);
+  }
+
+  function addOutputRow() {
+    var table = document.getElementById('outputTable');
+    var row = document.createElement('div');
+    row.className = 'pt-row pt-out';
+    row.innerHTML =
+      '<input type="text" placeholder="name" />' +
+      '<select><option>string</option></select>' +
+      '<input type="text" placeholder="description" />' +
+      '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>';
+    table.appendChild(row);
+  }
+
+  /* ---------- 类型切换（内容随类型变化） ---------- */
+  var contentMap = {
+    prompt: {
+      label: '内容（Prompt）',
+      hint: 'prompt 模板，支持 {{workspace}}、入参变量等占位符',
+      placeholder: '在当前工作区运行测试，并输出结果 JSON'
+    },
+    bash: {
+      label: '内容（Bash 脚本）',
+      hint: 'bash 脚本内容，入参 / 出参由包装脚本注入与提取',
+      placeholder: '#!/usr/bin/env bash\nnpm run test'
+    },
+    python: {
+      label: '内容（Python 脚本）',
+      hint: 'Python 脚本内容，入参 / 出参由包装脚本注入与提取',
+      placeholder: 'import json\n# ...'
+    },
+    powershell: {
+      label: '内容（PowerShell 脚本）',
+      hint: 'PowerShell 脚本内容，入参 / 出参由包装脚本注入与提取',
+      placeholder: 'Get-ChildItem -Path $env:WORKSPACE'
+    }
+  };
+
+  function switchType(type) {
+    var cfg = contentMap[type];
+    document.getElementById('contentLabel').textContent = cfg.label;
+    document.getElementById('contentHint').textContent = cfg.hint;
+    document.getElementById('contentArea').placeholder = cfg.placeholder;
+  }
+
+  /* ---------- 保存版本确认 ---------- */
+  function openVersionDialog() {
+    document.getElementById('versionOpName').textContent = document.getElementById('opName').value || '(未命名)';
+    document.getElementById('versionCurrent').textContent = editorVersion;
+
+    var items = document.querySelectorAll('#versionModal .option-item');
+    items.forEach(function (el, i) {
+      el.classList.toggle('selected', i === 1);
+      el.querySelector('input').checked = (i === 1);
+    });
+    openModal('versionModal');
+  }
+
+  function selectVersionOption(el) {
+    document.querySelectorAll('#versionModal .option-item').forEach(function (item) {
+      item.classList.remove('selected');
+    });
+    el.classList.add('selected');
+    el.querySelector('input').checked = true;
+  }
+
+  function doSave() {
+    closeModal('versionModal');
+    closeView('editor');
+  }
+
+  /* ---------- 单次执行流程（Client 按 OP 类型过滤） ---------- */
+  function openExecute(opName) {
+    var data = OP_DATA[opName] || { inputs: [], type: 'prompt' };
+    currentOpName = opName;
+    currentOpType = data.type;
+
+    document.getElementById('execOpName').textContent = opName;
+
+    // 渲染入参输入框
+    var inputsHtml = '';
+    if (!data.inputs || !data.inputs.length) {
+      inputsHtml = '<div class="hint" style="margin-bottom:12px">该 OP 无入参</div>';
+    } else {
+      data.inputs.forEach(function (p) {
+        inputsHtml +=
+          '<div class="field">' +
+            '<label>' + p.name + (p.required === '是' ? '<span class="required">*</span>' : '') + '</label>' +
+            '<input type="text" value="' + (p.def || '') + '" />' +
+          '</div>';
+      });
+    }
+    document.getElementById('execInputs').innerHTML = inputsHtml;
+
+    // 按 OP 类型渲染 Client 下拉
+    var clients = CLIENT_BY_TYPE[data.type] || [];
+    var sel = document.getElementById('execClientSelect');
+    sel.innerHTML = clients.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+
+    showView('execute');
+  }
+
+  function openConfirm() {
+    document.getElementById('confirmOpName').textContent =
+      document.getElementById('execOpName').textContent;
+    document.getElementById('confirmClient').textContent =
+      document.getElementById('execClientSelect').value || '—';
+    document.getElementById('confirmInputs').textContent = '（见执行表单）';
+    openModal('confirmModal');
+  }
+
+  function doExecute() {
+    closeModal('confirmModal');
+    closeView('execute');
+  }
+
+  /* ---------- 导出（选择目录） ---------- */
+  function openExport(name, version) {
+    document.getElementById('exportFileName').value = name + '-' + version + '.yaml';
+    openModal('exportModal');
+  }
+
+  /* ---------- 弹窗控制 ---------- */
+  function openModal(id) {
+    document.getElementById(id).classList.add('active');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+  document.querySelectorAll('.overlay').forEach(function (ov) {
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) ov.classList.remove('active');
+    });
+  });
+
+  /* ---------- 初始化 ---------- */
+  switchType('prompt');
+</script>
+</body>
+</html>

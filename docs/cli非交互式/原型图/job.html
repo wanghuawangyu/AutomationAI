@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Job 管理 · AI 自动化</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
+    --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --accent:#3b6ef6;--accent-soft:#eaf0ff;
+    --sidebar:#171b25;--sidebar-hover:#232838;
+    --failed:#dc2626;--failed-bg:#fdecec;
+    --success:#16a34a;--success-bg:#e8f7ee;
+    --warn:#d97706;--warn-bg:#fff7e8;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- 左侧固定菜单栏 ---------- */
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:#c8cedb;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid #0f131b}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4b7dff,#7a4bff);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 34px}
+  .brand-name{color:#fff;font-size:15px;font-weight:600;letter-spacing:.3px}
+  .brand-desc{font-size:11px;color:#7d8598;margin-top:1px}
+  .menu{padding:12px 10px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13.5px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .menu-item:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .mi-icon{font-size:15px;width:18px;text-align:center}
+  .star{margin-left:auto;color:#ffcb45;font-size:12px}
+  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ---------- 右侧内容区 ---------- */
+  .content{flex:1;min-width:0;padding:22px 26px 40px}
+  .view{display:none}
+  .view.active{display:block}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+  .page-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .head-actions{display:flex;align-items:center;gap:8px}
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;margin-bottom:12px}
+  .back-link:hover{color:var(--accent)}
+
+  /* 按钮 */
+  .btn{font-family:inherit;font-size:12.5px;padding:7px 13px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+  .btn:hover{background:#f7f8fa;border-color:#d2d7de}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn-primary:hover{background:#2f5fe0;border-color:#2f5fe0}
+  .btn-ghost-primary{color:var(--accent);border-color:#c6d6fd;background:var(--accent-soft)}
+  .btn-ghost-primary:hover{background:#dde8ff}
+  .btn-danger{color:var(--failed);border-color:#f3cfcf;background:#fff}
+  .btn-danger:hover{background:#fdf2f2}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* 卡片 / 工具栏 */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .toolbar{padding:14px 16px;border-bottom:1px solid var(--border-soft)}
+  .search{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .search:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{font-family:inherit;font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text-2);cursor:pointer}
+  .chip:hover{border-color:#c9d3e5;color:var(--text)}
+  .chip.active{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
+
+  /* Job 列表卡片 */
+  .job-card{display:flex;align-items:flex-start;gap:13px;padding:15px 16px;border-bottom:1px solid var(--border-soft);transition:background .12s}
+  .job-card:last-child{border-bottom:0}
+  .job-card:hover{background:#fafbfd}
+  .job-icon{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .job-main{flex:1;min-width:0}
+  .job-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .job-name{font-size:14px;font-weight:620}
+  .job-sub{font-size:12.5px;color:var(--text-2);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .job-sub .k{color:var(--text-3)}
+  .job-last{font-size:12.5px;color:var(--text-2);margin-top:5px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .job-actions{display:flex;gap:6px;align-items:center;padding-top:2px}
+
+  .tag{font-size:11px;padding:2px 7px;border-radius:5px;background:#f1f3f7;color:#5b6474;border:1px solid #e6e9ef;white-space:nowrap}
+  .tag-ver{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-op{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-wf{background:#f3eeff;color:#7a4bff;border-color:#e5dbff}
+  .tag-warn{background:#fff7e8;color:#b4740a;border-color:#f5e5c4}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+
+  .badge{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+  .badge-success{color:var(--success);background:var(--success-bg)}
+  .badge-failed{color:var(--failed);background:var(--failed-bg)}
+  .badge-off{color:#6b7280;background:#f0f1f4}
+
+  /* ---------- 编辑器 ---------- */
+  .editor-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;max-width:720px}
+  .editor-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border-soft)}
+  .editor-head h2{font-size:16px;font-weight:620;display:flex;align-items:center;gap:8px}
+  .editor-body{padding:20px}
+
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .field input[type=text],.field input[type=number],.field select,.field textarea{
+    width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;
+    font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .field .hint{font-size:11.5px;color:var(--text-3);margin-top:4px}
+  .form-row{display:flex;gap:12px;flex-wrap:wrap}
+  .form-row .field{flex:1;min-width:180px}
+
+  .radio-group{display:flex;gap:16px;flex-wrap:wrap;padding:4px 0}
+  .radio-group label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;font-weight:400}
+  .radio-group input[type=radio]{accent-color:var(--accent);width:15px;height:15px}
+
+  .section-title{font-size:13px;font-weight:600;color:var(--text-2);margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:space-between}
+  .section-title:first-of-type{margin-top:0}
+
+  .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+
+  /* 键值对表格 */
+  .kv-table{width:100%;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:12.5px}
+  .kv-table .kv-head,.kv-table .kv-row{display:grid;grid-template-columns:1.1fr 1.6fr 34px;gap:8px;padding:8px 10px;align-items:center}
+  .kv-table .kv-head{background:#f7f8fb;color:var(--text-3);font-weight:600;font-size:11.5px;border-bottom:1px solid var(--border)}
+  .kv-table .kv-row{border-bottom:1px solid var(--border-soft);background:#fff}
+  .kv-table .kv-row:last-child{border-bottom:0}
+  .kv-table .kv-row input{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:12.5px;outline:none;background:#fbfbfd}
+  .kv-table .kv-row input:focus{border-color:#b9cbfb;background:#fff}
+  .kv-del{width:26px;height:26px;border:0;background:#fff;color:#c3c8d0;border-radius:5px;cursor:pointer;font-size:15px;line-height:1}
+  .kv-del:hover{background:#fdf2f2;color:var(--failed)}
+
+  /* 触发方式 / 并发 */
+  .cron-row{display:flex;align-items:center;gap:10px;margin-top:8px;padding-left:24px}
+  .cron-row input{flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;outline:none;background:#fbfbfd}
+  .cron-row input:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  .info-box{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:10px 13px;font-size:12.5px;color:#4a5a7a;margin-top:8px;display:flex;gap:8px;align-items:flex-start}
+  .info-box.warn{background:#fff8e9;border-color:#f3e4bd;color:#96660a}
+
+  .target-config{display:none}
+  .target-config.active{display:block}
+
+  /* ---------- 弹窗 ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.active{display:flex}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:520px;box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;max-height:90vh;display:flex;flex-direction:column}
+  .modal-head{padding:16px 20px;border-bottom:1px solid var(--border-soft);font-size:15px;font-weight:620}
+  .modal-body{padding:20px;overflow-y:auto}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+  .modal .field{margin-bottom:14px}
+  .modal .field:last-child{margin-bottom:0}
+  .modal .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .modal .field input,.modal .field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .modal .field input:focus,.modal .field select:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  .summary{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.9}
+  .summary .k{color:var(--text-3);display:inline-block;min-width:80px}
+  .summary .v{color:var(--text)}
+
+  .option-list{display:flex;flex-direction:column;gap:10px}
+  .option-item{display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;cursor:pointer;transition:border-color .15s,background .15s}
+  .option-item:hover{border-color:#c9d3e5}
+  .option-item.selected{border-color:#b9cbfb;background:#f5f8ff}
+  .option-item input[type=radio]{accent-color:var(--accent);width:15px;height:15px;margin-top:2px}
+  .opt-title{font-size:13.5px;font-weight:600}
+  .opt-desc{font-size:12px;color:var(--text-3);margin-top:2px}
+
+  .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+  .required{color:var(--failed);margin-left:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== 左侧固定菜单栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>
+        <div class="brand-name">AI 自动化</div>
+        <div class="brand-desc">CLI 工作流编排器</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item" href="client.html"><span class="mi-icon">🧩</span>Client 管理</a>
+      <a class="menu-item" href="op.html"><span class="mi-icon">📦</span>OP 管理</a>
+      <a class="menu-item" href="workflow.html"><span class="mi-icon">📋</span>Workflow 管理</a>
+      <a class="menu-item active" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
+      <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
+    </nav>
+    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+  </aside>
+
+  <!-- ==================== 右侧内容区 ==================== -->
+  <main class="content">
+
+    <!-- ========== 列表视图 ========== -->
+    <div class="view active" id="view-list">
+      <div class="page-head">
+        <div>
+          <h1>Job 管理</h1>
+          <p class="sub">持久 Job · 定义"什么时候做、在哪做" · 不设超时，超时由 OP 定义</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn btn-primary" onclick="openEditor('')">＋ 新建</button>
+          <button class="btn" onclick="openModal('importModal')">导入</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <input class="search" placeholder="🔍 搜索..." />
+          <div class="filters">
+            <button class="chip active">全部</button>
+            <button class="chip">需要更新</button>
+            <button class="chip">已同步</button>
+            <button class="chip">最近执行失败</button>
+          </div>
+        </div>
+
+        <!-- daily_cleanup：定时 OP Job，启用，需要更新 -->
+        <article class="job-card">
+          <div class="job-icon">⏰</div>
+          <div class="job-main">
+            <div class="job-title">
+              <span class="job-name">daily_cleanup</span>
+              <span class="tag tag-ver">v2</span>
+              <span class="badge badge-success">✅ 启用</span>
+              <span class="tag tag-warn">⚠ 需要更新</span>
+            </div>
+            <div class="job-sub">
+              <span><span class="k">OP:</span>clean_logs <span class="tag tag-op">v2</span></span>
+              <span><span class="k">非交互</span></span>
+              <span><span class="k">Cron:</span><span class="mono">0 2 * * *</span></span>
+            </div>
+            <div class="job-last">
+              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 3.2s · 1 周前</span>
+            </div>
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
+            <button class="btn btn-sm" onclick="openEditor('daily_cleanup','op')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('daily_cleanup','v2','op')">导出</button>
+            <button class="btn btn-sm">禁用</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </article>
+
+        <!-- hourly_check：定时 Workflow Job，需要更新，失败 -->
+        <article class="job-card">
+          <div class="job-icon">⏰</div>
+          <div class="job-main">
+            <div class="job-title">
+              <span class="job-name">hourly_check</span>
+              <span class="tag tag-ver">v1</span>
+              <span class="badge badge-success">✅ 启用</span>
+              <span class="tag tag-warn">⚠ 需要更新</span>
+            </div>
+            <div class="job-sub">
+              <span><span class="k">Workflow:</span>deploy_workflow <span class="tag tag-wf">v1</span></span>
+              <span><span class="k">非交互</span></span>
+              <span><span class="k">Cron:</span><span class="mono">0 * * * *</span></span>
+            </div>
+            <div class="job-last">
+              <span><span class="k">最近执行:</span><span class="badge badge-failed">✗ 失败</span> 8.1s · 2 小时前</span>
+            </div>
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
+            <button class="btn btn-sm btn-ghost-primary" disabled title="需要更新后才能重试">重试</button>
+            <button class="btn btn-sm" onclick="openEditor('hourly_check','workflow')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('hourly_check','v1','workflow')">导出</button>
+            <button class="btn btn-sm">禁用</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </article>
+
+        <!-- manual_deploy：手动 Workflow Job -->
+        <article class="job-card">
+          <div class="job-icon">📌</div>
+          <div class="job-main">
+            <div class="job-title">
+              <span class="job-name">manual_deploy</span>
+              <span class="tag tag-ver">v2</span>
+            </div>
+            <div class="job-sub">
+              <span><span class="k">Workflow:</span>deploy_workflow <span class="tag tag-wf">v2</span></span>
+              <span><span class="k">非交互</span></span>
+              <span><span class="k">触发:</span>手动</span>
+            </div>
+            <div class="job-last">
+              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 15.3s · 3 小时前</span>
+            </div>
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-sm btn-ghost-primary" onclick="openRun('manual_deploy','Workflow','deploy_workflow','v2','手动')">运行</button>
+            <button class="btn btn-sm" onclick="openEditor('manual_deploy','workflow')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('manual_deploy','v2','workflow')">导出</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </article>
+
+        <!-- weekly_report：定时 Workflow Job，已禁用 + 需要更新 -->
+        <article class="job-card">
+          <div class="job-icon">⏰</div>
+          <div class="job-main">
+            <div class="job-title">
+              <span class="job-name">weekly_report</span>
+              <span class="tag tag-ver">v1</span>
+              <span class="badge badge-off">⏸ 已禁用</span>
+              <span class="tag tag-warn">⚠ 需要更新</span>
+            </div>
+            <div class="job-sub">
+              <span><span class="k">Workflow:</span>log_analysis <span class="tag tag-wf">v1</span></span>
+              <span><span class="k">非交互</span></span>
+              <span><span class="k">Cron:</span><span class="mono">0 9 * * 1</span></span>
+            </div>
+            <div class="job-last">
+              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 22.7s · 5 天前</span>
+            </div>
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-sm" disabled title="已禁用 / 需要更新">运行</button>
+            <button class="btn btn-sm" onclick="openEditor('weekly_report','workflow')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('weekly_report','v1','workflow')">导出</button>
+            <button class="btn btn-sm">启用</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </article>
+
+        <!-- data_sync：定时 OP Job，启用，需要更新，失败 -->
+        <article class="job-card">
+          <div class="job-icon">⏰</div>
+          <div class="job-main">
+            <div class="job-title">
+              <span class="job-name">data_sync</span>
+              <span class="tag tag-ver">v2</span>
+              <span class="badge badge-success">✅ 启用</span>
+              <span class="tag tag-warn">⚠ 需要更新</span>
+            </div>
+            <div class="job-sub">
+              <span><span class="k">OP:</span>process_data <span class="tag tag-op">v2</span></span>
+              <span><span class="k">非交互</span></span>
+              <span><span class="k">Cron:</span><span class="mono">0 3 * * *</span></span>
+            </div>
+            <div class="job-last">
+              <span><span class="k">最近执行:</span><span class="badge badge-failed">✗ 失败</span> 4.1s · 5 小时前</span>
+            </div>
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
+            <button class="btn btn-sm" onclick="openEditor('data_sync','op')">编辑</button>
+            <button class="btn btn-sm" onclick="openExport('data_sync','v2','op')">导出</button>
+            <button class="btn btn-sm">禁用</button>
+            <button class="btn btn-sm btn-danger">删除</button>
+          </div>
+        </article>
+
+      </div>
+    </div>
+
+    <!-- ========== 编辑器视图 ========== -->
+    <div class="view" id="view-editor">
+      <button class="back-link" onclick="closeView()">← 返回</button>
+
+      <div class="editor-card">
+        <div class="editor-head">
+          <h2>编辑: <span id="editorName">hourly_check</span> <span class="tag tag-ver" id="editorVersion">v1</span></h2>
+        </div>
+
+        <div class="editor-body">
+          <!-- 名称 / 描述 -->
+          <div class="form-row">
+            <div class="field">
+              <label>名称<span class="required">*</span></label>
+              <input type="text" id="jobName" value="hourly_check" />
+            </div>
+            <div class="field">
+              <label>描述</label>
+              <input type="text" id="jobDesc" value="每小时健康检查" />
+            </div>
+          </div>
+
+          <!-- 目标类型 -->
+          <div class="field">
+            <label>目标类型</label>
+            <div class="radio-group">
+              <label><input type="radio" name="targetKind" value="op" onchange="switchTarget('op')" /> 单个 OP</label>
+              <label><input type="radio" name="targetKind" value="workflow" checked onchange="switchTarget('workflow')" /> 整个 Workflow</label>
+            </div>
+          </div>
+
+          <!-- OP target -->
+          <div class="target-config" id="target-op">
+            <div class="field">
+              <label>OP</label>
+              <select id="opSelect">
+                <option>check_tests</option>
+                <option>review</option>
+                <option>deploy</option>
+                <option>notify</option>
+                <option>notify_fail</option>
+                <option>clean_logs</option>
+                <option>process_data</option>
+                <option>health_check</option>
+                <option>collect_metrics</option>
+                <option>run_lint</option>
+              </select>
+              <div class="hint">ℹ 超时由 OP 定义</div>
+            </div>
+            <div class="field">
+              <label>Client<span class="required">*</span></label>
+              <select id="clientSelect">
+                <option>Claude Code</option>
+                <option>Codex CLI</option>
+                <option>本地 Bash</option>
+                <option>本地 Python</option>
+                <option>本地 PowerShell</option>
+              </select>
+              <div class="hint">ℹ target=OP 时创建 Job 必须选择一个 Client</div>
+            </div>
+          </div>
+
+          <!-- Workflow target -->
+          <div class="target-config active" id="target-workflow">
+            <div class="field">
+              <label>Workflow</label>
+              <select id="wfSelect">
+                <option>deploy_workflow</option>
+                <option>log_analysis</option>
+                <option>code_review</option>
+              </select>
+              <div class="hint">ℹ 超时由各节点引用的 OP 定义</div>
+            </div>
+          </div>
+
+          <!-- 工作区 -->
+          <div class="field">
+            <label>工作区<span class="required">*</span></label>
+            <div style="display:flex;gap:8px">
+              <input type="text" value="/path/to/workspace" style="flex:1" />
+              <button class="btn">选择</button>
+            </div>
+          </div>
+
+          <!-- 初始入参 -->
+          <div class="section-title">
+            <span>初始入参</span>
+            <button class="btn btn-sm" onclick="addInputRow()">＋ 添加</button>
+          </div>
+          <div class="kv-table" id="inputTable">
+            <div class="kv-head"><span>name</span><span>value</span><span></span></div>
+            <div class="kv-row">
+              <input type="text" value="endpoint" />
+              <input type="text" value="https://..." />
+              <button class="kv-del" onclick="this.closest('.kv-row').remove()">✕</button>
+            </div>
+          </div>
+
+          <!-- 触发方式（手动 / 定时 二选一） -->
+          <div class="section-title">触发方式</div>
+          <div class="radio-group">
+            <label><input type="radio" name="triggerKind" value="manual" onchange="switchTrigger('manual')" /> 手动</label>
+            <label><input type="radio" name="triggerKind" value="schedule" checked onchange="switchTrigger('schedule')" /> 定时</label>
+          </div>
+          <div class="cron-row" id="cronRow">
+            <input type="text" value="0 * * * *" placeholder="Cron 表达式" />
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" checked style="accent-color:var(--accent);width:14px;height:14px" /> 启用
+            </label>
+          </div>
+
+          <!-- 并发策略 -->
+          <div class="field" style="margin-top:18px;max-width:260px">
+            <label>并发策略</label>
+            <select>
+              <option>skip</option>
+              <option>queue</option>
+              <option>parallel</option>
+            </select>
+          </div>
+
+          <div class="info-box">
+            <span>ℹ</span>
+            <span>Job 不设超时，超时由 OP 定义</span>
+          </div>
+        </div>
+
+        <div class="editor-foot">
+          <button class="btn" onclick="closeView()">取消</button>
+          <button class="btn btn-primary" onclick="openVersionDialog()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 手动运行确认视图 ========== -->
+    <div class="view" id="view-run">
+      <button class="back-link" onclick="closeView()">← 返回</button>
+
+      <div class="editor-card" style="max-width:560px">
+        <div class="editor-head">
+          <h2>确认执行: <span id="runJobName">manual_deploy</span></h2>
+        </div>
+        <div class="editor-body">
+          <div class="summary" id="runSummary">
+            <div><span class="k">即将执行:</span><span class="v" id="runTarget">Workflow: deploy_workflow v2</span></div>
+            <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
+            <div><span class="k">入参:</span><span class="v" id="runInputs">endpoint: https://...</span></div>
+            <div><span class="k">触发来源:</span><span class="v" id="runTrigger">手动</span></div>
+          </div>
+          <div class="info-box" style="margin-top:14px">
+            <span>ℹ</span>
+            <span>确认后将创建 Job Run 并后台执行，执行记录进入运行历史。</span>
+          </div>
+        </div>
+        <div class="editor-foot">
+          <button class="btn" onclick="closeView()">取消</button>
+          <button class="btn btn-primary" onclick="doRun()">确认执行</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ==================== 保存版本确认弹窗 ==================== -->
+<div class="overlay" id="versionModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head">保存: <span id="versionJobName">hourly_check</span></div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:14px">
+        当前版本: <strong id="versionCurrent" style="color:var(--text)">v1</strong>
+      </div>
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:10px">是否更新版本？</div>
+      <div class="option-list">
+        <label class="option-item" onclick="selectVersionOption(this)">
+          <input type="radio" name="versionOpt" value="update" />
+          <div>
+            <div class="opt-title">更新版本（v1 → v2）</div>
+            <div class="opt-desc">创建新版本，历史运行记录保留旧版本快照</div>
+          </div>
+        </label>
+        <label class="option-item selected" onclick="selectVersionOption(this)">
+          <input type="radio" name="versionOpt" value="keep" checked />
+          <div>
+            <div class="opt-title">不更新版本（覆盖 v1）</div>
+            <div class="opt-desc">默认选项，覆盖当前版本定义</div>
+          </div>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('versionModal')">取消</button>
+      <button class="btn btn-primary" onclick="doSave()">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导入弹窗 ==================== -->
+<div class="overlay" id="importModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">导入 Job</div>
+    <div class="modal-body">
+      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">选择 ZIP 文件</div>
+      <div class="file-row">
+        <span>📦</span>
+        <span class="mono">manual_deploy-v2.zip</span>
+        <button class="btn btn-sm" style="margin-left:auto">选择文件</button>
+      </div>
+      <div class="info-box warn" style="margin-top:12px">
+        <span>⚠</span>
+        <span>若同名 Job 已存在，导入时将提示冲突处理。</span>
+      </div>
+      <div class="tree">manual_deploy-v2.zip
+├── manifest.json
+├── job.yaml
+├── workflows/
+│   └── deploy_workflow.yaml
+└── ops/
+    ├── check_tests.yaml
+    └── ...</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('importModal')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('importModal')">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 导出弹窗 ==================== -->
+<div class="overlay" id="exportModal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-head">导出 Job</div>
+    <div class="modal-body">
+      <div class="field">
+        <label>文件名</label>
+        <input type="text" id="exportFileName" value="hourly_check-v1.zip" />
+      </div>
+      <div class="tree" id="exportTree">hourly_check-v1.zip
+├── manifest.json
+├── job.yaml
+├── workflows/
+│   └── health.yaml
+└── ops/
+    ├── health_check.yaml
+    └── ...</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('exportModal')">取消</button>
+      <button class="btn btn-primary" onclick="closeModal('exportModal')">导出</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ==================== 视图切换 ==================== */
+  var views = {
+    list: document.getElementById('view-list'),
+    editor: document.getElementById('view-editor'),
+    run: document.getElementById('view-run')
+  };
+
+  function showView(name) {
+    Object.keys(views).forEach(function (k) {
+      views[k].classList.toggle('active', k === name);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeView() {
+    showView('list');
+  }
+
+  /* ==================== 编辑器 ==================== */
+  var currentVersion = 'v1';
+
+  function openEditor(name, targetKind) {
+    var isNew = !name;
+    document.getElementById('editorName').textContent = name || '（未命名）';
+    var ver = (name === 'daily_cleanup' || name === 'manual_deploy' || name === 'data_sync') ? 'v2' : 'v1';
+    document.getElementById('editorVersion').textContent = ver;
+    currentVersion = ver;
+
+    document.getElementById('jobName').value = name || '';
+    document.getElementById('jobDesc').value = name ? (name + ' 作业') : '';
+
+    var kind = targetKind || 'workflow';
+    document.querySelector('input[name="targetKind"][value="' + kind + '"]').checked = true;
+    switchTarget(kind);
+
+    // 重置入参为 endpoint
+    document.getElementById('inputTable').innerHTML =
+      '<div class="kv-head"><span>name</span><span>value</span><span></span></div>' +
+      '<div class="kv-row">' +
+        '<input type="text" value="endpoint" />' +
+        '<input type="text" value="https://..." />' +
+        '<button class="kv-del" onclick="this.closest(\'.kv-row\').remove()">✕</button>' +
+      '</div>';
+
+    showView('editor');
+  }
+
+  function switchTarget(kind) {
+    document.getElementById('target-op').classList.toggle('active', kind === 'op');
+    document.getElementById('target-workflow').classList.toggle('active', kind === 'workflow');
+  }
+
+  function switchTrigger(kind) {
+    document.getElementById('cronRow').style.display = (kind === 'schedule') ? 'flex' : 'none';
+  }
+
+  function addInputRow() {
+    var table = document.getElementById('inputTable');
+    var row = document.createElement('div');
+    row.className = 'kv-row';
+    row.innerHTML =
+      '<input type="text" placeholder="name" />' +
+      '<input type="text" placeholder="value" />' +
+      '<button class="kv-del" onclick="this.closest(\'.kv-row\').remove()">✕</button>';
+    table.appendChild(row);
+  }
+
+  /* ==================== 手动运行 ==================== */
+  function openRun(name, type, target, version, trigger) {
+    document.getElementById('runJobName').textContent = name;
+    document.getElementById('runTarget').textContent = type + ': ' + target + ' ' + version;
+    document.getElementById('runTrigger').textContent = trigger;
+    showView('run');
+  }
+
+  function doRun() {
+    // 创建 Job Run → 后台执行 → 进入运行历史
+    closeView();
+  }
+
+  /* ==================== 保存版本确认 ==================== */
+  function openVersionDialog() {
+    document.getElementById('versionJobName').textContent =
+      document.getElementById('jobName').value || '(未命名)';
+    document.getElementById('versionCurrent').textContent = currentVersion;
+
+    var items = document.querySelectorAll('#versionModal .option-item');
+    items.forEach(function (el, i) {
+      el.classList.toggle('selected', i === 1);
+      el.querySelector('input').checked = (i === 1);
+    });
+    openModal('versionModal');
+  }
+
+  function selectVersionOption(el) {
+    document.querySelectorAll('#versionModal .option-item').forEach(function (item) {
+      item.classList.remove('selected');
+    });
+    el.classList.add('selected');
+    el.querySelector('input').checked = true;
+  }
+
+  function doSave() {
+    closeModal('versionModal');
+    closeView();
+  }
+
+  /* ==================== 导出 ==================== */
+  function openExport(name, version, type) {
+    document.getElementById('exportFileName').value = name + '-' + version + '.zip';
+
+    var tree = name + '-' + version + '.zip\n' +
+      '├── manifest.json\n' +
+      '├── job.yaml\n';
+
+    if (type === 'workflow') {
+      tree += '├── workflows/\n' +
+              '│   └── deploy_workflow.yaml\n' +
+              '└── ops/\n' +
+              '    ├── check_tests.yaml\n' +
+              '    └── ...';
+    } else {
+      tree += '└── ops/\n' +
+              '    ├── clean_logs.yaml\n' +
+              '    └── ...';
+    }
+
+    document.getElementById('exportTree').textContent = tree;
+    openModal('exportModal');
+  }
+
+  /* ==================== 弹窗控制 ==================== */
+  function openModal(id) {
+    document.getElementById(id).classList.add('active');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+  document.querySelectorAll('.overlay').forEach(function (ov) {
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) ov.classList.remove('active');
+    });
+  });
+
+  /* ==================== 初始化 ==================== */
+  switchTarget('workflow');
+  switchTrigger('schedule');
+</script>
+</body>
+</html>

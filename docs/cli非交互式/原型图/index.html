@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>运行历史 · AI 自动化</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
+    --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --accent:#3b6ef6;--accent-soft:#eaf0ff;
+    --sidebar:#171b25;--sidebar-hover:#232838;
+    --failed:#dc2626;--failed-bg:#fdecec;
+    --success:#16a34a;--success-bg:#e8f7ee;
+    --running:#2563eb;--running-bg:#e8effd;
+    --timeout:#d97706;--timeout-bg:#fdf3e3;
+    --warn:#d97706;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- 左侧固定菜单栏 ---------- */
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:#c8cedb;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid #0f131b}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4b7dff,#7a4bff);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 34px}
+  .brand-name{color:#fff;font-size:15px;font-weight:600;letter-spacing:.3px}
+  .brand-desc{font-size:11px;color:#7d8598;margin-top:1px}
+  .menu{padding:12px 10px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13.5px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .menu-item:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .mi-icon{font-size:15px;width:18px;text-align:center}
+  .star{margin-left:auto;color:#ffcb45;font-size:12px}
+  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ---------- 右侧内容区 ---------- */
+  .content{flex:1;min-width:0;padding:22px 26px 40px}
+  .view{display:none}
+  .view.active{display:block}
+
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+  .page-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .head-actions{display:flex;align-items:center;gap:8px}
+  .last-updated{font-size:12px;color:var(--text-3);margin-right:4px}
+
+  /* 按钮 */
+  .btn{font-family:inherit;font-size:12.5px;padding:7px 13px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+  .btn:hover{background:#f7f8fa;border-color:#d2d7de}
+  .btn-sm{padding:5px 10px;font-size:12px}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn-primary:hover{background:#2f5fe0;border-color:#2f5fe0}
+  .btn-ghost-primary{color:var(--accent);border-color:#c6d6fd;background:var(--accent-soft)}
+  .btn-ghost-primary:hover{background:#dde8ff}
+  .btn-danger{color:var(--failed);border-color:#f3cfcf;background:#fff}
+  .btn-danger:hover{background:#fdf2f2}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .toggle.on{background:var(--accent-soft);border-color:#c6d6fd;color:var(--accent);font-weight:500}
+
+  /* 卡片 */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .toolbar{padding:14px 16px;border-bottom:1px solid var(--border-soft)}
+  .search{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .search:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .filter-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .select{font-family:inherit;font-size:12.5px;color:var(--text-2);padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:#fff;cursor:pointer}
+
+  /* ---------- 运行历史列表（第一层） ---------- */
+  .run-list{display:flex;flex-direction:column}
+  .run-card{display:flex;align-items:flex-start;gap:13px;padding:15px 16px;border-bottom:1px solid var(--border-soft);transition:background .12s}
+  .run-card:last-child{border-bottom:0}
+  .run-card:hover{background:#fafbfd}
+  .run-icon{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .run-main{flex:1;min-width:0}
+  .run-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .run-name{font-size:14px;font-weight:620}
+  .tag{font-size:11px;padding:2px 7px;border-radius:5px;background:#f1f3f7;color:#5b6474;border:1px solid #e6e9ef;white-space:nowrap}
+  .tag-op{background:#eef4ff;color:#3b6ef6;border-color:#d9e6ff}
+  .tag-wf{background:#f3eeff;color:#7a4bff;border-color:#e5dbff}
+  .tag-job{background:#eefaf3;color:#12a150;border-color:#d6f0e2}
+  .badge{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+  .badge-success{color:var(--success);background:var(--success-bg)}
+  .badge-failed{color:var(--failed);background:var(--failed-bg)}
+  .badge-running{color:var(--running);background:var(--running-bg)}
+  .badge-timeout{color:var(--timeout);background:var(--timeout-bg)}
+  .meta{font-size:12.5px;color:var(--text-3)}
+  .dot-sep{color:#d3d7de}
+  .run-sub{font-size:12.5px;color:var(--text-2);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
+  .run-sub .k{color:var(--text-3)}
+  .run-note{margin-top:8px;font-size:12.5px;padding:7px 11px;border-radius:7px;display:inline-flex;align-items:center;gap:6px}
+  .note-failed{background:#fdf4f4;color:#b3261e;border:1px solid #f7dede}
+  .note-timeout{background:#fdf6ec;color:#a35c05;border:1px solid #f5e3c9}
+  .note-warn{background:#fff9e8;color:#96660a;border:1px solid #f3e4bd}
+  .run-actions{display:flex;gap:6px;align-items:center;padding-top:2px}
+  .progress{margin-top:8px;height:4px;border-radius:99px;background:#eceff4;overflow:hidden;max-width:340px}
+  .progress>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#4b7dff,#7a9bff)}
+
+  /* ---------- 详情页通用 ---------- */
+  .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;margin-bottom:12px}
+  .back-link:hover{color:var(--accent)}
+  .detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  .detail-head h1{font-size:19px;font-weight:650}
+  .detail-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+
+  .ver-compare{display:none;align-items:center;gap:10px;background:#fff9e8;border:1px solid #f3e4bd;color:#96660a;border-radius:9px;padding:10px 14px;font-size:12.5px;margin-bottom:14px}
+  .ver-compare.show{display:flex}
+  .ver-compare .vc-links{margin-left:auto;display:flex;gap:6px}
+
+  .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;margin-bottom:14px}
+  .info-item{padding:12px 16px;border-right:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft)}
+  .info-k{font-size:11.5px;color:var(--text-3);margin-bottom:3px}
+  .info-v{font-size:13px;font-weight:500;word-break:break-all}
+
+  .section{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .section-title{font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:space-between}
+  .section-title:only-child{margin-bottom:0;padding-bottom:0;border-bottom:0}
+
+  .kv-line{display:flex;font-size:12.5px;padding:4px 0}
+  .kv-line .k{color:var(--text-3);width:120px;flex:0 0 120px}
+  .kv-line .v{color:var(--text);flex:1;min-width:0;word-break:break-all}
+
+  .pre-block{background:#f8f9fc;border:1px solid var(--border-soft);border-radius:8px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;line-height:1.7;max-height:280px;overflow:auto}
+
+  /* ---------- Workflow 执行详情（画布 + 节点详情，无 OP 库） ---------- */
+  .exec-dag{display:flex;background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden;min-height:420px;margin-bottom:14px}
+  .exec-dag-wrap{flex:1;min-width:0;display:flex;flex-direction:column}
+  .exec-dag-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-soft);font-size:12.5px;color:var(--text-3);background:#fff}
+  .exec-dag-toolbar .legend{display:flex;align-items:center;gap:14px;margin-left:auto;flex-wrap:wrap}
+  .legend-item{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-3)}
+  .legend-box{width:12px;height:12px;border-radius:3px;display:inline-block;border:1.5px solid}
+  .lb-success{background:#eafaf0;border-color:#16a34a}
+  .lb-failed{background:#fdecec;border-color:#dc2626}
+  .lb-timeout{background:#fdf3e3;border-color:#d97706}
+  .lb-running{background:#fef9e3;border-color:#eab308}
+  .lb-skip{background:#f3f4f6;border-color:#9ca3af}
+  .lb-system{background:#e8f7ee;border-color:#16a34a;border-radius:50%}
+
+  .exec-dag-scroll{flex:1;overflow:auto;background:
+    radial-gradient(circle, #e7eaf0 1px, transparent 1px) 0 0/18px 18px, #fcfcfe}
+  .exec-dag-canvas{position:relative;width:1100px;height:360px}
+  .exec-edges{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
+
+  .exec-node{position:absolute;width:130px;height:52px;background:#fff;border:2px solid #d8dde6;border-radius:9px;padding:5px 10px;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;transition:box-shadow .15s}
+  .exec-node:hover{box-shadow:0 2px 10px rgba(0,0,0,.1)}
+  .exec-node.selected{box-shadow:0 0 0 3px rgba(59,110,246,.2)}
+  .en-title{font-size:12.5px;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .en-meta{font-size:10.5px;color:var(--text-3);margin-top:1px}
+  .en-state{font-size:10.5px;margin-top:1px;font-weight:600}
+
+  /* 系统节点（Start / End） */
+  .exec-node.node-system{
+    width:110px;height:50px;
+    border-radius:25px;
+    background:#e8f7ee;
+    border-color:#16a34a;
+    padding:5px 8px;
+    text-align:center;
+    align-items:center;
+  }
+  .exec-node.node-system .en-title{color:#15803d;font-weight:700;font-size:13px}
+  .exec-node.node-system .en-meta{color:#4d9f68}
+  .exec-node.node-system.st-skip{
+    background:#f3f4f6;
+    border-color:#9ca3af;
+  }
+  .exec-node.node-system.st-skip .en-title{color:#6b7280}
+  .exec-node.node-system.st-skip .en-meta{color:#9ca3af}
+
+  /* 节点状态边框 */
+  .st-success{border-color:#16a34a;background:#f4fdf8}
+  .st-failed{border-color:#dc2626;background:#fdf6f6}
+  .st-timeout{border-color:#d97706;background:#fdf9f2}
+  .st-running{border-color:#eab308;background:#fefce8}
+  .st-skip{border-color:#9ca3af;background:#f9fafb}
+
+  .st-success .en-state{color:#16a34a}
+  .st-failed .en-state{color:#dc2626}
+  .st-timeout .en-state{color:#d97706}
+  .st-running .en-state{color:#ca8a04}
+  .st-skip .en-state{color:#9ca3af}
+
+  /* 右侧节点详情 */
+  .exec-node-panel{width:330px;flex:0 0 330px;border-left:1px solid var(--border);display:flex;flex-direction:column;background:#fcfcfe;position:relative}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-soft);font-size:13px;font-weight:600;background:#fff}
+  .panel-head .panel-collapse{margin-left:auto;border:0;background:none;color:var(--text-3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:5px}
+  .panel-head .panel-collapse:hover{background:#f1f3f7;color:var(--text)}
+  .panel-body{padding:16px;overflow-y:auto;flex:1}
+
+  /* 拖拽分隔线 */
+  .panel-resizer{position:absolute;left:-3px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:5}
+  .panel-resizer:hover{background:rgba(59,110,246,.15)}
+
+  .panel-empty{text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 10px;line-height:1.9}
+
+  .ps-label{display:block;font-size:11.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+  .ps-row{display:flex;font-size:12.5px;margin-bottom:7px}
+  .ps-k{color:var(--text-3);width:64px;flex:0 0 64px}
+  .ps-v{color:var(--text);flex:1;min-width:0;word-break:break-all}
+  .panel-section{margin-bottom:16px}
+  .panel-section:last-child{margin-bottom:0}
+  .panel-note{margin-top:10px;font-size:11.5px;color:#4a5a7a;background:#f4f7fd;border:1px solid #e2e9f7;border-radius:7px;padding:8px 10px}
+  .panel-note.warn{background:#fff8e9;border-color:#f3e4bd;color:#96660a}
+  .panel-note.system{background:#e8f7ee;border-color:#c8ead5;color:#15803d}
+  .panel-actions{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+  .panel-actions .btn{width:100%;justify-content:center;text-align:center}
+
+  /* ---------- 弹窗 ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .overlay.active{display:flex}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:520px;box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden;max-height:90vh;display:flex;flex-direction:column}
+  .modal-head{padding:16px 20px;border-bottom:1px solid var(--border-soft);font-size:15px;font-weight:620}
+  .modal-body{padding:20px;overflow-y:auto}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
+  .modal .field{margin-bottom:14px}
+  .modal .field:last-child{margin-bottom:0}
+  .modal .field label{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px;font-weight:500}
+  .modal .field input,.modal .field select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd}
+  .modal .field input:focus,.modal .field select:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+
+  .summary{background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.9}
+  .summary .k{color:var(--text-3);display:inline-block;min-width:88px}
+  .summary .v{color:var(--text)}
+
+  .option-list{display:flex;flex-direction:column;gap:10px}
+  .option-item{display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;cursor:pointer;transition:border-color .15s,background .15s}
+  .option-item:hover{border-color:#c9d3e5}
+  .option-item.selected{border-color:#b9cbfb;background:#f5f8ff}
+  .option-item input[type=radio]{accent-color:var(--accent);width:15px;height:15px;margin-top:2px}
+  .opt-title{font-size:13.5px;font-weight:600}
+  .opt-desc{font-size:12px;color:var(--text-3);margin-top:2px}
+
+  .required{color:var(--failed);margin-left:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== 左侧固定菜单栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>
+        <div class="brand-name">AI 自动化</div>
+        <div class="brand-desc">CLI 工作流编排器</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item" href="client.html"><span class="mi-icon">🧩</span>Client 管理</a>
+      <a class="menu-item" href="op.html"><span class="mi-icon">📦</span>OP 管理</a>
+      <a class="menu-item" href="workflow.html"><span class="mi-icon">📋</span>Workflow 管理</a>
+      <a class="menu-item" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
+      <a class="menu-item active" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
+    </nav>
+    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+  </aside>
+
+  <!-- ==================== 右侧内容区 ==================== -->
+  <main class="content">
+
+    <!-- ========== 第一层：运行历史列表（默认首页） ========== -->
+    <div class="view active" id="view-list">
+      <div class="page-head">
+        <div>
+          <h1>运行历史</h1>
+          <p class="sub">所有 Job Run 的统一执行记录 · 默认首页 · 记录版本快照</p>
+        </div>
+        <div class="head-actions">
+          <span class="last-updated" id="lastUpdated">最后更新 12:03:41</span>
+          <button class="btn" onclick="manualRefresh()">刷新</button>
+          <button class="btn toggle on" id="autoRefresh">自动刷新: 开</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <input class="search" placeholder="🔍 搜索 OP / Workflow / Job 名称 / 状态 / 版本..." />
+          <div class="filter-row">
+            <select class="select"><option>全部类型</option><option>OP</option><option>Workflow</option><option>Job</option></select>
+            <select class="select"><option>全部来源</option><option>持久 Job</option><option>虚拟 Job</option></select>
+            <select class="select"><option>全部触发</option><option>手动</option><option>定时</option><option>单次执行</option><option>重试</option></select>
+            <select class="select"><option>全部状态</option><option>成功</option><option>失败</option><option>运行中</option><option>超时</option></select>
+            <select class="select"><option>全部工作区</option><option>/path/to/workspace</option></select>
+            <select class="select"><option>全部版本</option><option>v1</option><option>v2</option><option>v3</option></select>
+            <select class="select"><option>时间 ▾</option><option>最近 1 小时</option><option>最近 24 小时</option><option>最近 7 天</option></select>
+          </div>
+        </div>
+
+        <div class="run-list">
+
+          <!-- 成功：OP 单次执行 → 进入 OP 执行详情 -->
+          <article class="run-card">
+            <div class="run-icon">📦</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">check_tests</span>
+                <span class="tag tag-op">OP v2</span>
+                <span class="badge badge-success">✓ 成功</span>
+                <span class="meta">12.3s</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">2 分钟前</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>虚拟 Job / 单次执行</span>
+                <span><span class="k">工作区：</span><span class="mono">/path/to/workspace</span></span>
+              </div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openOpDetail('check_tests','v2','v2','from-list')">查看</button>
+              <button class="btn btn-sm" onclick="openRerun('check_tests')">重跑</button>
+            </div>
+          </article>
+
+          <!-- 运行中：Workflow → 进入 Workflow 执行详情 -->
+          <article class="run-card">
+            <div class="run-icon">📋</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">deploy_workflow</span>
+                <span class="tag tag-wf">Workflow v2</span>
+                <span class="badge badge-running">● 运行中</span>
+                <span class="meta">step 3/5</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">5 分钟前</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>虚拟 Job / 单次执行</span>
+                <span><span class="k">当前节点：</span>node_deploy</span>
+              </div>
+              <div class="progress"><i style="width:60%"></i></div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openWfDetail('running')">查看</button>
+              <button class="btn btn-sm btn-danger" onclick="openTerminate('deploy_workflow')">终止</button>
+            </div>
+          </article>
+
+          <!-- 失败：Workflow，需要更新 → [重试] 置灰 -->
+          <article class="run-card">
+            <div class="run-icon">⏰</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">hourly_check</span>
+                <span class="tag tag-job">Job v1</span>
+                <span class="badge badge-failed">✗ 失败</span>
+                <span class="meta">8.1s</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">2 小时前</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>持久 Job / 手动</span>
+                <span><span class="k">target：</span>Workflow deploy_workflow v1</span>
+              </div>
+              <div class="run-note note-failed">✗ 失败节点：node_deploy（step 3/5）· exit code 1</div>
+              <div class="run-note note-warn">⚠ 需要更新，无法重试。请使用 [重跑]。</div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openWfDetail('failed')">查看</button>
+              <button class="btn btn-sm" disabled title="需要更新后才能重试">重试</button>
+              <button class="btn btn-sm" onclick="openRerun('hourly_check')">重跑</button>
+            </div>
+          </article>
+
+          <!-- 超时：Workflow，不可重试，只能重跑 -->
+          <article class="run-card">
+            <div class="run-icon">📋</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">deploy_workflow</span>
+                <span class="tag tag-wf">Workflow v2</span>
+                <span class="badge badge-timeout">⏱ 超时</span>
+                <span class="meta">137.5s</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">昨天 23:40</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>持久 Job / 定时</span>
+                <span><span class="k">target：</span>Workflow deploy_workflow v2</span>
+              </div>
+              <div class="run-note note-timeout">⏱ 超时节点：node_deploy · 引用 OP deploy（timeout = 120s）· 已终止整个 Run</div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openWfDetail('timeout')">查看</button>
+              <button class="btn btn-sm disabled" disabled title="超时不可重试">重试</button>
+              <button class="btn btn-sm" onclick="openRerun('deploy_workflow')">重跑</button>
+            </div>
+          </article>
+
+          <!-- 成功：OP Job（daily_cleanup） -->
+          <article class="run-card">
+            <div class="run-icon">⏰</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">daily_cleanup</span>
+                <span class="tag tag-job">Job v2</span>
+                <span class="badge badge-success">✓ 成功</span>
+                <span class="meta">3.2s</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">1 周前</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>持久 Job / 定时</span>
+                <span><span class="k">target：</span>OP clean_logs v2</span>
+              </div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openOpDetail('clean_logs','v2','v3','from-list')">查看</button>
+              <button class="btn btn-sm" onclick="openRerun('daily_cleanup')">重跑</button>
+            </div>
+          </article>
+
+          <!-- 失败：OP Job（data_sync），版本已更新 → 无 [重试]，只能 [重跑] -->
+          <article class="run-card">
+            <div class="run-icon">⏰</div>
+            <div class="run-main">
+              <div class="run-title">
+                <span class="run-name">data_sync</span>
+                <span class="tag tag-job">Job v2</span>
+                <span class="badge badge-failed">✗ 失败</span>
+                <span class="meta">4.1s</span>
+                <span class="dot-sep">·</span>
+                <span class="meta">5 小时前</span>
+              </div>
+              <div class="run-sub">
+                <span><span class="k">来源：</span>持久 Job / 定时</span>
+                <span><span class="k">target：</span>OP process_data v2</span>
+              </div>
+              <div class="run-note note-warn">⚠ 版本已更新（失败时 v2 / 当前 v3），无法重试，请使用 [重跑]</div>
+            </div>
+            <div class="run-actions">
+              <button class="btn btn-sm" onclick="openOpDetail('process_data','v2','v3','from-list')">查看</button>
+              <button class="btn btn-sm" onclick="openRerun('data_sync')">重跑</button>
+            </div>
+          </article>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== 第二层 A / 第三层：OP 执行详情 ========== -->
+    <div class="view" id="view-op-detail">
+      <button class="back-link" id="opBackBtn" onclick="closeView()">← 返回</button>
+      <div class="detail-head">
+        <div>
+          <h1>执行详情: <span id="opDetailName">check_tests</span></h1>
+          <p class="sub" id="opDetailTrigger">触发: 虚拟 Job / 单次执行</p>
+        </div>
+        <div class="head-actions">
+          <button class="btn" id="opRerunBtn" onclick="openRerun('check_tests')">重跑</button>
+        </div>
+      </div>
+
+      <!-- 版本对比提示条 -->
+      <div class="ver-compare" id="opVerCompare">
+        <span>⚠</span>
+        <span>本次执行使用的版本: <strong id="opExecVer">v2</strong> · 当前最新版本: <strong id="opCurVer">v3</strong></span>
+        <div class="vc-links">
+          <button class="btn btn-sm">查看 v2 定义</button>
+          <button class="btn btn-sm">查看 v3 定义</button>
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-item"><div class="info-k">类型</div><div class="info-v">OP</div></div>
+        <div class="info-item"><div class="info-k">执行版本</div><div class="info-v" id="opInfoExecVer">v2（快照）</div></div>
+        <div class="info-item"><div class="info-k">状态</div><div class="info-v"><span class="badge badge-success">✓ 成功</span></div></div>
+        <div class="info-item"><div class="info-k">耗时</div><div class="info-v">12.3s</div></div>
+        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono">/path/to/workspace</div></div>
+        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="opInfoTrigger">虚拟 Job / 单次执行</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">入参</div>
+        <div class="kv-line"><span class="k">test_cmd</span><span class="v mono">npm run test</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">正文</div>
+        <div class="pre-block">在当前工作区运行测试，并输出结果 JSON</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">输出</div>
+        <div class="pre-block">23 tests passed, 0 failed</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">出参</div>
+        <div class="kv-line"><span class="k">passed</span><span class="v mono">true</span></div>
+        <div class="kv-line"><span class="k">count</span><span class="v mono">23</span></div>
+        <div class="kv-line"><span class="k">result</span><span class="v mono">{"passed":true,"count":23}</span></div>
+      </div>
+    </div>
+
+    <!-- ========== 第二层 B：Workflow 执行详情（画布 + 节点详情，无 OP 库） ========== -->
+    <div class="view" id="view-wf-detail">
+      <button class="back-link" onclick="closeView()">← 返回</button>
+      <div class="detail-head">
+        <div>
+          <h1>执行详情: <span id="wfDetailName">deploy_workflow</span></h1>
+          <p class="sub" id="wfDetailTrigger">触发: 持久 Job / 手动</p>
+        </div>
+        <div class="head-actions" id="wfHeadActions">
+          <!-- 由 JS 渲染：失败 → [重跑]（[重试] 在失败节点面板内），运行中 → [终止]，超时 → [重跑] -->
+        </div>
+      </div>
+
+      <!-- 版本对比提示条 -->
+      <div class="ver-compare" id="wfVerCompare">
+        <span>⚠</span>
+        <span>本次执行使用的版本: <strong id="wfExecVer">v1</strong> · 当前最新版本: <strong id="wfCurVer">v2</strong></span>
+        <div class="vc-links">
+          <button class="btn btn-sm">查看 v1 定义</button>
+          <button class="btn btn-sm">查看 v2 定义</button>
+        </div>
+      </div>
+
+      <!-- 失败 / 超时提示条 -->
+      <div class="run-note note-failed" id="wfFailBar" style="display:none;margin-bottom:14px">
+        ✗ 该 Workflow 执行失败。失败节点: node_deploy
+      </div>
+      <div class="run-note note-timeout" id="wfTimeoutBar" style="display:none;margin-bottom:14px">
+        ⏱ 该 Workflow 执行超时。超时节点: node_deploy · 引用 OP deploy（timeout = 120s）
+      </div>
+
+      <div class="info-grid">
+        <div class="info-item"><div class="info-k">类型</div><div class="info-v">Workflow</div></div>
+        <div class="info-item"><div class="info-k">执行版本</div><div class="info-v" id="wfInfoExecVer">v1（快照）</div></div>
+        <div class="info-item"><div class="info-k">状态</div><div class="info-v" id="wfInfoStatus"><span class="badge badge-failed">✗ 失败</span></div></div>
+        <div class="info-item"><div class="info-k">耗时</div><div class="info-v" id="wfInfoDuration">8.1s</div></div>
+        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono">/path/to/workspace</div></div>
+        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="wfInfoTrigger">持久 Job / 手动</div></div>
+      </div>
+
+      <!-- 画布 + 节点详情（无 OP 库；只读展示执行状态，含固定 Start / End 节点） -->
+      <div class="exec-dag" id="execDag">
+        <div class="exec-dag-wrap">
+          <div class="exec-dag-toolbar">
+            <span>画布（只读展示执行状态）</span>
+            <div class="legend">
+              <span class="legend-item"><i class="legend-box lb-system"></i>系统节点</span>
+              <span class="legend-item"><i class="legend-box lb-success"></i>成功</span>
+              <span class="legend-item"><i class="legend-box lb-failed"></i>失败</span>
+              <span class="legend-item"><i class="legend-box lb-timeout"></i>超时</span>
+              <span class="legend-item"><i class="legend-box lb-running"></i>运行中</span>
+              <span class="legend-item"><i class="legend-box lb-skip"></i>未执行 / 跳过</span>
+            </div>
+          </div>
+
+          <div class="exec-dag-scroll">
+            <div class="exec-dag-canvas" id="execCanvas">
+              <!-- 连线（SVG，静态示例：执行到 node_deploy 失败） -->
+              <svg class="exec-edges" id="execEdges" width="1100" height="360" viewBox="0 0 1100 360">
+                <defs>
+                  <marker id="x-arr-g" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 Z" fill="#16a34a"/>
+                  </marker>
+                  <marker id="x-arr-r" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 Z" fill="#dc2626"/>
+                  </marker>
+                  <marker id="x-arr-b" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 Z" fill="#3b6ef6"/>
+                  </marker>
+                  <marker id="x-arr-gray" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 Z" fill="#c3c8d0"/>
+                  </marker>
+                </defs>
+
+                <!-- Start 🟢 → node_check（已执行） -->
+                <path d="M130 180 C 150 180 150 76 180 76"
+                      stroke="#16a34a" stroke-width="2" fill="none"
+                      marker-end="url(#x-arr-g)"/>
+
+                <!-- node_check 🟢 → node_review（已执行） -->
+                <path d="M310 76 L360 76"
+                      stroke="#16a34a" stroke-width="2" fill="none"
+                      marker-end="url(#x-arr-g)"/>
+
+                <!-- node_check 🔴 → node_notify_fail（未执行，灰色虚线） -->
+                <path d="M310 96 C 330 96 330 256 360 256"
+                      stroke="#c3c8d0" stroke-width="2" fill="none"
+                      stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
+
+                <!-- node_review 🟢 → node_deploy（已执行） -->
+                <path d="M490 76 L540 76"
+                      stroke="#16a34a" stroke-width="2" fill="none"
+                      marker-end="url(#x-arr-g)"/>
+
+                <!-- node_deploy 🟢 → node_notify（未执行，灰色虚线） -->
+                <path d="M670 76 L720 76"
+                      stroke="#c3c8d0" stroke-width="2" fill="none"
+                      stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
+
+                <!-- node_notify 🟢 → End（未到达，灰色虚线） -->
+                <path d="M850 76 C 920 76 920 180 940 180"
+                      stroke="#c3c8d0" stroke-width="2" fill="none"
+                      stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
+
+                <!-- node_notify_fail 🟢 → End（未到达，灰色虚线） -->
+                <path d="M490 256 C 750 256 750 180 940 180"
+                      stroke="#c3c8d0" stroke-width="2" fill="none"
+                      stroke-dasharray="5 4" marker-end="url(#x-arr-gray)"/>
+              </svg>
+              <!-- 节点由 JS 渲染 -->
+            </div>
+          </div>
+        </div>
+
+        <aside class="exec-node-panel" id="execNodePanel">
+          <div class="panel-resizer" id="execPanelResizer"></div>
+          <div class="panel-head">
+            <span>节点详情</span>
+            <button class="panel-collapse" onclick="toggleExecPanel()" title="收起面板">⇥</button>
+          </div>
+          <div class="panel-body" id="execNodePanelBody"></div>
+        </aside>
+      </div>
+
+      <div style="text-align:right">
+        <button class="btn" onclick="toggleExecPanel()" id="execExpandBtn" style="display:none">⇤ 展开节点详情</button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ==================== 重试对话框 ==================== -->
+<div class="overlay" id="retryModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">重试: <span id="retryJobName">hourly_check</span></div>
+    <div class="modal-body">
+      <div class="summary">
+        <div><span class="k">执行时间:</span><span class="v">2 小时前</span></div>
+        <div><span class="k">失败节点:</span><span class="v">node_deploy (step 3/5)</span></div>
+        <div><span class="k">失败原因:</span><span class="v">exit code 1</span></div>
+      </div>
+      <div style="margin-top:16px;font-size:13px;color:var(--text-2);margin-bottom:8px">重试方式</div>
+      <div class="option-list">
+        <label class="option-item selected">
+          <input type="radio" name="retryMode" checked />
+          <div>
+            <div class="opt-title">从失败节点开始重试</div>
+            <div class="opt-desc">固定方式</div>
+          </div>
+        </label>
+      </div>
+      <div style="margin-top:16px;font-size:13px;color:var(--text-2);margin-bottom:8px">版本使用</div>
+      <div class="option-list">
+        <label class="option-item selected">
+          <input type="radio" name="retryVer" checked />
+          <div>
+            <div class="opt-title">使用最新版本</div>
+            <div class="opt-desc">固定方式（= 快照版本，版本一致时可用）</div>
+          </div>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('retryModal')">取消</button>
+      <button class="btn btn-primary" onclick="doRetry()">确认重试</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 重跑对话框（固定使用最新版本） ==================== -->
+<div class="overlay" id="rerunModal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-head">重跑: <span id="rerunName">deploy_workflow</span></div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:10px">版本使用</div>
+      <div class="option-list">
+        <label class="option-item selected">
+          <input type="radio" name="rerunVer" value="latest" checked />
+          <div>
+            <div class="opt-title">使用最新版本</div>
+            <div class="opt-desc">固定方式，使用当前最新版本重新从头执行</div>
+          </div>
+        </label>
+      </div>
+      <div style="margin-top:14px;font-size:12.5px;color:#4a5a7a;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:10px 13px">
+        ℹ 重跑将从头开始执行，创建新的 Job Run 并进入运行历史。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('rerunModal')">取消</button>
+      <button class="btn btn-primary" onclick="doRerun()">确认重跑</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 终止确认弹窗 ==================== -->
+<div class="overlay" id="terminateModal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">确认终止</div>
+    <div class="modal-body">
+      <div style="font-size:13px;line-height:1.9">
+        即将终止正在运行的 Run：<strong id="terminateName">deploy_workflow</strong>
+      </div>
+      <div style="margin-top:12px;font-size:12.5px;color:#96660a;background:#fff8e9;border:1px solid #f3e4bd;border-radius:8px;padding:10px 13px">
+        ⚠ 终止后当前 Run 状态为 cancelled，未执行的节点标记为 skipped，不支持重试，只能重跑。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('terminateModal')">取消</button>
+      <button class="btn btn-danger" onclick="doTerminate()">确认终止</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ==================== 视图切换 ==================== */
+  var views = {
+    list: document.getElementById('view-list'),
+    opDetail: document.getElementById('view-op-detail'),
+    wfDetail: document.getElementById('view-wf-detail')
+  };
+
+  function showView(name) {
+    Object.keys(views).forEach(function (k) {
+      views[k].classList.toggle('active', k === name);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeView() {
+    showView('list');
+  }
+
+  /* ==================== 自动刷新开关（前端轮询，不使用事件流） ==================== */
+  var autoRefreshBtn = document.getElementById('autoRefresh');
+  autoRefreshBtn.addEventListener('click', function () {
+    autoRefreshBtn.classList.toggle('on');
+    autoRefreshBtn.textContent = autoRefreshBtn.classList.contains('on') ? '自动刷新: 开' : '自动刷新: 关';
+  });
+
+  function manualRefresh() {
+    var el = document.getElementById('lastUpdated');
+    var now = new Date();
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+    el.textContent = '最后更新 ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  }
+
+  /* ==================== OP 执行详情 ==================== */
+  function openOpDetail(name, execVer, curVer, from) {
+    document.getElementById('opDetailName').textContent = name;
+    document.getElementById('opExecVer').textContent = execVer;
+    document.getElementById('opCurVer').textContent = curVer;
+    document.getElementById('opInfoExecVer').textContent = execVer + '（快照）';
+
+    var verCompare = document.getElementById('opVerCompare');
+    verCompare.classList.toggle('show', execVer !== curVer);
+
+    var backBtn = document.getElementById('opBackBtn');
+    if (from === 'from-wf') {
+      backBtn.textContent = '← 返回 Workflow 执行详情';
+      document.getElementById('opDetailTrigger').textContent = '触发: Workflow node_deploy';
+      document.getElementById('opInfoTrigger').textContent = 'Workflow node_deploy';
+    } else {
+      backBtn.textContent = '← 返回';
+      document.getElementById('opDetailTrigger').textContent = '触发: 虚拟 Job / 单次执行';
+      document.getElementById('opInfoTrigger').textContent = '虚拟 Job / 单次执行';
+    }
+
+    backBtn.onclick = function () {
+      if (from === 'from-wf') {
+        showView('wfDetail');
+      } else {
+        closeView();
+      }
+    };
+
+    showView('opDetail');
+  }
+
+  /* ==================== Workflow 执行详情 ==================== */
+
+  /* 执行画布节点（含固定 Start / End） */
+  var EXEC_NODES = {
+    '__start__': {
+      kind: 'start',
+      status: 'success',       // Start 已开始
+      x: 20, y: 155
+    },
+    node_check: {
+      kind: 'op',
+      op: 'check_tests', opVersion: 2, type: 'prompt', timeout: 300,
+      status: 'success', duration: '12.3s', exitCode: 0, error: null,
+      x: 180, y: 50
+    },
+    node_review: {
+      kind: 'op',
+      op: 'review', opVersion: 2, type: 'prompt', timeout: 600,
+      status: 'success', duration: '5.2s', exitCode: 0, error: null,
+      x: 360, y: 50
+    },
+    node_deploy: {
+      kind: 'op',
+      op: 'deploy', opVersion: 2, type: 'prompt', timeout: 120,
+      status: 'failed', duration: '2.1s', exitCode: 1, error: 'exit code 1',
+      x: 540, y: 50
+    },
+    node_notify: {
+      kind: 'op',
+      op: 'notify', opVersion: 1, type: 'prompt', timeout: 60,
+      status: 'skipped', duration: '—', exitCode: null, error: null,
+      x: 720, y: 50
+    },
+    node_notify_fail: {
+      kind: 'op',
+      op: 'notify_fail', opVersion: 1, type: 'prompt', timeout: 60,
+      status: 'skipped', duration: '—', exitCode: null, error: null,
+      x: 360, y: 230
+    },
+    '__end__': {
+      kind: 'end',
+      status: 'skipped',       // End 未到达
+      x: 940, y: 155
+    }
+  };
+
+  var execSelectedNode = 'node_deploy';
+  var execMode = 'failed';     // running | failed | timeout
+  var execCanRetry = false;    // 失败场景：hourly_check 需要更新，故不可重试
+
+  function openWfDetail(mode) {
+    execMode = mode || 'failed';
+
+    /* 按模式调整节点状态 */
+    if (mode === 'timeout') {
+      EXEC_NODES.__start__.status = 'success';
+      EXEC_NODES.node_check.status = 'success';
+      EXEC_NODES.node_review.status = 'success';
+      EXEC_NODES.node_deploy.status = 'timeout';
+      EXEC_NODES.node_deploy.duration = '120.0s';
+      EXEC_NODES.node_deploy.exitCode = null;
+      EXEC_NODES.node_deploy.error = '进程被 kill';
+      EXEC_NODES.node_notify.status = 'skipped';
+      EXEC_NODES.node_notify_fail.status = 'skipped';
+      EXEC_NODES.__end__.status = 'skipped';
+    } else if (mode === 'running') {
+      EXEC_NODES.__start__.status = 'success';
+      EXEC_NODES.node_check.status = 'success';
+      EXEC_NODES.node_review.status = 'success';
+      EXEC_NODES.node_deploy.status = 'running';
+      EXEC_NODES.node_deploy.duration = '运行中';
+      EXEC_NODES.node_deploy.exitCode = null;
+      EXEC_NODES.node_deploy.error = null;
+      EXEC_NODES.node_notify.status = 'skipped';
+      EXEC_NODES.node_notify_fail.status = 'skipped';
+      EXEC_NODES.__end__.status = 'skipped';
+    } else {
+      /* failed */
+      EXEC_NODES.__start__.status = 'success';
+      EXEC_NODES.node_check.status = 'success';
+      EXEC_NODES.node_review.status = 'success';
+      EXEC_NODES.node_deploy.status = 'failed';
+      EXEC_NODES.node_deploy.duration = '2.1s';
+      EXEC_NODES.node_deploy.exitCode = 1;
+      EXEC_NODES.node_deploy.error = 'exit code 1';
+      EXEC_NODES.node_notify.status = 'skipped';
+      EXEC_NODES.node_notify_fail.status = 'skipped';
+      EXEC_NODES.__end__.status = 'skipped';
+    }
+
+    /* 头部状态 */
+    var statusHtml = '';
+    if (mode === 'timeout') {
+      statusHtml = '<span class="badge badge-timeout">⏱ 超时</span>';
+      document.getElementById('wfInfoDuration').textContent = '137.5s';
+      document.getElementById('wfInfoTrigger').textContent = '持久 Job / 定时';
+      document.getElementById('wfDetailTrigger').textContent = '触发: 持久 Job / 定时';
+      document.getElementById('wfInfoExecVer').textContent = 'v2（快照）';
+      document.getElementById('wfFailBar').style.display = 'none';
+      document.getElementById('wfTimeoutBar').style.display = 'inline-flex';
+      execCanRetry = false;
+    } else if (mode === 'running') {
+      statusHtml = '<span class="badge badge-running">● 运行中</span>';
+      document.getElementById('wfInfoDuration').textContent = '—';
+      document.getElementById('wfInfoTrigger').textContent = '虚拟 Job / 单次执行';
+      document.getElementById('wfDetailTrigger').textContent = '触发: 虚拟 Job / 单次执行';
+      document.getElementById('wfInfoExecVer').textContent = 'v2（快照）';
+      document.getElementById('wfFailBar').style.display = 'none';
+      document.getElementById('wfTimeoutBar').style.display = 'none';
+      execCanRetry = false;
+    } else {
+      /* failed */
+      statusHtml = '<span class="badge badge-failed">✗ 失败</span>';
+      document.getElementById('wfInfoDuration').textContent = '8.1s';
+      document.getElementById('wfInfoTrigger').textContent = '持久 Job / 手动';
+      document.getElementById('wfDetailTrigger').textContent = '触发: 持久 Job / 手动';
+      document.getElementById('wfInfoExecVer').textContent = 'v1（快照）';
+      document.getElementById('wfFailBar').style.display = 'inline-flex';
+      document.getElementById('wfTimeoutBar').style.display = 'none';
+      execCanRetry = false; // hourly_check 需要更新，禁止重试
+    }
+    document.getElementById('wfInfoStatus').innerHTML = statusHtml;
+
+    /* 版本对比（仅失败 + 版本已更新时显示） */
+    var verCompare = document.getElementById('wfVerCompare');
+    verCompare.classList.toggle('show', mode === 'failed');
+
+    /* 头部操作按钮：重试不在顶部，仅在失败节点面板内；
+       失败 → [重跑]；运行中 → [终止]；超时 → [重跑] */
+    var headActions = document.getElementById('wfHeadActions');
+    if (mode === 'failed') {
+      headActions.innerHTML = '<button class="btn" onclick="openRerun(\'hourly_check\')">重跑</button>';
+    } else if (mode === 'running') {
+      headActions.innerHTML = '<button class="btn btn-danger" onclick="openTerminate(\'deploy_workflow\')">终止</button>';
+    } else {
+      headActions.innerHTML = '<button class="btn" onclick="openRerun(\'deploy_workflow\')">重跑</button>';
+    }
+
+    /* 渲染画布 + 节点详情 */
+    renderExecCanvas();
+    execSelectedNode = 'node_deploy';
+    renderExecNodePanel(execSelectedNode);
+
+    document.getElementById('execDag').classList.remove('panel-collapsed');
+    document.getElementById('execExpandBtn').style.display = 'none';
+    document.getElementById('execNodePanel').style.display = 'flex';
+
+    showView('wfDetail');
+  }
+
+  function renderExecCanvas() {
+    var canvas = document.getElementById('execCanvas');
+    canvas.querySelectorAll('.exec-node').forEach(function (n) { n.remove(); });
+
+    Object.keys(EXEC_NODES).forEach(function (id) {
+      var n = EXEC_NODES[id];
+      var el = document.createElement('div');
+      var statusClass = 'st-' + n.status;
+      var sysClass = (n.kind === 'start' || n.kind === 'end') ? ' node-system' : '';
+      el.className = 'exec-node' + sysClass + ' ' + statusClass + (id === execSelectedNode ? ' selected' : '');
+      el.dataset.node = id;
+      el.style.left = n.x + 'px';
+      el.style.top = n.y + 'px';
+
+      if (n.kind === 'start') {
+        el.innerHTML =
+          '<div class="en-title">▶ Start</div>' +
+          '<div class="en-meta">' + (n.status === 'success' ? '已开始' : '未开始') + '</div>';
+      } else if (n.kind === 'end') {
+        el.innerHTML =
+          '<div class="en-title">End ◉</div>' +
+          '<div class="en-meta">' + (n.status === 'success' ? '已到达' : '未到达') + '</div>';
+      } else {
+        var stateText = '';
+        if (n.status === 'success') stateText = '✓ 成功';
+        else if (n.status === 'failed') stateText = '✗ 失败';
+        else if (n.status === 'timeout') stateText = '⏱ 超时';
+        else if (n.status === 'running') stateText = '● 运行中';
+        else stateText = '⊘ 未执行';
+
+        el.innerHTML =
+          '<div class="en-title">' + n.op + '</div>' +
+          '<div class="en-meta">OP v' + n.opVersion + ' · ' + n.timeout + 's</div>' +
+          '<div class="en-state">' + stateText + '</div>';
+      }
+
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        execSelectedNode = id;
+        document.querySelectorAll('.exec-node').forEach(function (x) {
+          x.classList.toggle('selected', x.dataset.node === id);
+        });
+        renderExecNodePanel(id);
+      });
+
+      canvas.appendChild(el);
+    });
+  }
+
+  function toggleExecPanel() {
+    var card = document.getElementById('execDag');
+    var btn = document.getElementById('execExpandBtn');
+    var panel = document.getElementById('execNodePanel');
+    var collapsed = card.classList.toggle('panel-collapsed');
+    if (collapsed) {
+      panel.style.display = 'none';
+      btn.style.display = 'inline-block';
+    } else {
+      panel.style.display = 'flex';
+      btn.style.display = 'none';
+    }
+  }
+
+  function renderExecNodePanel(id) {
+    var body = document.getElementById('execNodePanelBody');
+
+    if (!id || !EXEC_NODES[id]) {
+      body.innerHTML = '<div class="panel-empty">请在画布中选择一个节点<br/>以查看其执行状态</div>';
+      return;
+    }
+
+    var n = EXEC_NODES[id];
+
+    /* Start 节点：只读展示开始状态 */
+    if (n.kind === 'start') {
+      body.innerHTML =
+        '<div class="panel-section">' +
+          '<div class="ps-row"><span class="ps-k">节点</span><span class="ps-v">Start</span></div>' +
+          '<div class="ps-row"><span class="ps-k">类型</span><span class="ps-v">开始节点（系统节点）</span></div>' +
+        '</div>' +
+        '<div class="panel-section">' +
+          '<label class="ps-label">执行状态</label>' +
+          '<div class="ps-row"><span class="ps-k">状态</span><span class="ps-v">' +
+            (n.status === 'success' ? '<span class="badge badge-success">✓ 已开始</span>' : '<span class="tag">⊘ 未开始</span>') +
+          '</span></div>' +
+        '</div>' +
+        '<div class="panel-note system">ℹ 系统节点不产生 StepRecord，不进入步骤列表</div>';
+      return;
+    }
+
+    /* End 节点：只读展示到达状态 */
+    if (n.kind === 'end') {
+      body.innerHTML =
+        '<div class="panel-section">' +
+          '<div class="ps-row"><span class="ps-k">节点</span><span class="ps-v">End</span></div>' +
+          '<div class="ps-row"><span class="ps-k">类型</span><span class="ps-v">结束节点（系统节点）</span></div>' +
+        '</div>' +
+        '<div class="panel-section">' +
+          '<label class="ps-label">执行状态</label>' +
+          '<div class="ps-row"><span class="ps-k">状态</span><span class="ps-v">' +
+            (n.status === 'success' ? '<span class="badge badge-success">✓ 已到达</span>' : '<span class="tag">⊘ 未到达</span>') +
+          '</span></div>' +
+        '</div>' +
+        '<div class="panel-note system">ℹ 系统节点不产生 StepRecord，不进入步骤列表</div>';
+      return;
+    }
+
+    /* ===== OP 节点 ===== */
+    var statusBadge = '';
+    if (n.status === 'success') statusBadge = '<span class="badge badge-success">✓ 成功</span>';
+    else if (n.status === 'failed') statusBadge = '<span class="badge badge-failed">✗ 失败</span>';
+    else if (n.status === 'timeout') statusBadge = '<span class="badge badge-timeout">⏱ 超时</span>';
+    else if (n.status === 'running') statusBadge = '<span class="badge badge-running">● 运行中</span>';
+    else statusBadge = '<span class="tag">⊘ 未执行</span>';
+
+    var html = '';
+
+    html += '<div class="panel-section">';
+    html += '<div class="ps-row"><span class="ps-k">节点</span><span class="ps-v mono">' + id + '</span></div>';
+    html += '<div class="ps-row"><span class="ps-k">OP</span><span class="ps-v">' + n.op + ' <span class="tag tag-op">OP v' + n.opVersion + '</span></span></div>';
+    html += '<div class="ps-row"><span class="ps-k">超时</span><span class="ps-v">' + n.timeout + 's</span></div>';
+    html += '</div>';
+
+    html += '<div class="panel-section">';
+    html += '<label class="ps-label">执行状态</label>';
+    html += '<div class="ps-row"><span class="ps-k">状态</span><span class="ps-v">' + statusBadge + '</span></div>';
+    html += '<div class="ps-row"><span class="ps-k">耗时</span><span class="ps-v">' + n.duration + '</span></div>';
+    if (n.exitCode !== null) {
+      html += '<div class="ps-row"><span class="ps-k">退出码</span><span class="ps-v mono">' + n.exitCode + '</span></div>';
+    }
+    if (n.error) {
+      html += '<div class="ps-row"><span class="ps-k">错误</span><span class="ps-v" style="color:var(--failed)">' + n.error + '</span></div>';
+    }
+    html += '</div>';
+
+    /* 失败节点：重试入口放在节点详情面板内（顶部不放） */
+    if (execMode === 'failed' && n.status === 'failed') {
+      html += '<div class="panel-actions">';
+      if (execCanRetry) {
+        html += '<button class="btn btn-ghost-primary" onclick="openRetry(\'hourly_check\')">重试 · 从此节点开始</button>';
+      } else {
+        html += '<button class="btn btn-ghost-primary" disabled title="需要更新后才能重试">重试 · 从此节点开始</button>';
+      }
+      html += '<button class="btn" onclick="openOpDetail(\'' + n.op + '\',\'v' + n.opVersion + '\',\'v' + (n.opVersion + 1) + '\',\'from-wf\')">查看 OP 执行详情</button>';
+      html += '</div>';
+      if (execCanRetry) {
+        html += '<div class="panel-note">ℹ 重试将从该失败节点开始，使用最新版本（= 快照版本）</div>';
+      } else {
+        html += '<div class="panel-note warn">⚠ 该 Workflow 需要更新，无法重试，请使用 [重跑]</div>';
+      }
+    } else if (n.status === 'success' || n.status === 'failed' || n.status === 'timeout') {
+      html += '<div class="panel-actions">';
+      html += '<button class="btn" onclick="openOpDetail(\'' + n.op + '\',\'v' + n.opVersion + '\',\'v' + (n.opVersion + 1) + '\',\'from-wf\')">查看 OP 执行详情</button>';
+      html += '</div>';
+    }
+
+    body.innerHTML = html;
+  }
+
+  /* ==================== 节点详情面板拖拽宽度 ==================== */
+  (function bindPanelResizer() {
+    var resizer = document.getElementById('execPanelResizer');
+    var panel = document.getElementById('execNodePanel');
+    var dragging = false;
+
+    resizer.addEventListener('mousedown', function (e) {
+      dragging = true;
+      e.preventDefault();
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      var rect = panel.getBoundingClientRect();
+      var newWidth = rect.right - e.clientX;
+      newWidth = Math.max(240, Math.min(newWidth, 560));
+      panel.style.width = newWidth + 'px';
+      panel.style.flexBasis = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', function () {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  })();
+
+  /* ==================== 重试 ==================== */
+  function openRetry(name) {
+    document.getElementById('retryJobName').textContent = name;
+    openModal('retryModal');
+  }
+
+  function doRetry() {
+    closeModal('retryModal');
+    closeView();
+  }
+
+  /* ==================== 重跑（固定使用最新版本） ==================== */
+  function openRerun(name) {
+    document.getElementById('rerunName').textContent = name;
+    openModal('rerunModal');
+  }
+
+  function doRerun() {
+    closeModal('rerunModal');
+    closeView();
+  }
+
+  /* ==================== 终止 ==================== */
+  function openTerminate(name) {
+    document.getElementById('terminateName').textContent = name;
+    openModal('terminateModal');
+  }
+
+  function doTerminate() {
+    closeModal('terminateModal');
+    closeView();
+  }
+
+  /* ==================== 弹窗控制 ==================== */
+  function openModal(id) {
+    document.getElementById(id).classList.add('active');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('active');
+  }
+  document.querySelectorAll('.overlay').forEach(function (ov) {
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) ov.classList.remove('active');
+    });
+  });
+
+  /* ==================== 初始化 ==================== */
+  renderExecCanvas();
+  renderExecNodePanel('node_deploy');
+</script>
+</body>
+</html>

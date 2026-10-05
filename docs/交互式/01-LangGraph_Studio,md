@@ -1,0 +1,131 @@
+# LangGraph 与 LangGraph Studio 内网 Human-in-the-Loop 场景评估
+
+## 一、我的使用场景
+
+- 在内网环境下使用。
+- 使用的 Agent CLI 是内部工具。
+- Agent CLI 使用时，有数据和权限校验要求。
+- 如果在容器中或挂载到容器中使用 Agent CLI，会有权限校验不过的问题。
+- 需求：在办公电脑上直接运行，从而直接调用本地的工具。
+
+核心诉求：**CLI 触发工作流，执行中 Agent 可暂停提问，我回答后从断点继续；同时尽量不依赖容器，能调用本地工具，满足内网与权限校验要求。**
+
+## 二、LangGraph 介绍
+
+### 2.1 LangGraph 是什么？
+
+LangGraph 是一个**低层级的编排框架和运行时（Runtime）**，不是开箱即用的完整工具产品。
+
+- 官方定位：用于构建、管理和部署长期运行、有状态智能体的底层编排框架和运行时。
+- 使用方式：需要自己编写代码（Python / JS）来定义工作流的图结构、节点逻辑和状态管理。
+- 与 LangChain 的关系：LangChain 是更高层的 Agent 框架，LangGraph 是其底层编排引擎；也可以脱离 LangChain 单独使用 LangGraph。
+- 生态中提供了一些可直接使用的组件：
+  - LangGraph CLI：本地构建、打包、运行图。
+  - LangGraph Studio：可视化、交互、调试的 Agent 开发 IDE。
+  - LangGraph Platform：商业化部署方案，有 Self-Hosted Lite 免费模式（每年 100 万次节点执行限制）。
+
+### 2.2 核心概念
+
+- **节点（Nodes）**：一个具体操作步骤，例如调用 LLM、执行工具、处理数据。
+- **边（Edges）**：定义节点之间的执行顺序和流转逻辑，可创建循环和条件分支。
+- **状态（State）**：贯穿整个工作流的数据对象，每个节点可读取和更新，实现复杂状态管理。
+
+这种设计允许将确定性的代码逻辑与 LLM 驱动的灵活步骤混合编排，获得细粒度控制权。
+
+### 2.3 Human-in-the-Loop（HITL）工作机制
+
+LangGraph 内置 HITL 能力，核心机制是 `interrupt()` 函数和 Checkpointer 持久化层。
+
+1. **触发暂停**：在任意节点中调用 `interrupt(payload)`，工作流暂停，并将 `payload`（例如待审批操作）返回给调用方。
+2. **等待输入**：Agent CLI 接收到中断信号后，展示给用户并等待输入。
+3. **恢复执行**：用户输入后，通过 `Command(resume=...)` 指令恢复工作流，`interrupt()` 的返回值就是用户提供的答案，流程从断点继续。
+
+由于 Checkpointer 在每一步保存状态，暂停是**持久化**的，即使程序重启或用户稍后回答，也能从暂停点恢复。
+
+### 2.4 是否适合我的场景？
+
+| 我的需求 | LangGraph 支持情况 |
+|-|-|
+| 内网环境使用 | ✅ 完全支持。核心库 MIT 开源，可通过 `pip` 在办公电脑安装，`langgraph dev` 启动本地开发服务器。 |
+| 内部 Agent CLI 对接 | ✅ 支持。CLI 可作为调用方，与 LangGraph 工作流通信。 |
+| 数据和权限校验 | ✅ 支持。权限校验逻辑可在节点中自行编写，或集成第三方安全中间件。 |
+| 办公电脑直接运行，调用本地工具 | ✅ 支持。纯本地化部署，可连接本地 LLM（如 Ollama），所有数据和推理在内网完成。 |
+| 不依赖容器 | ✅ 支持。核心库和 CLI 可直接在本地 Python 环境运行。 |
+
+### 2.5 需要留意的关键点
+
+- **许可限制**：核心库免费，但 LangGraph Server 本地自托管 Lite 模式有每年 100 万次节点运行额度限制。
+- **开发模式与部署模式**：`langgraph dev` 适合本地开发和测试；内网长期稳定运行需考虑更完善的部署方案。
+- **权限校验实现**：LangGraph 是框架，具体校验逻辑需在节点中自行编写或集成第三方安全中间件。
+
+### 2.6 LangGraph 结论
+
+**LangGraph 非常适合我的场景。** 它像一个乐高积木式的引擎，让我能用代码构建符合内网安全规范的 Agent 工作流，并精确控制何处暂停并请求我的介入。需要将内部 Agent CLI 与这个引擎对接，并在关键节点编写权限校验和提问逻辑。
+
+## 三、LangGraph Studio 介绍
+
+### 3.1 LangGraph Studio 是什么？
+
+LangGraph Studio（现已更名为 LangSmith Studio）是一个**专门的 Agent 开发 IDE**，用于可视化、交互和调试实现了 LangGraph Server API 协议的 Agent 系统。核心定位是**开发者工具**，而非最终用户产品。
+
+| 维度 | 说明 |
+|-|-|
+| 本质 | 免费的可视化调试界面，连接到我本地运行的 Agent Server |
+| 运行方式 | Web UI（浏览器访问）+ 本地后端（Agent Server 在办公电脑上运行） |
+| 主要用途 | 可视化 Agent 图结构、逐步执行调试、状态检查、时间旅行调试 |
+| 两种模式 | Graph Mode（完整执行信息、中间状态可视化）/ Chat Mode（简化对话界面） |
+
+**关键认知**：Studio 本身不运行工作流逻辑。Agent 代码（LangGraph 图）由本地 `langgraph dev` 启动的 Agent Server 执行，Studio 只是连接到该 Server 的前端 UI。
+
+### 3.2 在 HITL 场景下的应用方式
+
+LangGraph Studio 对 HITL 的支持是原生且深度集成的，核心机制与 LangGraph 框架的 `interrupt()` + Checkpointer 一致。
+
+#### 工作流程
+
+1. **Agent 执行到中断点**：节点中调用 `interrupt(payload)`，工作流暂停，返回包含待审批内容的 interrupt 对象。
+2. **Studio UI 渲染审批界面**：Studio 通过 `stream.interrupt` 暴露中断负载，在界面上展示审批卡片（可包含 approve / reject / edit 选项）。
+3. **用户做出决策**：在 Studio 界面中直接操作——批准、拒绝或修改参数。
+4. **恢复执行**：Studio 自动调用 `stream.submit(null, { command: { resume: response } })`，将用户输入注入工作流，从断点继续执行。
+
+由于 Checkpointer 每一步都保存状态，暂停是持久化的——即使刷新页面或稍后回答，也能从精确的暂停点恢复。
+
+#### 实际案例
+
+有技术博客演示使用 `interrupt_before=["tools"]` 静态断点，在工具节点执行前暂停，让用户检查工具名称和参数是否符合预期，批准后才真正执行工具调用。该案例同时提供终端测试和 LangGraph Studio 部署两种方式。
+
+### 3.3 是否适合我的场景？
+
+| 我的需求 | LangGraph Studio 支持情况 |
+|-|-|
+| 内网环境使用 | ✅ 完全支持。`langgraph dev` 启动的 Agent Server 在本机运行，可设置 `LANGSMITH_TRACING=false` 让数据不离开本地服务器。Studio 前端可通过自托管 LangSmith 实例运行（使用 `--studio-url` 参数）。 |
+| 内部 Agent CLI 对接 | ✅ 支持。CLI 作为调用方，通过 Agent Server API（默认 `http://localhost:2024`）与工作流通信。CLI 和 Studio 可同时连接同一个 Agent Server。 |
+| 数据和权限校验 | ✅ 支持。权限校验逻辑由我在节点代码中编写。Studio 默认通过 `x-auth-scheme: langsmith` 头被 Agent Server 放行，可通过 `disable_studio_auth` 配置调整。 |
+| 办公电脑直接运行，调用本地工具 | ✅ 完全支持。2024 年 11 月更新后不再依赖 Docker，后端以 Python 包形式直接运行，可调用办公电脑上的本地工具和脚本。 |
+
+### 3.4 需要留意的关键点
+
+1. **LangSmith 账号/API Key**：Studio 默认需要连接 LangSmith 认证。内网可自托管 LangSmith 实例，并通过 `--studio-url` 指向它。完全不想使用 LangSmith 时，可设置 `LANGSMITH_TRACING=false`，但 Studio 完整功能可能受限。
+2. **Python >= 3.11 要求**：`langgraph-cli[inmem]` 需要 Python 3.11 或更高版本。
+3. **Studio 定位是开发调试工具**：最终用户（包括日常使用）应通过内部 Agent CLI 触发工作流，Studio 主要用于开发和调试阶段——可视化执行路径、检查中间状态、验证 HITL 中断逻辑。
+4. **CLI 与 Studio 的 HITL 兼容性**：若希望同一份 Agent 代码既能在 CLI 中运行（使用 `input()`），又能在 Studio 中运行（使用 `interrupt()`），可通过环境变量条件切换。推荐统一使用 `interrupt()`，然后在 CLI 侧实现相应的中断处理和恢复逻辑。
+
+### 3.5 LangGraph Studio 结论
+
+**LangGraph Studio 适合我的场景，但它是开发流程中的「可视化调试器」，而不是日常运行的「工作流执行入口」。**
+
+- 日常使用：通过内部 Agent CLI 触发工作流，CLI 对接本地的 Agent Server API。
+- 开发调试：用 LangGraph Studio 可视化查看工作流每一步、检查中断点是否正确触发、验证 HITL 交互逻辑。
+- 权限校验：写在自己的节点代码中，与 Studio 无关。
+- 本地工具调用：Agent Server 直接运行在办公电脑上（非 Docker），可无障碍调用本地工具。
+
+## 四、综合结论
+
+1. **LangGraph** 是低层级编排框架和运行时，不是开箱即用产品。它完全适合内网办公电脑直接运行，可调用本地工具，权限校验可自行编码实现。
+2. **LangGraph Studio** 是可视化开发调试 IDE，适合开发阶段验证 HITL 中断逻辑，不是日常执行入口。
+3. **推荐架构**：
+   - 内部 Agent CLI 作为触发入口；
+   - LangGraph Agent Server 在办公电脑本地运行（非容器）；
+   - 权限校验、数据脱敏、本地工具调用逻辑写在 LangGraph 节点代码中；
+   - 开发调试时用 LangGraph Studio 连接本地 Agent Server，可视化验证工作流和 HITL 交互。
+4. **数据不出本地，不依赖 Docker**，满足内网、权限校验、本地工具调用的核心需求。
