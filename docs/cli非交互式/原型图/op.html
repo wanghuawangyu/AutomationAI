@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OP 管理 · AI 自动化</title>
+<script src="mock-data.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -65,12 +66,15 @@
   .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
   .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
   .row.expanded .expand-arrow{transform:rotate(90deg)}
-  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft,#f9fafc);border-bottom:1px solid var(--border-soft)}
   .detail-table{width:100%;border-collapse:collapse;font-size:13px}
-  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
+  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft);vertical-align:top}
   .detail-table .dt-k{color:var(--text-3);width:80px;white-space:nowrap;font-weight:500}
-  .detail-table .dt-v{color:var(--text-1)}
-  .detail-table .mono{font-family:var(--mono);font-size:12px}
+  .detail-table .dt-v{color:var(--text)}
+  .detail-table .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .sub-table{width:100%;border-collapse:collapse;font-size:12px}
+  .sub-table td{padding:3px 8px;border-bottom:1px solid var(--border-soft)}
+  .sub-table .st-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:180px}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -122,6 +126,7 @@
   .pt-out{grid-template-columns:1.2fr 1fr 2.2fr 34px}
   .param-table .pt-del{width:26px;height:26px;border:0;background:#fff;color:#c3c8d0;border-radius:5px;cursor:pointer;font-size:15px;line-height:1}
   .param-table .pt-del:hover{background:#fdf2f2;color:var(--failed)}
+  .param-table .pt-empty{padding:14px;text-align:center;color:var(--text-3);font-size:12.5px;background:#fbfbfd}
 
   .type-config{display:none}
   .type-config.active{display:block}
@@ -155,7 +160,7 @@
   .summary .v{color:var(--text)}
 
   .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
-  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre;max-height:280px;overflow:auto}
 
   .required{color:var(--failed);margin-left:2px}
 </style>
@@ -499,7 +504,7 @@
         <div><span class="k">即将执行:</span><span class="v" id="confirmOpName">check_tests</span></div>
         <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
         <div><span class="k">Client:</span><span class="v" id="confirmClient">Claude Code</span></div>
-        <div><span class="k">入参:</span><span class="v" id="confirmInputs">test_cmd: npm run test</span></div>
+        <div><span class="k">入参:</span><span class="v" id="confirmInputs">（见执行表单）</span></div>
       </div>
       <div class="info-box" style="margin-top:14px">
         <span>ℹ</span>
@@ -586,7 +591,7 @@
           <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
           <button class="btn" onclick="pickExportDirectory()">选择</button>
         </div>
-        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
+        <div class="hint">点击 [选择] 弹出系统文件夹选择框，选中后回填目录名</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -596,138 +601,9 @@
   </div>
 </div>
 
-<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
-<div class="overlay" id="dirPickerModal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-head">选择导出目录</div>
-    <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
-      <div class="field">
-        <label>目录绝对路径</label>
-        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
-      </div>
-      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
-        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
-        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
-      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
-    </div>
-  </div>
-</div>
-
 <script>
   /* ==================== OP 数据 ==================== */
-  var OP_DATA = {
-    check_tests: {
-      version: 'v2', type: 'prompt', timeout: 300,
-      description: '运行测试并报告结果',
-      inputs: [
-        { name: 'test_cmd', type: 'string', required: '是', def: '', desc: '测试命令' }
-      ],
-      outputs: [
-        { name: 'passed', type: 'string', desc: '测试是否通过' },
-        { name: 'count', type: 'string', desc: '通过用例数' },
-        { name: 'result', type: 'string', desc: '测试结果详情' }
-      ],
-      content: '在当前工作区运行测试，并输出结果 JSON'
-    },
-    review: {
-      version: 'v2', type: 'prompt', timeout: 600,
-      description: '审查测试结果',
-      inputs: [
-        { name: 'test_result', type: 'string', required: '是', def: '', desc: '测试结果' }
-      ],
-      outputs: [
-        { name: 'approved', type: 'string', desc: '是否通过审查' }
-      ],
-      content: '审查测试结果并给出结论'
-    },
-    deploy: {
-      version: 'v2', type: 'prompt', timeout: 120,
-      description: '部署到目标环境',
-      inputs: [
-        { name: 'target_env', type: 'string', required: '是', def: '', desc: '目标环境' }
-      ],
-      outputs: [
-        { name: 'url', type: 'string', desc: '部署后的 URL' }
-      ],
-      content: '将当前工作区部署到指定环境，并返回访问 URL'
-    },
-    notify: {
-      version: 'v1', type: 'prompt', timeout: 60,
-      description: '发送成功通知',
-      inputs: [
-        { name: 'message', type: 'string', required: '是', def: '', desc: '通知内容' }
-      ],
-      outputs: [],
-      content: '发送通知消息'
-    },
-    notify_fail: {
-      version: 'v1', type: 'prompt', timeout: 60,
-      description: '发送失败通知',
-      inputs: [],
-      outputs: [],
-      content: '发送失败告警通知'
-    },
-    clean_logs: {
-      version: 'v3', type: 'powershell', timeout: 120,
-      description: '清理历史日志',
-      inputs: [
-        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '日志服务地址' }
-      ],
-      outputs: [],
-      content: 'Get-ChildItem -Path $env:WORKSPACE -Recurse -Filter *.log | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item'
-    },
-    process_data: {
-      version: 'v3', type: 'python', timeout: 300,
-      description: '处理数据',
-      inputs: [
-        { name: 'source', type: 'string', required: '是', def: '', desc: '数据源' }
-      ],
-      outputs: [
-        { name: 'count', type: 'string', desc: '处理条数' }
-      ],
-      content: 'import json\n# 处理数据源并输出结果'
-    },
-    health_check: {
-      version: 'v1', type: 'bash', timeout: 180,
-      description: '健康检查',
-      inputs: [
-        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '服务地址' }
-      ],
-      outputs: [
-        { name: 'healthy', type: 'string', desc: '是否健康' }
-      ],
-      content: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"'
-    },
-    collect_metrics: {
-      version: 'v1', type: 'python', timeout: 240,
-      description: '采集指标',
-      inputs: [
-        { name: 'endpoint', type: 'string', required: '是', def: '', desc: '服务地址' }
-      ],
-      outputs: [
-        { name: 'metrics', type: 'string', desc: '指标数据' }
-      ],
-      content: 'import json\n# 采集指标'
-    },
-    run_lint: {
-      version: 'v2', type: 'bash', timeout: 180,
-      description: '运行代码检查',
-      inputs: [
-        { name: 'target', type: 'string', required: '是', def: '', desc: '检查目标' }
-      ],
-      outputs: [
-        { name: 'issues', type: 'string', desc: '问题列表' }
-      ],
-      content: '#!/usr/bin/env bash\nnpm run lint'
-    }
-  };
+  var OP_DATA = OPS;
 
   /* OP 类型 → 可选 Client 列表 */
   var CLIENT_BY_TYPE = {
@@ -745,71 +621,8 @@
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    execute: document.getElementById('view-execute'),
-    detail: document.getElementById('view-detail')
+    execute: document.getElementById('view-execute')
   };
-  var currentDetail = { name: '', version: '' };
-
-  function toggleDetail(el, name, version) {
-    var row = el.closest('.row');
-    var panel = row.querySelector('.detail-panel');
-    var isOpen = panel.style.display !== 'none';
-    // 折叠所有其他展开的
-    document.querySelectorAll('.row.expanded').forEach(function(r) {
-      r.classList.remove('expanded');
-      var p = r.querySelector('.detail-panel');
-      if (p) p.style.display = 'none';
-    });
-    if (!isOpen) {
-      if (!panel.dataset.loaded) {
-        panel.innerHTML = buildDetailTable(name, version);
-        panel.dataset.loaded = '1';
-      }
-      row.classList.add('expanded');
-      panel.style.display = 'block';
-    }
-  }
-  function buildDetailTable(name, version) {
-    var data = {
-      'check_tests': { desc: '运行测试并报告结果', type: 'prompt', timeout: 300, inputs: [['test_cmd','string','测试命令']], outputs: [['passed','string','是否通过'],['count','string','通过用例数']], content: '在当前工作区运行测试，并输出结果 JSON' },
-      'review': { desc: '代码审查', type: 'prompt', timeout: 120, inputs: [['test_result','string','测试结果']], outputs: [['approved','string','是否通过']], content: '审查测试结果并给出结论' },
-      'deploy': { desc: '部署到目标环境', type: 'prompt', timeout: 300, inputs: [['target_env','string','目标环境']], outputs: [['url','string','部署后的 URL']], content: '部署到指定环境并返回访问地址' },
-      'notify': { desc: '发送通知', type: 'prompt', timeout: 30, inputs: [['message','string','通知内容']], outputs: [], content: '发送通知消息' },
-      'notify_fail': { desc: '发送失败通知', type: 'prompt', timeout: 30, inputs: [], outputs: [], content: '发送失败告警通知' },
-      'clean_logs': { desc: '清理日志', type: 'powershell', timeout: 60, inputs: [['endpoint','string','服务地址']], outputs: [], content: '清理指定服务的历史日志' },
-      'process_data': { desc: '处理数据', type: 'python', timeout: 120, inputs: [['source','string','数据源']], outputs: [['count','string','处理条数']], content: '读取数据源并处理' },
-      'health_check': { desc: '健康检查', type: 'bash', timeout: 30, inputs: [['endpoint','string','服务地址']], outputs: [['healthy','string','是否健康']], content: '检查服务健康状态' },
-      'collect_metrics': { desc: '采集指标', type: 'python', timeout: 60, inputs: [['endpoint','string','服务地址']], outputs: [['metrics','string','指标数据']], content: '采集服务运行指标' },
-      'run_lint': { desc: '运行 lint', type: 'bash', timeout: 120, inputs: [['target','string','检查目标']], outputs: [['issues','string','问题数']], content: '对目标运行静态检查' }
-    };
-    var s = data[name] || { desc: name, type: 'prompt', timeout: 60, inputs: [], outputs: [], content: '...' };
-    var html = '<table class="detail-table">';
-    html += '<tr><td class="dt-k">类型</td><td class="dt-v">' + s.type + '</td><td class="dt-k">超时</td><td class="dt-v">' + s.timeout + 's</td><td class="dt-k">描述</td><td class="dt-v">' + s.desc + '</td></tr>';
-    // 入参子表格
-    html += '<tr><td class="dt-k">入参</td><td colspan="5">';
-    if (s.inputs.length) {
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      s.inputs.forEach(function(i) {
-        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + i[0] + ' (' + i[1] + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + i[2] + '</td></tr>';
-      });
-      html += '</table>';
-    } else { html += '<span style="color:var(--text-3)">无</span>'; }
-    html += '</td></tr>';
-    // 出参子表格
-    html += '<tr><td class="dt-k">出参</td><td colspan="5">';
-    if (s.outputs.length) {
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      s.outputs.forEach(function(o) {
-        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + o[0] + ' (' + o[1] + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + o[2] + '</td></tr>';
-      });
-      html += '</table>';
-    } else { html += '<span style="color:var(--text-3)">无</span>'; }
-    html += '</td></tr>';
-    html += '<tr><td class="dt-k">正文</td><td class="dt-v mono" colspan="5">' + s.content + '</td></tr>';
-    html += '</table>';
-    return html;
-  }
-
 
   function showView(name) {
     Object.keys(views).forEach(function (k) {
@@ -822,6 +635,174 @@
     showView('list');
   }
 
+  /* ---------- 分页状态 ---------- */
+  var allOps = [];
+  var currentPage = 1;
+  var pageSize = 10;
+
+  function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSize').value);
+    currentPage = 1;
+    renderOpList();
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    renderOpList();
+  }
+
+  /* ---------- 渲染 OP 列表 ---------- */
+  function renderOpList(ops) {
+    if (ops) { allOps = ops; }
+    var card = document.querySelector('#view-list .card');
+    var rows = card.querySelectorAll('.row');
+    rows.forEach(function(r) { r.remove(); });
+
+    var total = allOps.length;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+    var pageData = allOps.slice(start, end);
+
+    // 表头
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">' +
+      '<thead>' +
+        '<tr style="border-bottom:2px solid var(--border)">' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:22%">名称</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:10%">类型</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:8%">超时</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:25%">描述</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:35%">操作</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+
+    pageData.forEach(function(op) {
+      var tagClass = 'tag-' + op.type;
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + op.name + '\',\'v' + op.version + '\')">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + op.name + '</span> <span class="tag tag-ver">v' + op.version + '</span>' +
+        '</td>' +
+        '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + op.type + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + op.timeout + 's</td>' +
+        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (op.description || '') + '</td>' +
+        '<td style="padding:10px 8px">' +
+          '<button class="btn btn-sm btn-ghost-primary" onclick="openExecute(\'' + op.name + '\')">执行</button>' +
+          '<button class="btn btn-sm" onclick="openEditor(\'' + op.name + '\',\'' + op.type + '\',\'v' + op.version + '\')">编辑</button>' +
+          '<button class="btn btn-sm">复制</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + op.name + '\',\'v' + op.version + '\')">导出</button>' +
+          '<button class="btn btn-sm btn-danger">删除</button>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="detail-row" style="display:none">' +
+        '<td colspan="5" style="padding:0;background:var(--bg-hover, #f8f9fa)">' +
+          '<div class="detail-panel" style="display:none"></div>' +
+        '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    card.insertAdjacentHTML('beforeend', html);
+
+    // 先删除旧的分页控件
+    var oldPagination = card.querySelector('.pagination');
+    if (oldPagination) oldPagination.remove();
+
+    // 动态添加分页控件
+    var paginationHtml = '<div class="pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 0;margin-top:12px;font-size:13px;color:var(--text-dim)">' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<span>每页</span>' +
+        '<select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' +
+          '<option value="10">10</option>' +
+          '<option value="50">50</option>' +
+          '<option value="100">100</option>' +
+          '<option value="1000">1000</option>' +
+        '</select>' +
+        '<span id="totalCount">共 ' + total + ' 条</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:4px">' +
+        '<button class="btn btn-sm" id="prevPage" onclick="changePage(-1)"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span id="pageInfo" style="padding:0 12px">' + currentPage + ' / ' + totalPages + '</span>' +
+        '<button class="btn btn-sm" id="nextPage" onclick="changePage(1)"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+      '</div>' +
+    '</div>';
+    card.insertAdjacentHTML('beforeend', paginationHtml);
+  }
+  // 调用接口获取数据
+  mockFetch('/api/ops').then(renderOpList);
+
+  /* ---------- 行内展开详情 ---------- */
+  function toggleDetail(el, name, version) {
+    var row = el.closest('tr');
+    var detailRow = row.nextElementSibling;
+    var isOpen = detailRow && detailRow.classList.contains('detail-row') && detailRow.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.detail-row').forEach(function(r) {
+      r.style.display = 'none';
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    document.querySelectorAll('.expand-arrow').forEach(function(a) {
+      a.textContent = '▶';
+    });
+    if (!isOpen && detailRow) {
+      // 加载详情内容
+      var panel = detailRow.querySelector('.detail-panel');
+      if (!panel.dataset.loaded) {
+        panel.innerHTML = buildDetailTable(name, version);
+        panel.dataset.loaded = '1';
+      }
+      panel.style.display = 'block';
+      detailRow.style.display = 'table-row';
+      el.querySelector('.expand-arrow').textContent = '▼';
+    }
+  }
+
+  function buildDetailTable(name, version) {
+    var data = OP_DATA[name];
+    if (!data) return '';
+
+    var html = '<table class="detail-table">';
+    // 第一行：类型 + 超时 + 描述
+    html += '<tr>' +
+      '<td class="dt-k">类型</td><td class="dt-v">' + data.type + '</td>' +
+      '<td class="dt-k">超时</td><td class="dt-v">' + data.timeout + 's</td>' +
+      '<td class="dt-k">描述</td><td class="dt-v">' + (data.description || '-') + '</td>' +
+      '</tr>';
+
+    // 入参子表格
+    html += '<tr><td class="dt-k">入参</td><td colspan="5">';
+    if (data.inputs && data.inputs.length) {
+      html += '<table class="sub-table">';
+      data.inputs.forEach(function(i) {
+        html += '<tr><td class="st-name">' + i.name + ' (' + i.type + ')</td><td>' + (i.description || '') + '</td></tr>';
+      });
+      html += '</table>';
+    } else {
+      html += '<span style="color:var(--text-3)">无</span>';
+    }
+    html += '</td></tr>';
+
+    // 出参子表格
+    html += '<tr><td class="dt-k">出参</td><td colspan="5">';
+    if (data.outputs && data.outputs.length) {
+      html += '<table class="sub-table">';
+      data.outputs.forEach(function(o) {
+        html += '<tr><td class="st-name">' + o.name + ' (' + o.type + ')</td><td>' + (o.description || '') + '</td></tr>';
+      });
+      html += '</table>';
+    } else {
+      html += '<span style="color:var(--text-3)">无</span>';
+    }
+    html += '</td></tr>';
+
+    // 正文
+    html += '<tr><td class="dt-k">正文</td><td class="dt-v mono" colspan="5">' + (data.content || '') + '</td></tr>';
+
+    html += '</table>';
+    return html;
+  }
+
   /* ---------- 编辑器 ---------- */
   var editorVersion = 'v2';
   var currentOpName = 'check_tests';
@@ -831,10 +812,11 @@
     var isNew = !name;
 
     if (isNew) {
-      document.getElementById('editorTitle').innerHTML = '新建 OP';
+      /* 新建：各字段为空 */
+      document.getElementById('editorTitle').innerHTML = '新建 OP <span class="tag tag-ver" id="editorVersion">v1</span>';
       document.getElementById('opName').value = '';
       document.getElementById('opDesc').value = '';
-      document.getElementById('opTimeout').value = 300;
+      document.getElementById('opTimeout').value = '';
       editorVersion = 'v1';
       currentOpName = '';
       currentOpType = 'prompt';
@@ -877,13 +859,13 @@
             '<option' + (p.required === '否' ? ' selected' : '') + '>否</option>' +
           '</select>' +
           '<input type="text" value="' + (p.def || '') + '" placeholder="default" />' +
-          '<input type="text" value="' + (p.desc || '') + '" placeholder="description" />' +
+          '<input type="text" value="' + (p.description || '') + '" placeholder="description" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
     });
 
     if (!(data.inputs || []).length) {
-      inputHtml += '<div class="pt-row pt-in" style="color:var(--text-3)">无入参</div>';
+      inputHtml += '<div class="pt-empty">无入参</div>';
     }
 
     document.getElementById('inputTable').innerHTML = inputHtml;
@@ -897,13 +879,13 @@
         '<div class="pt-row pt-out">' +
           '<input type="text" value="' + (p.name || '') + '" />' +
           '<select><option>string</option></select>' +
-          '<input type="text" value="' + (p.desc || '') + '" placeholder="description" />' +
+          '<input type="text" value="' + (p.description || '') + '" placeholder="description" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
     });
 
     if (!(data.outputs || []).length) {
-      outputHtml += '<div class="pt-row pt-out" style="color:var(--text-3)">无出参</div>';
+      outputHtml += '<div class="pt-empty">无出参</div>';
     }
 
     document.getElementById('outputTable').innerHTML = outputHtml;
@@ -911,6 +893,15 @@
 
   function addInputRow() {
     var table = document.getElementById('inputTable');
+    // 若当前为空状态，先移除
+    var empty = table.querySelector('.pt-empty');
+    if (empty) empty.remove();
+    if (!table.querySelector('.pt-head')) {
+      var head = document.createElement('div');
+      head.className = 'pt-head pt-in';
+      head.innerHTML = '<span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span>';
+      table.insertBefore(head, table.firstChild);
+    }
     var row = document.createElement('div');
     row.className = 'pt-row pt-in';
     row.innerHTML =
@@ -925,6 +916,14 @@
 
   function addOutputRow() {
     var table = document.getElementById('outputTable');
+    var empty = table.querySelector('.pt-empty');
+    if (empty) empty.remove();
+    if (!table.querySelector('.pt-head')) {
+      var head = document.createElement('div');
+      head.className = 'pt-head pt-out';
+      head.innerHTML = '<span>name</span><span>type</span><span>description</span><span></span>';
+      table.insertBefore(head, table.firstChild);
+    }
     var row = document.createElement('div');
     row.className = 'pt-row pt-out';
     row.innerHTML =
@@ -1049,52 +1048,74 @@
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
   }
+  var exportDirHandle = null;
   function pickExportDirectory() {
-    window.showDirectoryPicker().then(function (dirHandle) {
-      document.getElementById('exportDir').value = dirHandle.name;
-      document.getElementById('confirmExportBtn').disabled = false;
-    }).catch(function () {
-      // 用户取消选择
-    });
+    if (window.showDirectoryPicker) {
+      window.showDirectoryPicker().then(function (dirHandle) {
+        exportDirHandle = dirHandle;
+        document.getElementById('exportDir').value = dirHandle.name;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }).catch(function () {});
+    } else {
+      var dir = prompt('请输入导出目录路径：', 'C:\\export');
+      if (dir) {
+        exportDirHandle = null;
+        document.getElementById('exportDir').value = dir;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }
+    }
   }
   function buildOpYaml(name, version) {
-    var samples = {
-      'check_tests': { desc: '运行测试并报告结果', inputs: [['test_cmd','测试命令']], outputs: [['passed','测试是否通过'],['count','通过用例数'],['result','测试结果详情']], content: '在当前工作区运行测试，并输出结果 JSON' },
-      'review': { desc: '代码审查', inputs: [['test_result','测试结果']], outputs: [['approved','是否通过']], content: '审查测试结果并给出结论' },
-      'deploy': { desc: '部署到目标环境', inputs: [['target_env','目标环境']], outputs: [['url','部署后的 URL']], content: '部署到指定环境并返回访问地址' },
-      'notify': { desc: '发送通知', inputs: [['message','通知内容']], outputs: [], content: '发送通知消息' },
-      'notify_fail': { desc: '发送失败通知', inputs: [], outputs: [], content: '发送失败告警通知' },
-      'clean_logs': { desc: '清理日志', inputs: [['endpoint','服务地址']], outputs: [], content: '清理指定服务的历史日志' },
-      'process_data': { desc: '处理数据', inputs: [['source','数据源']], outputs: [['count','处理条数']], content: '读取数据源并处理' },
-      'health_check': { desc: '健康检查', inputs: [['endpoint','服务地址']], outputs: [['healthy','是否健康']], content: '检查服务健康状态' },
-      'collect_metrics': { desc: '采集指标', inputs: [['endpoint','服务地址']], outputs: [['metrics','指标数据']], content: '采集服务运行指标' },
-      'run_lint': { desc: '运行 lint', inputs: [['target','检查目标']], outputs: [['issues','问题数']], content: '对目标运行静态检查' }
-    };
-    var s = samples[name] || { desc: name, inputs: [], outputs: [], content: '...' };
-    var yaml = 'name: ' + name + '\nversion: ' + version + '\ndescription: ' + s.desc + '\ntype: prompt\ntimeout: 300\n';
+    var d = OP_DATA[name];
+    if (!d) return 'name: ' + name + '\nversion: ' + version + '\n';
+    var yaml = 'name: ' + name + '\nversion: ' + version + '\n';
+    yaml += 'description: ' + (d.description || '') + '\n';
+    yaml += 'type: ' + d.type + '\n';
+    yaml += 'timeout: ' + d.timeout + '\n';
     yaml += 'inputs:\n';
-    if (s.inputs.length === 0) { yaml += '  []\n'; }
-    s.inputs.forEach(function (i) { yaml += '  - name: ' + i[0] + '\n    type: string\n    required: true\n    description: ' + i[1] + '\n'; });
+    if (!d.inputs || !d.inputs.length) { yaml += '  []\n'; }
+    else {
+      d.inputs.forEach(function (i) {
+        yaml += '  - name: ' + i.name + '\n    type: string\n    required: ' + (i.required ? 'true' : 'false') + '\n    description: ' + (i.description || '') + '\n';
+      });
+    }
     yaml += 'outputs:\n';
-    if (s.outputs.length === 0) { yaml += '  []\n'; }
-    s.outputs.forEach(function (o) { yaml += '  - name: ' + o[0] + '\n    type: string\n    description: ' + o[1] + '\n'; });
-    yaml += 'content: |\n  ' + s.content + '\n';
+    if (!d.outputs || !d.outputs.length) { yaml += '  []\n'; }
+    else {
+      d.outputs.forEach(function (o) {
+        yaml += '  - name: ' + o.name + '\n    type: string\n    description: ' + (o.description || '') + '\n';
+      });
+    }
+    yaml += 'content: |\n  ' + (d.content || '').replace(/\n/g, '\n  ') + '\n';
     return yaml;
   }
   function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
     var dir = document.getElementById('exportDir').value;
     var yaml = buildOpYaml(exportTargetName, exportTargetVersion);
-    var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
-    alert('已导出：' + dir + '\\' + fileName);
-    closeModal('exportModal');
+
+    if (exportDirHandle) {
+      exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
+        return fileHandle.createWritable();
+      }).then(function (writable) {
+        writable.write(yaml);
+        return writable.close();
+      }).then(function () {
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+        closeModal('exportModal');
+      });
+    } else {
+      var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      alert('已导出：' + dir + '\\' + fileName);
+      closeModal('exportModal');
+    }
   }
 
   /* ---------- 弹窗控制 ---------- */

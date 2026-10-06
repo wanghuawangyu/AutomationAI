@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Client 管理 · AI 自动化</title>
+<script src="mock-data.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -68,12 +69,12 @@
   .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
   .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
   .row.expanded .expand-arrow{transform:rotate(90deg)}
-  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft,#f9fafc);border-bottom:1px solid var(--border-soft)}
   .detail-table{width:100%;border-collapse:collapse;font-size:13px}
   .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
   .detail-table .dt-k{color:var(--text-3);width:100px;white-space:nowrap;font-weight:500}
-  .detail-table .dt-v{color:var(--text-1)}
-  .detail-table .mono{font-family:var(--mono);font-size:12px}
+  .detail-table .dt-v{color:var(--text)}
+  .detail-table .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -136,7 +137,7 @@
   .summary .v{color:var(--text)}
 
   .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
-  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre;max-height:280px;overflow:auto}
 
   .test-result{display:none;margin-top:12px;font-size:12.5px;border-radius:8px;padding:10px 13px}
   .test-result.show{display:block}
@@ -196,115 +197,24 @@
           </div>
         </div>
 
-        <div class="row" data-detail="Claude Code">
-          <div class="row-icon">🧩</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'Claude Code','prompt')">
-              <span class="expand-arrow">▶</span> Claude Code <span class="tag tag-prompt">prompt</span>
-            </div>
-            <div class="row-desc"><span class="mono">claude</span> · 输出解析 json · 2 天前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" onclick="editClient('Claude Code','prompt')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('Claude Code','prompt')">导出</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none">
-            <table class="detail-table">
-              <tr><td class="dt-k">类型</td><td class="dt-v">prompt</td><td class="dt-k">格式</td><td class="dt-v">json</td><td class="dt-k">描述</td><td class="dt-v">Claude Code CLI</td></tr>
-              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">claude</td></tr>
-              <tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">--print --output-format json --model sonnet</td></tr>
-            </table>
-          </div>
-        </div>
+        <div id="clientList"></div>
 
-        <div class="row">
-          <div class="row-icon">🧩</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'Codex CLI','prompt')">
-              <span class="expand-arrow">▶</span> Codex CLI <span class="tag tag-prompt">prompt</span>
-            </div>
-            <div class="row-desc"><span class="mono">codex</span> · 输出解析 text · 1 周前</div>
+        <!-- 分页控件 -->
+        <div class="pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 0;border-top:1px solid var(--border);margin-top:12px;font-size:13px;color:var(--text-dim)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>每页</span>
+            <select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="10">10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="1000">1000</option>
+            </select>
+            <span id="totalCount">共 0 条</span>
           </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" onclick="editClient('Codex CLI','prompt')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('Codex CLI','prompt')">导出</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none">
-            <table class="detail-table">
-              <tr><td class="dt-k">类型</td><td class="dt-v">prompt</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">OpenAI Codex CLI</td></tr>
-              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">codex</td></tr>
-              <tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">exec --silent</td></tr>
-            </table>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="row-icon">🧩</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 Bash','bash')">
-              <span class="expand-arrow">▶</span> 本地 Bash <span class="tag tag-bash">bash</span>
-            </div>
-            <div class="row-desc"><span class="mono">/usr/bin/bash</span> · 1 周前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" onclick="editClient('本地 Bash','bash')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('本地 Bash','bash')">导出</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none">
-            <table class="detail-table">
-              <tr><td class="dt-k">类型</td><td class="dt-v">bash</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">本地 Bash Shell</td></tr>
-              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">/usr/bin/bash</td></tr>
-            </table>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="row-icon">🧩</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 Python','python')">
-              <span class="expand-arrow">▶</span> 本地 Python <span class="tag tag-python">python</span>
-            </div>
-            <div class="row-desc"><span class="mono">/usr/bin/python3</span> · 1 周前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" onclick="editClient('本地 Python','python')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('本地 Python','python')">导出</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none">
-            <table class="detail-table">
-              <tr><td class="dt-k">类型</td><td class="dt-v">python</td><td class="dt-k">格式</td><td class="dt-v">json</td><td class="dt-k">描述</td><td class="dt-v">本地 Python</td></tr>
-              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">/usr/bin/python3</td></tr>
-            </table>
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="row-icon">🧩</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'本地 PowerShell','powershell')">
-              <span class="expand-arrow">▶</span> 本地 PowerShell <span class="tag tag-powershell">powershell</span>
-            </div>
-            <div class="row-desc"><span class="mono">C:\Program Files\PowerShell\7\pwsh.exe</span> · 1 周前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" onclick="editClient('本地 PowerShell','powershell')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('本地 PowerShell','powershell')">导出</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none">
-            <table class="detail-table">
-              <tr><td class="dt-k">类型</td><td class="dt-v">powershell</td><td class="dt-k">格式</td><td class="dt-v">text</td><td class="dt-k">描述</td><td class="dt-v">本地 PowerShell</td></tr>
-              <tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">C:\Program Files\PowerShell\7\pwsh.exe</td></tr>
-            </table>
+          <div style="display:flex;align-items:center;gap:4px">
+            <button class="btn btn-sm" id="prevPage" onclick="changePage(-1)">上一页</button>
+            <span id="pageInfo" style="padding:0 12px">1 / 1</span>
+            <button class="btn btn-sm" id="nextPage" onclick="changePage(1)">下一页</button>
           </div>
         </div>
       </div>
@@ -322,7 +232,7 @@
         <div class="editor-body">
           <div class="form-row">
             <div class="field">
-              <label>名称</label>
+              <label>名称<span class="required">*</span></label>
               <input type="text" id="clientName" value="Claude Code" />
             </div>
             <div class="field">
@@ -347,21 +257,22 @@
 
             <div class="form-row">
               <div class="field">
-                <label>命令</label>
-                <input type="text" value="claude" />
+                <label>命令<span class="required">*</span></label>
+                <input type="text" id="promptCommand" value="claude" />
+                <div class="hint">CLI 可执行文件名或路径</div>
               </div>
             </div>
 
             <div class="field">
               <label>参数模板</label>
-              <input type="text" value='["-p","{{prompt}}","--output-format","json"]' />
+              <input type="text" id="promptArgs" value='["-p","{{prompt}}","--output-format","json"]' />
               <div class="hint">JSON 数组格式，支持 {{prompt}}、{{workspace}} 等占位符（{{workspace}} 运行时由 Job 工作区注入）</div>
             </div>
 
             <div class="form-row">
               <div class="field">
                 <label>输入方式</label>
-                <select>
+                <select id="promptInputMode">
                   <option>arg</option>
                   <option>stdin</option>
                   <option>file</option>
@@ -370,7 +281,7 @@
               </div>
               <div class="field">
                 <label>输出解析 mode</label>
-                <select>
+                <select id="promptOutputMode">
                   <option>json</option>
                   <option>text</option>
                   <option>jsonl</option>
@@ -378,14 +289,14 @@
               </div>
               <div class="field">
                 <label>jsonPath</label>
-                <input type="text" value="$.result" />
+                <input type="text" id="promptJsonPath" value="$.result" />
               </div>
             </div>
 
             <div class="form-row">
               <div class="field">
                 <label>退出码语义（成功）</label>
-                <input type="text" value="0" />
+                <input type="text" id="promptExitCode" value="0" />
               </div>
             </div>
 
@@ -399,9 +310,9 @@
           <div class="type-config" id="config-bash">
             <div class="section-title">Bash 类型配置</div>
             <div class="field">
-              <label>二进制路径</label>
+              <label>二进制路径<span class="required">*</span></label>
               <div style="display:flex;gap:8px">
-                <input type="text" value="/usr/bin/bash" style="flex:1" />
+                <input type="text" id="bashPath" value="/usr/bin/bash" style="flex:1" />
                 <button class="btn">浏览</button>
               </div>
             </div>
@@ -415,9 +326,9 @@
           <div class="type-config" id="config-python">
             <div class="section-title">Python 类型配置</div>
             <div class="field">
-              <label>二进制路径</label>
+              <label>二进制路径<span class="required">*</span></label>
               <div style="display:flex;gap:8px">
-                <input type="text" value="/usr/bin/python3" style="flex:1" />
+                <input type="text" id="pythonPath" value="/usr/bin/python3" style="flex:1" />
                 <button class="btn">浏览</button>
               </div>
             </div>
@@ -431,9 +342,9 @@
           <div class="type-config" id="config-powershell">
             <div class="section-title">PowerShell 类型配置</div>
             <div class="field">
-              <label>二进制路径</label>
+              <label>二进制路径<span class="required">*</span></label>
               <div style="display:flex;gap:8px">
-                <input type="text" value="C:\Program Files\PowerShell\7\pwsh.exe" style="flex:1" />
+                <input type="text" id="psPath" value="C:\Program Files\PowerShell\7\pwsh.exe" style="flex:1" />
                 <button class="btn">浏览</button>
               </div>
             </div>
@@ -446,7 +357,7 @@
 
         <div class="editor-foot">
           <button class="btn" onclick="closeEditor()">取消</button>
-          <button class="btn btn-primary" onclick="closeEditor()">保存</button>
+          <button class="btn btn-primary" onclick="saveClient()">保存</button>
           <button class="btn" id="testBtn" onclick="openTestDialog()">测试命令</button>
         </div>
       </div>
@@ -501,7 +412,7 @@
   </div>
 </div>
 
-<!-- ==================== 导出弹窗 ==================== -->
+<!-- ==================== 导出弹窗（选择目录） ==================== -->
 <div class="overlay" id="exportModal">
   <div class="modal" style="max-width:480px">
     <div class="modal-head">导出 Client</div>
@@ -530,42 +441,182 @@
   // ---------- 视图切换 ----------
   var listView = document.getElementById('view-list');
   var editorView = document.getElementById('view-editor');
-  var detailView = document.getElementById('view-detail');
   var editorTitle = document.getElementById('editorTitle');
-  var currentDetail = { name: '', type: '' };
 
-  function toggleDetail(el, name, type) {
-    var row = el.closest('.row');
-    var panel = row.querySelector('.detail-panel');
-    var isOpen = panel.style.display !== 'none';
-    // 折叠所有其他展开的
-    document.querySelectorAll('.row.expanded').forEach(function(r) {
-      r.classList.remove('expanded');
-      var p = r.querySelector('.detail-panel');
-      if (p) p.style.display = 'none';
+  /* 判断是否新建：新建时不预填默认值 */
+  var isNewClient = false;
+
+  // ---------- 分页状态 ----------
+  var allClients = [];
+  var currentPage = 1;
+  var pageSize = 10;
+
+  function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSize').value);
+    currentPage = 1;
+    renderClientList();
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    renderClientList();
+  }
+
+  // ---------- 渲染 Client 列表 ----------
+  function renderClientList(clients) {
+    if (clients) { allClients = clients; }
+    var container = document.getElementById('clientList');
+    var total = allClients.length;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+    var pageData = allClients.slice(start, end);
+
+    // 表头
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">' +
+      '<thead>' +
+        '<tr style="border-bottom:2px solid var(--border)">' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:18%">Client名称</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:10%">Client类型</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:20%">二进制路径</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:15%">输入方式</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:10%">输出解析方式</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:27%">操作</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+
+    pageData.forEach(function(c) {
+      var tagClass = 'tag-' + c.type;
+      var inputMethod = c.paramTemplate ? '参数模板: ' + c.paramTemplate : '固定调用方式';
+      var detailRows = '';
+      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + c.type + '</td><td class="dt-k">格式</td><td class="dt-v">' + c.format + '</td><td class="dt-k">描述</td><td class="dt-v">' + c.description + '</td></tr>';
+      detailRows += '<tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">' + c.binaryPath + '</td></tr>';
+      if (c.paramTemplate) {
+        detailRows += '<tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">' + c.paramTemplate + '</td></tr>';
+      }
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + c.id + '\',\'' + c.type + '\')">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.id + '</span>' +
+        '</td>' +
+        '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + c.type + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + c.binaryPath + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim)">' + inputMethod + '</td>' +
+        '<td style="padding:10px 8px">' + c.format + '</td>' +
+        '<td style="padding:10px 8px">' +
+          '<button class="btn btn-sm" onclick="editClient(\'' + c.id + '\',\'' + c.type + '\')">编辑</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + c.id + '\',\'' + c.type + '\')">导出</button>' +
+          '<button class="btn btn-sm">复制</button>' +
+          '<button class="btn btn-sm btn-danger">删除</button>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="detail-row" style="display:none">' +
+        '<td colspan="6" style="padding:0;background:var(--bg-hover, #f8f9fa)">' +
+          '<table class="detail-table" style="width:100%">' + detailRows + '</table>' +
+        '</td>' +
+      '</tr>';
     });
-    if (!isOpen) {
-      row.classList.add('expanded');
-      panel.style.display = 'block';
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // 先删除旧的分页控件
+    var oldPagination = container.parentNode.querySelector('.pagination');
+    if (oldPagination) oldPagination.remove();
+
+    // 动态添加分页控件
+    var paginationHtml = '<div class="pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 0;margin-top:12px;font-size:13px;color:var(--text-dim)">' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<span>每页</span>' +
+        '<select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' +
+          '<option value="10">10</option>' +
+          '<option value="50">50</option>' +
+          '<option value="100">100</option>' +
+          '<option value="1000">1000</option>' +
+        '</select>' +
+        '<span id="totalCount">共 ' + total + ' 条</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:4px">' +
+        '<button class="btn btn-sm" id="prevPage" onclick="changePage(-1)"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span id="pageInfo" style="padding:0 12px">' + currentPage + ' / ' + totalPages + '</span>' +
+        '<button class="btn btn-sm" id="nextPage" onclick="changePage(1)"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+      '</div>' +
+    '</div>';
+    container.insertAdjacentHTML('afterend', paginationHtml);
+  }
+  // 调用接口获取数据
+  mockFetch('/api/clients').then(renderClientList);
+
+  // ---------- 行内展开详情 ----------
+  function toggleDetail(el, name, type) {
+    var row = el.closest('tr');
+    var detailRow = row.nextElementSibling;
+    var isOpen = detailRow && detailRow.classList.contains('detail-row') && detailRow.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.detail-row').forEach(function(r) {
+      r.style.display = 'none';
+    });
+    document.querySelectorAll('.expand-arrow').forEach(function(a) {
+      a.textContent = '▶';
+    });
+    if (!isOpen && detailRow) {
+      detailRow.style.display = 'table-row';
+      el.querySelector('.expand-arrow').textContent = '▼';
     }
   }
 
+  /* 新建 Client：命令 / 二进制路径均为空 */
   function openEditor() {
+    isNewClient = true;
     listView.classList.remove('active');
     editorView.classList.add('active');
     editorTitle.textContent = '新建 Client';
     document.getElementById('clientName').value = '';
     document.getElementById('clientDesc').value = '';
+    // 命令置空
+    document.getElementById('promptCommand').value = '';
+    // 参数模板置空
+    document.getElementById('promptArgs').value = '';
+    // 输入方式 / 输出解析恢复默认
+    document.getElementById('promptInputMode').value = 'arg';
+    document.getElementById('promptOutputMode').value = 'json';
+    document.getElementById('promptJsonPath').value = '';
+    document.getElementById('promptExitCode').value = '0';
+    // 二进制路径置空
+    document.getElementById('bashPath').value = '';
+    document.getElementById('pythonPath').value = '';
+    document.getElementById('psPath').value = '';
     switchType('prompt');
     document.querySelector('input[name="clientType"][value="prompt"]').checked = true;
   }
 
   function editClient(name, type) {
+    isNewClient = false;
     listView.classList.remove('active');
     editorView.classList.add('active');
     editorTitle.textContent = '编辑: ' + name;
     document.getElementById('clientName').value = name;
     document.getElementById('clientDesc').value = name + ' 适配';
+
+    // 演示数据：按 name 填充
+    var samples = {
+      'Claude Code': { cmd: 'claude', args: '["-p","{{prompt}}","--output-format","json"]', bin: 'claude' },
+      'Codex CLI': { cmd: 'codex', args: '["exec","--silent"]', bin: 'codex' },
+      '本地 Bash': { cmd: '', args: '', bin: '/usr/bin/bash' },
+      '本地 Python': { cmd: '', args: '', bin: '/usr/bin/python3' },
+      '本地 PowerShell': { cmd: '', args: '', bin: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' }
+    };
+    var s = samples[name] || { cmd: '', args: '', bin: '' };
+    document.getElementById('promptCommand').value = s.cmd;
+    document.getElementById('promptArgs').value = s.args;
+    document.getElementById('promptInputMode').value = 'arg';
+    document.getElementById('promptOutputMode').value = 'json';
+    document.getElementById('promptJsonPath').value = '$.result';
+    document.getElementById('promptExitCode').value = '0';
+    document.getElementById('bashPath').value = s.bin;
+    document.getElementById('pythonPath').value = s.bin;
+    document.getElementById('psPath').value = s.bin;
+
     document.querySelector('input[name="clientType"][value="' + type + '"]').checked = true;
     switchType(type);
   }
@@ -573,6 +624,22 @@
   function closeEditor() {
     editorView.classList.remove('active');
     listView.classList.add('active');
+  }
+
+  function saveClient() {
+    // 简易校验
+    var name = document.getElementById('clientName').value.trim();
+    if (!name) { alert('请填写名称'); return; }
+    var type = document.querySelector('input[name="clientType"]:checked').value;
+    if (type === 'prompt' && !document.getElementById('promptCommand').value.trim()) {
+      alert('请填写命令'); return;
+    }
+    if (type !== 'prompt') {
+      var binId = { bash: 'bashPath', python: 'pythonPath', powershell: 'psPath' }[type];
+      if (!document.getElementById(binId).value.trim()) { alert('请填写二进制路径'); return; }
+    }
+    // 保存（演示）
+    closeEditor();
   }
 
   // ---------- 类型切换 ----------
@@ -603,16 +670,16 @@
     document.getElementById('testType').textContent = type;
 
     if (type === 'prompt') {
-      document.getElementById('testCommand').textContent = 'claude';
+      document.getElementById('testCommand').textContent = document.getElementById('promptCommand').value || '(未填写)';
       document.getElementById('testArgs').textContent = '["-p","hello","--output-format","json"]';
     } else if (type === 'bash') {
-      document.getElementById('testCommand').textContent = '/usr/bin/bash';
+      document.getElementById('testCommand').textContent = document.getElementById('bashPath').value || '(未填写)';
       document.getElementById('testArgs').textContent = '—';
     } else if (type === 'python') {
-      document.getElementById('testCommand').textContent = '/usr/bin/python3';
+      document.getElementById('testCommand').textContent = document.getElementById('pythonPath').value || '(未填写)';
       document.getElementById('testArgs').textContent = '—';
     } else {
-      document.getElementById('testCommand').textContent = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+      document.getElementById('testCommand').textContent = document.getElementById('psPath').value || '(未填写)';
       document.getElementById('testArgs').textContent = '—';
     }
 
@@ -697,41 +764,63 @@
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
   }
+  var exportDirHandle = null;
   function pickExportDirectory() {
-    window.showDirectoryPicker().then(function (dirHandle) {
-      document.getElementById('exportDir').value = dirHandle.name;
-      document.getElementById('confirmExportBtn').disabled = false;
-    }).catch(function () {});
+    if (window.showDirectoryPicker) {
+      window.showDirectoryPicker().then(function (dirHandle) {
+        exportDirHandle = dirHandle;
+        document.getElementById('exportDir').value = dirHandle.name;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }).catch(function () {});
+    } else {
+      // 浏览器不支持 showDirectoryPicker，让用户手动输入目录路径
+      var dir = prompt('请输入导出目录路径：', 'C:\\export');
+      if (dir) {
+        exportDirHandle = null;
+        document.getElementById('exportDir').value = dir;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }
+    }
   }
   function buildClientYaml(name, type) {
-    var samples = {
-      'Claude Code': { bin: 'claude', format: 'json', args: '--print --output-format json --model sonnet' },
-      'Codex CLI': { bin: 'codex', format: 'text', args: 'exec --silent' },
-      '本地 Bash': { bin: '/usr/bin/bash', format: 'text', args: '-c' },
-      '本地 Python': { bin: '/usr/bin/python3', format: 'json', args: '-c' },
-      '本地 PowerShell': { bin: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', format: 'text', args: '-Command' }
-    };
-    var s = samples[name] || { bin: name, format: 'text', args: '' };
-    var yaml = 'name: ' + name + '\ntype: ' + type + '\n';
-    yaml += 'bin: ' + s.bin + '\n';
-    if (s.args) yaml += 'argsTemplate: "' + s.args + '"\n';
-    yaml += 'outputFormat: ' + s.format + '\n';
+    var c = CLIENTS[name] || { binaryPath: name, format: 'text', paramTemplate: '' };
+    var yaml = 'name: ' + name + '\n';
+    yaml += 'type: ' + c.type + '\n';
+    yaml += 'description: ' + c.description + '\n';
+    yaml += 'bin: ' + c.binaryPath + '\n';
+    if (c.paramTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.paramTemplate.split(' ')) + '\n';
+    yaml += 'outputFormat: ' + c.format + '\n';
     return yaml;
   }
   function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
     var dir = document.getElementById('exportDir').value;
     var yaml = buildClientYaml(exportTargetName, exportTargetType);
-    var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
-    alert('已导出：' + dir + '\\' + fileName);
-    closeModal('exportModal');
+
+    if (exportDirHandle) {
+      // 通过 showDirectoryPicker 选择了目录，直接写入文件
+      exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
+        return fileHandle.createWritable();
+      }).then(function (writable) {
+        writable.write(yaml);
+        return writable.close();
+      }).then(function () {
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+        closeModal('exportModal');
+      });
+    } else {
+      // 没有目录句柄，触发浏览器下载
+      var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+      alert('已导出：' + dir + '\\' + fileName);
+      closeModal('exportModal');
+    }
   }
 
   // 初始化

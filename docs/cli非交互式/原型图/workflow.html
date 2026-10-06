@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Workflow 管理 · AI 自动化</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="mock-data.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -69,7 +70,7 @@
   .row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap}
   .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
   .row.expanded .expand-arrow{transform:rotate(90deg)}
-  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft,#f9fafc);border-bottom:1px solid var(--border-soft)}
   .detail-canvas{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;height:420px}
   .detail-canvas .dc-body{display:flex;flex:1;overflow:hidden}
   .detail-canvas .dc-left{flex:1;overflow:auto;position:relative;background:var(--bg)}
@@ -190,14 +191,11 @@
   .anchor-center{top:50%;margin-top:-6px}
   .anchor:hover{transform:scale(1.35)}
 
-  /* 右侧节点详情面板 */
+  /* 右侧节点详情面板（常驻） */
   .node-panel{width:320px;flex:0 0 320px;border-left:1px solid var(--border);display:flex;flex-direction:column;background:#fcfcfe;position:relative}
-  .dag-card.panel-collapsed .node-panel{display:none}
   .panel-resizer{position:absolute;left:-3px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:5}
   .panel-resizer:hover{background:rgba(59,110,246,.15)}
   .panel-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-soft);font-size:13px;font-weight:600;background:#fff}
-  .panel-head .panel-collapse{margin-left:auto;border:0;background:none;color:var(--text-3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:5px}
-  .panel-head .panel-collapse:hover{background:#f1f3f7;color:var(--text)}
   .panel-body{padding:16px;overflow-y:auto;flex:1}
 
   .panel-empty{text-align:center;color:var(--text-3);font-size:12.5px;padding:50px 10px;line-height:1.9}
@@ -229,6 +227,10 @@
   .retry-grid{display:flex;flex-direction:column;gap:8px}
   .rg-row{display:flex;align-items:center;gap:10px}
   .rg-k{font-size:12px;color:var(--text-3);width:62px;flex:0 0 62px}
+
+  /* 面板底部固定操作栏（保存 / 取消） */
+  .panel-foot{padding:12px 16px;border-top:1px solid var(--border-soft);background:#fff;display:flex;gap:8px;justify-content:flex-end}
+  .panel-foot .btn{flex:1;justify-content:center;text-align:center}
 
   /* ---------- 弹窗 ---------- */
   .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
@@ -317,58 +319,25 @@
           </div>
         </div>
 
-        <div class="row">
-          <div class="row-icon">📋</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'deploy_workflow','v2')">
-              <span class="expand-arrow">▶</span> deploy_workflow <span class="tag tag-ver">v2</span>
-            </div>
-            <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 2 天前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('deploy_workflow')">执行</button>
-            <button class="btn btn-sm" onclick="openEditor('deploy_workflow')">编辑</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm" onclick="openExport('deploy_workflow','v2')">导出</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
-        </div>
+        <div id="workflowList"></div>
 
-        <div class="row">
-          <div class="row-icon">📋</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'log_analysis','v1')">
-              <span class="expand-arrow">▶</span> log_analysis <span class="tag tag-ver">v1</span> <span class="tag tag-warn">⚠ 需要更新</span>
-            </div>
-            <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 1 周前 · 2 个节点引用的 OP 已升级</div>
+        <!-- 分页控件 -->
+        <div class="pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 0;margin-top:12px;font-size:13px;color:var(--text-dim)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>每页</span>
+            <select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="10">10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="1000">1000</option>
+            </select>
+            <span id="totalCount">共 0 条</span>
           </div>
-          <div class="row-actions">
-            <button class="btn btn-sm" disabled>执行</button>
-            <button class="btn btn-sm" onclick="openEditor('log_analysis')">编辑</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm" onclick="openExport('log_analysis','v1')">导出</button>
-            <button class="btn btn-sm btn-danger">删除</button>
+          <div style="display:flex;align-items:center;gap:4px">
+            <button class="btn btn-sm" id="prevPage" onclick="changePage(-1)">上一页</button>
+            <span id="pageInfo" style="padding:0 12px">1 / 1</span>
+            <button class="btn btn-sm" id="nextPage" onclick="changePage(1)">下一页</button>
           </div>
-          <div class="detail-panel" style="display:none"></div>
-        </div>
-
-        <div class="row">
-          <div class="row-icon">📋</div>
-          <div class="row-body">
-            <div class="row-name" style="cursor:pointer" onclick="toggleDetail(this,'code_review','v3')">
-              <span class="expand-arrow">▶</span> code_review <span class="tag tag-ver">v3</span>
-            </div>
-            <div class="row-desc">5 节点 · 入参 1 · 出参 1 · 1 个月前</div>
-          </div>
-          <div class="row-actions">
-            <button class="btn btn-sm btn-ghost-primary" onclick="openExecute('code_review')">执行</button>
-            <button class="btn btn-sm" onclick="openEditor('code_review')">编辑</button>
-            <button class="btn btn-sm">复制</button>
-            <button class="btn btn-sm" onclick="openExport('code_review','v3')">导出</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -397,7 +366,7 @@
           </div>
           <div class="field">
             <label>描述</label>
-            <input type="text" value="部署流程" />
+            <input type="text" id="wfDesc" value="部署流程" />
           </div>
         </div>
 
@@ -405,34 +374,16 @@
           <span>Workflow 入参</span>
           <button class="btn btn-sm" onclick="addWorkflowInput()">＋ 添加</button>
         </div>
-        <div class="param-table" id="wfInputTable">
-          <div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>
-          <div class="pt-row pt-in">
-            <input type="text" value="target_env" />
-            <select><option>string</option></select>
-            <select><option>是</option><option>否</option></select>
-            <input type="text" value="" placeholder="default" />
-            <input type="text" value="目标环境" placeholder="description" />
-            <button class="pt-del" onclick="this.closest('.pt-row').remove()">✕</button>
-          </div>
-        </div>
+        <div class="param-table" id="wfInputTable"></div>
 
         <div class="section-title">
           <span>Workflow 出参</span>
           <button class="btn btn-sm" onclick="addWorkflowOutput()">＋ 添加</button>
         </div>
-        <div class="param-table" id="wfOutputTable">
-          <div class="pt-head pt-out"><span>name</span><span>from (nodeId.outputName)</span><span>description</span><span></span></div>
-          <div class="pt-row pt-out">
-            <input type="text" value="deploy_url" />
-            <input type="text" value="node_deploy.url" />
-            <input type="text" value="部署后的 URL" />
-            <button class="pt-del" onclick="this.closest('.pt-row').remove()">✕</button>
-          </div>
-        </div>
+        <div class="param-table" id="wfOutputTable"></div>
       </div>
 
-      <!-- 三栏：OP 库 + 画布 + 节点详情 -->
+      <!-- 三栏：OP 库 + 画布 + 节点详情（三栏常驻） -->
       <div class="dag-card" id="dagCard">
 
         <!-- 左侧 OP 库 -->
@@ -482,20 +433,19 @@
           </div>
         </div>
 
-        <!-- 右侧节点详情面板 -->
+        <!-- 右侧节点详情面板（常驻） -->
         <aside class="node-panel" id="nodePanel">
           <div class="panel-resizer" id="panelResizer"></div>
           <div class="panel-head">
             <span>节点详情</span>
-            <button class="panel-collapse" onclick="togglePanel()" title="收起面板">⇥</button>
           </div>
           <div class="panel-body" id="nodePanelBody"></div>
+          <div class="panel-foot" id="nodePanelFoot" style="display:none">
+            <button class="btn" onclick="cancelNodeEdit()">取消</button>
+            <button class="btn btn-primary" onclick="saveNodeEdit()">保存</button>
+          </div>
         </aside>
 
-      </div>
-
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn" onclick="togglePanel()" id="expandPanelBtn" style="display:none">⇤ 展开节点详情</button>
       </div>
     </div>
 
@@ -652,36 +602,12 @@
           <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
           <button class="btn" onclick="pickExportDirectory()">选择</button>
         </div>
-        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
+        <div class="hint">点击 [选择] 弹出系统文件夹选择框，选中后回填目录名</div>
       </div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('exportModal')">取消</button>
       <button class="btn btn-primary" id="confirmExportBtn" disabled onclick="confirmExport()">导出</button>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
-<div class="overlay" id="dirPickerModal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-head">选择导出目录</div>
-    <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
-      <div class="field">
-        <label>目录绝对路径</label>
-        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
-      </div>
-      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
-        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
-        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
-      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
     </div>
   </div>
 </div>
@@ -698,12 +624,11 @@
   var START_ID = '__start__';
   var END_ID   = '__end__';
   var NODE_W = 130, NODE_H = 46;
-  /* OP 节点三色锚点相对节点顶部的中心 Y 偏移 */
   var ANCHOR_Y = { on_failure: 11.5, on_success: 21.5, always: 31.5 };
   var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
   var EDGE_MARKER = { on_success: 'arr-g', on_failure: 'arr-r', always: 'arr-b' };
 
-  /* ==================== OP 库数据（含入参定义） ==================== */
+  /* ==================== OP 库数据 ==================== */
   var OP_LIB = [
     { name: 'check_tests',    type: 'prompt',     version: 2, timeout: 300,
       inputs: [{ name: 'test_cmd', required: true }],
@@ -733,7 +658,6 @@
 
   var TYPE_ICON = { prompt: '💬', bash: '🐚', python: '🐍', powershell: '⚡' };
 
-  /* 快速查找 OP 定义 */
   function findOpDef(name) {
     for (var i = 0; i < OP_LIB.length; i++) {
       if (OP_LIB[i].name === name) return OP_LIB[i];
@@ -743,87 +667,82 @@
 
   /* ==================== Workflow 数据 ==================== */
 
-  /* 系统 Start / End 节点模板 */
   function makeStartNode() { return { kind: 'start', x: 20,  y: 175 }; }
   function makeEndNode()   { return { kind: 'end',   x: 850, y: 175 }; }
 
-  /* 5 个 OP 节点的初始定义（部署流程） */
-  function makeDeployNodes() {
+  /* 空 Workflow：仅 Start + End */
+  function makeEmptyNodes() {
     return {
       __start__: makeStartNode(),
-      node_check: {
-        kind: 'op', op: 'check_tests', opVersion: 2, type: 'prompt', timeout: 300,
-        client: 'Claude Code',
-        bindings: [ { name: 'test_cmd', kind: 'literal', from: 'npm run test' } ],
-        retry: null, outdated: false, x: 190, y: 60
-      },
-      node_review: {
-        kind: 'op', op: 'review', opVersion: 2, type: 'prompt', timeout: 600,
-        client: 'Claude Code',
-        bindings: [ { name: 'test_result', kind: 'node_output', from: 'node_check.result' } ],
-        retry: { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 },
-        outdated: false, x: 360, y: 60
-      },
-      node_deploy: {
-        kind: 'op', op: 'deploy', opVersion: 2, type: 'prompt', timeout: 120,
-        client: 'Claude Code',
-        bindings: [ { name: 'target_env', kind: 'workflow_input', from: 'target_env' } ],
-        retry: { on: 'failure', max: 2, backoff: 'linear', interval: 2000 },
-        outdated: false, x: 530, y: 60
-      },
-      node_notify: {
-        kind: 'op', op: 'notify', opVersion: 1, type: 'prompt', timeout: 60,
-        client: 'Claude Code',
-        bindings: [ { name: 'message', kind: 'node_output', from: 'node_deploy.url' } ],
-        retry: null, outdated: false, x: 700, y: 60
-      },
-      node_notify_fail: {
-        kind: 'op', op: 'notify_fail', opVersion: 1, type: 'prompt', timeout: 60,
-        client: 'Claude Code', bindings: [], retry: null, outdated: false,
-        x: 360, y: 265
-      },
       __end__: makeEndNode()
     };
   }
+  function makeEmptyEdges() { return []; }
 
-  function makeDeployEdges() {
-    return [
-      { from: '__start__',         to: 'node_check',       condition: 'on_success' },
-      { from: 'node_check',        to: 'node_review',      condition: 'on_success' },
-      { from: 'node_check',        to: 'node_notify_fail', condition: 'on_failure' },
-      { from: 'node_review',       to: 'node_deploy',      condition: 'on_success' },
-      { from: 'node_review',       to: 'node_notify',      condition: 'always' },
-      { from: 'node_deploy',       to: 'node_notify',      condition: 'on_success' },
-      { from: 'node_notify',       to: '__end__',          condition: 'on_success' },
-      { from: 'node_notify_fail',  to: '__end__',          condition: 'on_success' }
-    ];
+  /* 5 个 OP 节点的完整示例 */
+  /* 从 mock-data.js 的 WORKFLOWS 初始化编辑数据（与预览界面共享同一数据源） */
+  function buildNodesFromWf(wfName) {
+    var wf = WORKFLOWS[wfName];
+    var nodes = {};
+    Object.keys(wf.nodes).forEach(function(id) {
+      var n = wf.nodes[id];
+      if (n.kind === 'start') {
+        nodes[id] = makeStartNode();
+      } else if (n.kind === 'end') {
+        nodes[id] = makeEndNode();
+      } else {
+        // OP 节点：从 mock-data 读取基础字段，补充编辑所需字段
+        nodes[id] = {
+          kind: 'op',
+          op: n.op,
+          opVersion: n.opVersion || 1,
+          type: 'prompt',
+          timeout: 300,
+          client: 'Claude Code',
+          bindings: [],
+          params: n.params || {},
+          retry: n.retry || null,
+          outdated: false,
+          x: n.x || 200,
+          y: n.y || 60
+        };
+        // 把 params 转成 bindings
+        if (n.params) {
+          Object.keys(n.params).forEach(function(k) {
+            nodes[id].bindings.push({ name: k, kind: 'literal', from: n.params[k] });
+          });
+        }
+      }
+    });
+    return nodes;
   }
 
-  /* deploy_workflow */
-  var NODES_DEPLOY = makeDeployNodes();
-  var EDGES_DEPLOY = makeDeployEdges();
+  function buildEdgesFromWf(wfName) {
+    var wf = WORKFLOWS[wfName];
+    return (wf.edges || []).map(function(e) {
+      return { from: e[0], to: e[1], condition: e[2] };
+    });
+  }
 
-  /* log_analysis：node_check / node_review 落后于当前版本 */
-  var NODES_LOG = JSON.parse(JSON.stringify(NODES_DEPLOY));
-  NODES_LOG.node_check.opVersion = 1; NODES_LOG.node_check.outdated = true;
-  NODES_LOG.node_review.opVersion = 1; NODES_LOG.node_review.outdated = true;
-  var EDGES_LOG = JSON.parse(JSON.stringify(EDGES_DEPLOY));
-
-  /* code_review：全部已同步 */
-  var NODES_CODE = JSON.parse(JSON.stringify(NODES_DEPLOY));
-  var EDGES_CODE = JSON.parse(JSON.stringify(EDGES_DEPLOY));
-
-  var WORKFLOW_DATA = {
-    deploy_workflow: { nodes: NODES_DEPLOY, edges: EDGES_DEPLOY, version: 'v2' },
-    log_analysis:    { nodes: NODES_LOG,    edges: EDGES_LOG,    version: 'v1' },
-    code_review:     { nodes: NODES_CODE,   edges: EDGES_CODE,   version: 'v3' }
-  };
+  /* 从 WORKFLOWS 初始化 3 条 Workflow 的编辑数据 */
+  var WORKFLOW_DATA = {};
+  Object.keys(WORKFLOWS).forEach(function(name) {
+    WORKFLOW_DATA[name] = {
+      nodes: buildNodesFromWf(name),
+      edges: buildEdgesFromWf(name),
+      version: 'v' + WORKFLOWS[name].version
+    };
+  });
 
   var nodeSeq = 100;
   var currentWf = 'deploy_workflow';
   var currentVersion = 'v2';
-  var selectedNodeId = 'node_deploy';
+  var selectedNodeId = null;
   var dragOp = null;
+
+  /* 编辑草稿（节点详情面板的临时数据） */
+  var editingNodeId = null;
+  var editingDraft = null;
 
   function curNodes() { return WORKFLOW_DATA[currentWf].nodes; }
   function curEdges() { return WORKFLOW_DATA[currentWf].edges; }
@@ -833,62 +752,174 @@
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    execute: document.getElementById('view-execute'),
-    detail: document.getElementById('view-detail')
+    execute: document.getElementById('view-execute')
   };
-  var currentDetail = { name: '', version: '' };
 
+  function showView(name) {
+    Object.keys(views).forEach(function (k) {
+      views[k].classList.toggle('active', k === name);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function closeView() { showView('list'); }
+
+  /* ==================== Toast ==================== */
+  var toastTimer = null;
+  function showToast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1800);
+  }
+
+  /* ==================== 渲染 Workflow 列表 ==================== */
+  /* ---------- 分页状态 ---------- */
+  var allWorkflows = [];
+  var currentPage = 1;
+  var pageSize = 10;
+
+  function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSize').value);
+    currentPage = 1;
+    renderWorkflowList();
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    renderWorkflowList();
+  }
+
+  function renderWorkflowList(workflows) {
+    if (workflows) { allWorkflows = workflows; }
+    var container = document.getElementById('workflowList');
+
+    var total = allWorkflows.length;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+    var pageData = allWorkflows.slice(start, end);
+
+    // 表头
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">' +
+      '<thead>' +
+        '<tr style="border-bottom:2px solid var(--border)">' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:25%">名称</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">入参数</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">出参数</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">节点数</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:39%">操作</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+
+    pageData.forEach(function(w) {
+      var nodeCount = Object.keys(w.nodes).length;
+      var warnTag = w.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
+      var execBtn = w.needsUpdate
+        ? '<button class="btn btn-sm" disabled>执行</button>'
+        : '<button class="btn btn-sm btn-ghost-primary" onclick="openExecute(\'' + w.name + '\')">执行</button>';
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + w.name + '\',\'v' + w.version + '\')">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + w.name + '</span> <span class="tag tag-ver">v' + w.version + '</span>' + warnTag +
+        '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + w.inputs.length + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + w.outputs.length + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + nodeCount + '</td>' +
+        '<td style="padding:10px 8px">' +
+          execBtn +
+          '<button class="btn btn-sm" onclick="openEditor(\'' + w.name + '\')">编辑</button>' +
+          '<button class="btn btn-sm">复制</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + w.name + '\',\'v' + w.version + '\')">导出</button>' +
+          '<button class="btn btn-sm btn-danger">删除</button>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="detail-row" style="display:none">' +
+        '<td colspan="5" style="padding:0;background:var(--bg-hover, #f8f9fa)">' +
+          '<div class="detail-panel" style="display:none"></div>' +
+        '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // 更新分页信息
+    document.getElementById('totalCount').textContent = '共 ' + total + ' 条';
+    document.getElementById('pageInfo').textContent = currentPage + ' / ' + totalPages;
+    document.getElementById('prevPage').disabled = currentPage <= 1;
+    document.getElementById('nextPage').disabled = currentPage >= totalPages;
+  }
+  // 调用接口获取数据
+  mockFetch('/api/workflows').then(renderWorkflowList);
+
+  /* ==================== 行内展开详情（列表） ==================== */
   function toggleDetail(el, name, version) {
-    var row = el.closest('.row');
-    var panel = row.querySelector('.detail-panel');
-    var isOpen = panel.style.display !== 'none';
-    document.querySelectorAll('.row.expanded').forEach(function(r) {
-      r.classList.remove('expanded');
+    var row = el.closest('tr');
+    var detailRow = row.nextElementSibling;
+    var isOpen = detailRow && detailRow.classList.contains('detail-row') && detailRow.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.detail-row').forEach(function(r) {
+      r.style.display = 'none';
       var p = r.querySelector('.detail-panel');
       if (p) p.style.display = 'none';
     });
-    if (!isOpen) {
+    document.querySelectorAll('.expand-arrow').forEach(function(a) {
+      a.textContent = '▶';
+    });
+    if (!isOpen && detailRow) {
+      var panel = detailRow.querySelector('.detail-panel');
+      panel.id = 'panel_' + name;
       if (!panel.dataset.loaded) {
         panel.innerHTML = buildDetailPanel(name, version);
         panel.dataset.loaded = '1';
       }
-      row.classList.add('expanded');
       panel.style.display = 'block';
+      detailRow.style.display = 'table-row';
+      el.querySelector('.expand-arrow').textContent = '▼';
     }
   }
+
   function buildDetailPanel(name, version) {
-    var nodeData = {
-      node_start: { x: 30, y: 140, label: '▶ Start', kind: 'sys' },
-      node_check: { x: 180, y: 50, label: 'check_tests', op: 'check_tests', opVersion: 'v2', client: 'Claude Code', params: { test_cmd: 'npm run test' }, retry: null },
-      node_review: { x: 350, y: 50, label: 'review', op: 'review', opVersion: 'v1', client: 'Claude Code', params: { test_result: '${node_check.result}' }, retry: { max: 3, backoff: 'exponential', interval: 1000 } },
-      node_deploy: { x: 520, y: 50, label: 'deploy', op: 'deploy', opVersion: 'v1', client: 'Claude Code', params: { target_env: '${workflow.target_env}' }, retry: { max: 2, backoff: 'linear', interval: 2000 } },
-      node_notify: { x: 690, y: 50, label: 'notify', op: 'notify', opVersion: 'v2', client: 'Claude Code', params: { message: '${node_deploy.url}' }, retry: null },
-      node_notify_fail: { x: 350, y: 220, label: 'notify_fail', op: 'notify_fail', opVersion: 'v1', client: 'Claude Code', params: {}, retry: null },
-      node_end: { x: 860, y: 140, label: 'End ◉', kind: 'sys' }
-    };
-    var edges = [
-      ['node_start','node_check','on_success'],
-      ['node_check','node_review','on_success'],
-      ['node_check','node_notify_fail','on_failure'],
-      ['node_review','node_deploy','on_success'],
-      ['node_review','node_notify','always'],
-      ['node_deploy','node_notify','on_success'],
-      ['node_notify','node_end','on_success'],
-      ['node_notify_fail','node_end','on_success']
-    ];
-    var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
+    var wf = WORKFLOWS[name];
+    if (!wf) return '<div style="padding:20px">未找到 Workflow 数据</div>';
+
+    // 从 WORKFLOWS 数据中动态生成节点
+    var nodeData = {};
+    var nodeIds = Object.keys(wf.nodes);
+    nodeIds.forEach(function(id) {
+      var n = wf.nodes[id];
+      // 系统节点显示特殊标签，OP 节点显示 OP 名
+      var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.op || id);
+      nodeData[id] = {
+        x: n.x,
+        y: n.y,
+        label: label,
+        kind: n.kind,
+        op: n.op,
+        opVersion: n.opVersion,
+        params: n.params,
+        retry: n.retry
+      };
+    });
+
+    // 直接使用 mock-data 中定义的边（包含成功/失败/完成分支）
+    var edges = wf.edges || [];
 
     var html = '<div class="detail-canvas">';
     html += '<div style="width:100%;background:#fff;border-bottom:1px solid var(--border);padding:10px 16px;font-size:13px">';
-    html += '<table class="detail-table" style="margin:0">';
-    html += '<tr><td class="dt-k" style="width:60px">入参</td><td style="width:50%">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+    html += '<tr><td style="color:var(--text-3);width:60px;padding:6px 10px;border-bottom:1px solid var(--border-soft)">入参</td><td style="padding:6px 10px;border-bottom:1px solid var(--border-soft)">';
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">target_env (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">目标环境</td></tr>';
+    (wf.inputs || []).forEach(function(i) {
+      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + i.name + ' (' + i.type + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + (i.description || '') + '</td></tr>';
+    });
     html += '</table>';
-    html += '</td><td class="dt-k" style="width:60px">出参</td><td>';
+    html += '</td><td style="color:var(--text-3);width:60px;padding:6px 10px;border-bottom:1px solid var(--border-soft)">出参</td><td style="padding:6px 10px;border-bottom:1px solid var(--border-soft)">';
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">deploy_url (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">部署后的访问地址</td></tr>';
-    html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">status (string)</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">最终状态</td></tr>';
+    (wf.outputs || []).forEach(function(o) {
+      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + o.name + ' (' + o.type + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + (o.description || '') + '</td></tr>';
+    });
     html += '</table>';
     html += '</td></tr>';
     html += '</table>';
@@ -925,8 +956,8 @@
     html += '</div>';
     return html;
   }
+
   function showDcNode(el, id) {
-    // 高亮选中节点
     el.closest('.detail-panel').querySelectorAll('.dc-node').forEach(function(n) {
       n.style.borderColor = '';
       n.style.boxShadow = '';
@@ -934,27 +965,29 @@
     el.style.borderColor = '#f59e0b';
     el.style.boxShadow = '0 0 0 3px rgba(245,158,11,.3)';
     var panel = el.closest('.detail-panel').querySelector('.dc-right');
-    var nodeData = {
-      node_check: { label: 'check_tests', op: 'check_tests', opVersion: 'v2', client: 'Claude Code', params: { test_cmd: 'npm run test' }, retry: null },
-      node_review: { label: 'review', op: 'review', opVersion: 'v1', client: 'Claude Code', params: { test_result: '${node_check.result}' }, retry: { max: 3, backoff: 'exponential', interval: 1000 } },
-      node_deploy: { label: 'deploy', op: 'deploy', opVersion: 'v1', client: 'Claude Code', params: { target_env: '${workflow.target_env}' }, retry: { max: 2, backoff: 'linear', interval: 2000 } },
-      node_notify: { label: 'notify', op: 'notify', opVersion: 'v2', client: 'Claude Code', params: { message: '${node_deploy.url}' }, retry: null },
-      node_notify_fail: { label: 'notify_fail', op: 'notify_fail', opVersion: 'v1', client: 'Claude Code', params: {}, retry: null }
-    };
-    var n = nodeData[id];
+    // 从当前展开的 Workflow 数据中动态读取节点
+    var wfName = el.closest('.detail-panel').id.replace('panel_', '');
+    var wf = WORKFLOWS[wfName];
+    var n = wf && wf.nodes ? wf.nodes[id] : null;
     if (!n) return;
-    var html = '<div style="font-weight:600;margin-bottom:12px">' + n.label + '</div>';
-    html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">OP 配置</div>';
+    var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.op || id);
+    var html = '<div style="font-weight:600;margin-bottom:12px">' + label + '</div>';
+    html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">节点配置</div>';
     html += '<div style="font-size:13px;line-height:2">';
-    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + n.op + '</span></div>';
-    html += '<div><span style="color:var(--text-3)">版本：</span>v' + n.opVersion + '</div>';
-    html += '<div><span style="color:var(--text-3)">Client：</span>' + n.client + '</div>';
+    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + (n.op || '-') + '</span></div>';
+    html += '<div><span style="color:var(--text-3)">版本：</span>v' + (n.opVersion || '-') + '</div>';
     html += '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin:14px 0 8px">节点参数</div>';
     html += '<div style="font-size:13px;line-height:2">';
-    Object.keys(n.params).forEach(function(k) {
-      html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + n.params[k] + '</span></div>';
-    });
+    var params = n.params || {};
+    var paramKeys = Object.keys(params);
+    if (paramKeys.length === 0) {
+      html += '<div style="color:var(--text-3)">无参数</div>';
+    } else {
+      paramKeys.forEach(function(k) {
+        html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + params[k] + '</span></div>';
+      });
+    }
     html += '</div>';
     html += '<div style="font-size:13px;line-height:2">';
     if (n.retry) {
@@ -967,24 +1000,6 @@
     panel.innerHTML = html;
   }
 
-  function showView(name) {
-    Object.keys(views).forEach(function (k) {
-      views[k].classList.toggle('active', k === name);
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-  function closeView() { showView('list'); }
-
-  /* ==================== Toast ==================== */
-  var toastTimer = null;
-  function showToast(msg) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1800);
-  }
-
   /* ==================== 编辑器 ==================== */
   function openEditor(name) {
     var isNew = !name;
@@ -993,8 +1008,8 @@
     if (isNew) {
       currentWf = '__new__';
       WORKFLOW_DATA.__new__ = {
-        nodes: makeDeployNodes(),
-        edges: makeDeployEdges(),
+        nodes: makeEmptyNodes(),
+        edges: makeEmptyEdges(),
         version: 'v1'
       };
       currentVersion = 'v1';
@@ -1006,27 +1021,55 @@
     document.getElementById('editorName').textContent = name || '（未命名）';
     document.getElementById('editorVersion').textContent = currentVersion;
     document.getElementById('wfName').value = name || '';
+    document.getElementById('wfDesc').value = isNew ? '' : '部署流程';
 
     document.getElementById('warnBar').style.display = isLog ? 'flex' : 'none';
+
+    /* 渲染入参 / 出参：新建时为空，编辑时显示示例数据 */
+    renderWfParams(isNew);
+
+    /* 重置编辑状态 */
+    selectedNodeId = null;
+    editingNodeId = null;
+    editingDraft = null;
 
     document.getElementById('opLibSearch').value = '';
     renderOpLib();
     renderCanvas();
-
-    if (curNodes().node_deploy) {
-      selectedNodeId = 'node_deploy';
-      markSelected('node_deploy');
-      renderNodePanel('node_deploy');
-    } else {
-      selectedNodeId = null;
-      renderNodePanel(null);
-    }
-
-    document.getElementById('dagCard').classList.remove('panel-collapsed');
-    document.getElementById('expandPanelBtn').style.display = 'none';
-    document.getElementById('nodePanel').style.display = 'flex';
+    renderNodePanel(null);
 
     showView('editor');
+  }
+
+  /* 渲染 Workflow 入参 / 出参表格 */
+  function renderWfParams(isNew) {
+    var inputTable = document.getElementById('wfInputTable');
+    var outputTable = document.getElementById('wfOutputTable');
+
+    var inputHead = '<div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>';
+    var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from (nodeId.outputName)</span><span>description</span><span></span></div>';
+
+    if (isNew) {
+      inputTable.innerHTML = inputHead;
+      outputTable.innerHTML = outputHead;
+    } else {
+      inputTable.innerHTML = inputHead +
+        '<div class="pt-row pt-in">' +
+          '<input type="text" value="target_env" />' +
+          '<select><option>string</option></select>' +
+          '<select><option>是</option><option>否</option></select>' +
+          '<input type="text" value="" placeholder="default" />' +
+          '<input type="text" value="目标环境" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+      outputTable.innerHTML = outputHead +
+        '<div class="pt-row pt-out">' +
+          '<input type="text" value="deploy_url" />' +
+          '<input type="text" value="node_deploy.url" />' +
+          '<input type="text" value="部署后的 URL" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+    }
   }
 
   function addWorkflowInput() {
@@ -1139,7 +1182,6 @@
       canvas.appendChild(el);
     });
 
-    /* 锚点拖拽连线（Start 只有一个绿色锚点；End 无锚点，靠拖到节点上松手连接） */
     canvas.querySelectorAll('.anchor').forEach(function (a) {
       a.addEventListener('mousedown', function (e) {
         e.stopPropagation();
@@ -1152,7 +1194,6 @@
     renderEdges();
   }
 
-  /* 计算某节点的"入口点"（左侧）与"出口点"（右侧）*/
   function getNodeOutPoint(id, condition) {
     var n = curNodes()[id];
     if (!n) return null;
@@ -1228,7 +1269,6 @@
       renderEdges();
     }
   }
-  // 点击其他位置关闭右键菜单
   document.addEventListener('click', function () {
     document.getElementById('edgeCtxMenu').style.display = 'none';
   });
@@ -1273,7 +1313,6 @@
 
   function createNode(op, x, y) {
     var id = 'node_' + (++nodeSeq);
-    /* 自动带出该 OP 的全部入参（未绑定状态） */
     var bindings = (op.inputs || []).map(function (inp) {
       return { name: inp.name, kind: '', from: '' };
     });
@@ -1300,7 +1339,6 @@
   var tempPath = null;
 
   function startConnect(fromNode, condition, e) {
-    /* Start 节点只有一个绿色锚点，on_success */
     connecting = { from: fromNode, condition: condition };
     var canvas = document.getElementById('dagCanvas');
     var rect = canvas.getBoundingClientRect();
@@ -1341,7 +1379,6 @@
       if (!targetEl) return;
       var toId = targetEl.dataset.node;
 
-      /* 约束：Start 不能作为入边目标 */
       if (toId === START_ID) {
         showToast('Start 节点不能有入边');
         return;
@@ -1351,7 +1388,6 @@
         return;
       }
 
-      /* 重复边检测 */
       var exists = curEdges().some(function (ed) {
         return ed.from === cn.from && ed.to === toId && ed.condition === cn.condition;
       });
@@ -1368,33 +1404,63 @@
     document.addEventListener('mouseup', onUp);
   }
 
-  /* ==================== 节点选中与面板 ==================== */
+  /* ==================== 节点选中与编辑草稿 ==================== */
+
   function selectNode(id) {
     selectedNodeId = id;
     markSelected(id);
+    startEdit(id);
+  }
+
+  /* 开始编辑：拷贝节点数据到草稿 */
+  function startEdit(id) {
+    editingNodeId = id;
+    var n = curNodes()[id];
+
+    if (!n || n.kind === 'start' || n.kind === 'end') {
+      editingDraft = null;
+      renderNodePanel(id);
+      return;
+    }
+
+    editingDraft = {
+      client: n.client,
+      bindings: JSON.parse(JSON.stringify(n.bindings || [])),
+      retry: n.retry ? JSON.parse(JSON.stringify(n.retry)) : null
+    };
     renderNodePanel(id);
   }
 
-  function togglePanel() {
-    var card = document.getElementById('dagCard');
-    var btn = document.getElementById('expandPanelBtn');
-    var panel = document.getElementById('nodePanel');
-    var collapsed = card.classList.toggle('panel-collapsed');
-    if (collapsed) {
-      panel.style.display = 'none';
-      btn.style.display = 'inline-block';
-    } else {
-      panel.style.display = 'flex';
-      btn.style.display = 'none';
-    }
+  /* 保存：把草稿写回节点数据 */
+  function saveNodeEdit() {
+    if (!editingNodeId || !editingDraft) { showToast('无可保存的修改'); return; }
+    var n = curNodes()[editingNodeId];
+    if (!n || n.kind !== 'op') return;
+
+    n.client = editingDraft.client;
+    n.bindings = JSON.parse(JSON.stringify(editingDraft.bindings));
+    n.retry = editingDraft.retry ? JSON.parse(JSON.stringify(editingDraft.retry)) : null;
+
+    renderNodePanel(editingNodeId);
+    showToast('已保存');
   }
 
-  /* 节点详情面板 */
+  /* 取消：丢弃草稿，还原为进入该节点时的配置 */
+  function cancelNodeEdit() {
+    if (!editingNodeId) return;
+    startEdit(editingNodeId);
+    showToast('已取消');
+  }
+
+  /* ==================== 节点详情面板（常驻） ==================== */
   function renderNodePanel(id) {
     var body = document.getElementById('nodePanelBody');
+    var foot = document.getElementById('nodePanelFoot');
 
+    /* 空状态：未选中节点 */
     if (!id || !curNodes()[id]) {
       body.innerHTML = '<div class="panel-empty">请在画布中选择一个节点<br/>以查看和编辑其配置</div>';
+      foot.style.display = 'none';
       return;
     }
 
@@ -1409,6 +1475,7 @@
         '</div>' +
         '<div class="panel-note system">ℹ 无需配置</div>' +
         '<div class="panel-note system" style="margin-top:8px">ℹ 从右侧 🟢 锚点连线到后续节点</div>';
+      foot.style.display = 'none';
       return;
     }
 
@@ -1421,12 +1488,25 @@
         '</div>' +
         '<div class="panel-note system">ℹ 无需配置</div>' +
         '<div class="panel-note system" style="margin-top:8px">ℹ 从任意节点连线到 End 左侧入边</div>';
+      foot.style.display = 'none';
       return;
     }
 
-    /* ===== OP 节点 ===== */
+    /* ===== OP 节点：从编辑草稿渲染 ===== */
+    var draft = editingDraft;
+    if (!draft) {
+      /* 兜底：无草稿，直接显示只读 */
+      editingDraft = {
+        client: n.client,
+        bindings: JSON.parse(JSON.stringify(n.bindings || [])),
+        retry: n.retry ? JSON.parse(JSON.stringify(n.retry)) : null
+      };
+      draft = editingDraft;
+    }
+
     var html = '';
 
+    /* 基本信息 */
     html += '<div class="panel-section">';
     html += '<div class="ps-row"><span class="ps-k">节点</span><span class="ps-v mono">' + id + '</span></div>';
     html += '<div class="ps-row"><span class="ps-k">OP</span><span class="ps-v">' + n.op +
@@ -1444,30 +1524,30 @@
     /* Client */
     html += '<div class="panel-section" style="margin-top:16px">';
     html += '<label class="ps-label">Client</label>';
-    html += '<select class="ps-select" onchange="setNodeClient(\'' + id + '\', this.value)">';
+    html += '<select class="ps-select" onchange="setNodeClient(this.value)">';
     ['Claude Code', 'Codex CLI', '本地 Bash', '本地 Python', '本地 PowerShell'].forEach(function (c) {
-      html += '<option' + (n.client === c ? ' selected' : '') + '>' + c + '</option>';
+      html += '<option' + (draft.client === c ? ' selected' : '') + '>' + c + '</option>';
     });
     html += '</select>';
     html += '</div>';
 
-    /* 参数绑定（可编辑） */
+    /* 参数绑定 */
     html += '<div class="panel-section">';
     html += '<label class="ps-label">参数绑定</label>';
-    if (!n.bindings || !n.bindings.length) {
+    if (!draft.bindings || !draft.bindings.length) {
       html += '<div class="panel-hint">该节点无入参</div>';
     } else {
-      n.bindings.forEach(function (b, idx) {
+      draft.bindings.forEach(function (b, idx) {
         html += '<div class="binding-item">';
         html += '<div class="bi-name">' + b.name + '</div>';
         html += '<div class="bi-opts">';
 
         /* 前置节点出参 */
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + id + '_' + idx + '"' + (b.kind === 'node_output' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + id + '\',' + idx + ',\'node_output\')" />' +
+                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'node_output' ? ' checked' : '') +
+                  ' onchange="setBindingKind(' + idx + ',\'node_output\')" />' +
                   '<span>前置节点出参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingFrom(\'' + id + '\',' + idx + ',this.value)">' +
+                  '<span class="bi-field"><select onchange="setBindingFrom(' + idx + ',this.value)">' +
                     buildNodeOutputOptions(id, b) +
                   '</select></span>' +
                 '</label>';
@@ -1475,10 +1555,10 @@
         /* Workflow 入参 */
         var wfOptHtml = buildWorkflowInputOptions(b);
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + id + '_' + idx + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + id + '\',' + idx + ',\'workflow_input\')" />' +
+                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
+                  ' onchange="setBindingKind(' + idx + ',\'workflow_input\')" />' +
                   '<span>Workflow 入参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingFrom(\'' + id + '\',' + idx + ',this.value)">' +
+                  '<span class="bi-field"><select onchange="setBindingFrom(' + idx + ',this.value)">' +
                     wfOptHtml +
                   '</select></span>' +
                 '</label>';
@@ -1486,11 +1566,11 @@
         /* 字面量 */
         var litVal = (b.kind === 'literal' ? (b.from || '') : '');
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + id + '_' + idx + '"' + (b.kind === 'literal' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + id + '\',' + idx + ',\'literal\')" />' +
+                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'literal' ? ' checked' : '') +
+                  ' onchange="setBindingKind(' + idx + ',\'literal\')" />' +
                   '<span>字面量</span>' +
                   '<span class="bi-field"><input type="text" value="' + escapeAttr(litVal) +
-                    '" placeholder="输入字面量" oninput="setBindingFrom(\'' + id + '\',' + idx + ',this.value)" /></span>' +
+                    '" placeholder="输入字面量" oninput="setBindingFrom(' + idx + ',this.value)" /></span>' +
                 '</label>';
 
         html += '</div></div>';
@@ -1501,47 +1581,47 @@
     /* 重试策略 */
     html += '<div class="panel-section">';
     html += '<label class="ps-label">重试策略</label>';
-    if (!n.retry) {
+    if (!draft.retry) {
       html += '<div class="panel-hint">未配置重试</div>';
-      html += '<button class="btn btn-sm" style="margin-top:8px" onclick="addRetry(\'' + id + '\')">＋ 添加重试</button>';
+      html += '<button class="btn btn-sm" style="margin-top:8px" onclick="addRetry()">＋ 添加重试</button>';
     } else {
       html += '<div class="retry-grid">';
-      html += '<div class="rg-row"><span class="rg-k">on</span><select class="ps-select ps-select-sm" onchange="setRetry(\'' + id + '\',\'on\',this.value)">';
-      html += '<option value="failure"' + (n.retry.on === 'failure' ? ' selected' : '') + '>失败时</option>';
-      html += '<option value="success"' + (n.retry.on === 'success' ? ' selected' : '') + '>成功时</option>';
+      html += '<div class="rg-row"><span class="rg-k">on</span><select class="ps-select ps-select-sm" onchange="setRetry(\'on\',this.value)">';
+      html += '<option value="failure"' + (draft.retry.on === 'failure' ? ' selected' : '') + '>失败时</option>';
+      html += '<option value="success"' + (draft.retry.on === 'success' ? ' selected' : '') + '>成功时</option>';
       html += '</select></div>';
       html += '<div class="rg-row"><span class="rg-k">max</span>' +
-              '<input class="ps-input ps-input-sm" type="number" value="' + n.retry.max + '" onchange="setRetry(\'' + id + '\',\'max\',this.value)"/></div>';
-      html += '<div class="rg-row"><span class="rg-k">backoff</span><select class="ps-input ps-select-sm" onchange="setRetry(\'' + id + '\',\'backoff\',this.value)">';
-      html += '<option value="constant"' + (n.retry.backoff === 'constant' ? ' selected' : '') + '>固定间隔</option>';
-      html += '<option value="linear"' + (n.retry.backoff === 'linear' ? ' selected' : '') + '>线性退避</option>';
-      html += '<option value="exponential"' + (n.retry.backoff === 'exponential' ? ' selected' : '') + '>指数退避</option>';
+              '<input class="ps-input ps-input-sm" type="number" value="' + draft.retry.max + '" onchange="setRetry(\'max\',this.value)"/></div>';
+      html += '<div class="rg-row"><span class="rg-k">backoff</span><select class="ps-input ps-select-sm" onchange="setRetry(\'backoff\',this.value)">';
+      html += '<option value="constant"' + (draft.retry.backoff === 'constant' ? ' selected' : '') + '>固定间隔</option>';
+      html += '<option value="linear"' + (draft.retry.backoff === 'linear' ? ' selected' : '') + '>线性退避</option>';
+      html += '<option value="exponential"' + (draft.retry.backoff === 'exponential' ? ' selected' : '') + '>指数退避</option>';
       html += '</select></div>';
       html += '<div class="rg-row"><span class="rg-k">interval</span>' +
-              '<input class="ps-input ps-input-sm" type="number" value="' + n.retry.interval + '" onchange="setRetry(\'' + id + '\',\'interval\',this.value)"/></div>';
+              '<input class="ps-input ps-input-sm" type="number" value="' + draft.retry.interval + '" onchange="setRetry(\'interval\',this.value)"/></div>';
       html += '</div>';
-      html += '<button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="removeRetry(\'' + id + '\')">删除重试</button>';
+      html += '<button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="removeRetry()">删除重试</button>';
     }
     html += '<div class="panel-note">ℹ 超时由 OP 定义（' + n.timeout +
             's），超时是终止信号，不参与重试</div>';
     html += '</div>';
 
     body.innerHTML = html;
+    foot.style.display = 'flex';
   }
 
   function escapeAttr(s) {
     return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
-  /* 前置节点出参下拉选项 */
   function buildNodeOutputOptions(currentId, binding) {
     var html = '<option value="">— 选择 —</option>';
     var nodes = curNodes();
 
     Object.keys(nodes).forEach(function (nid) {
-      if (nid === currentId) return;                       // 排除自身
+      if (nid === currentId) return;
       var n = nodes[nid];
-      if (n.kind !== 'op') return;                         // 排除 Start / End
+      if (n.kind !== 'op') return;
       var def = findOpDef(n.op);
       var outs = def ? (def.outputs || []) : [];
       outs.forEach(function (out) {
@@ -1554,9 +1634,7 @@
     return html;
   }
 
-  /* Workflow 入参下拉选项 */
   function buildWorkflowInputOptions(binding) {
-    /* 简化处理：读取当前 Workflow 的入参定义（此处静态列出 target_env） */
     var wfInputs = ['target_env'];
     return wfInputs.map(function (w) {
       var sel = (binding.kind === 'workflow_input' && binding.from === w) ? ' selected' : '';
@@ -1564,40 +1642,41 @@
     }).join('');
   }
 
-  /* ==================== 节点配置修改 ==================== */
-  function setNodeClient(id, val) {
-    if (curNodes()[id]) curNodes()[id].client = val;
+  /* ==================== 草稿修改函数 ==================== */
+  function setNodeClient(val) {
+    if (!editingDraft) return;
+    editingDraft.client = val;
   }
 
-  function setBindingKind(id, idx, kind) {
-    var b = curNodes()[id].bindings[idx];
+  function setBindingKind(idx, kind) {
+    if (!editingDraft) return;
+    var b = editingDraft.bindings[idx];
     b.kind = kind;
     if (kind === 'workflow_input') b.from = 'target_env';
     else if (kind === 'literal') b.from = '';
     else b.from = '';
-    renderNodePanel(id);
+    renderNodePanel(editingNodeId);
   }
 
-  function setBindingFrom(id, idx, val) {
-    var b = curNodes()[id].bindings[idx];
-    b.from = val;
-    /* 不重渲染，避免输入时失焦 */
+  function setBindingFrom(idx, val) {
+    if (!editingDraft) return;
+    editingDraft.bindings[idx].from = val;
   }
 
-  function addRetry(id) {
-    curNodes()[id].retry = { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 };
-    renderNodePanel(id);
+  function addRetry() {
+    if (!editingDraft) return;
+    editingDraft.retry = { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 };
+    renderNodePanel(editingNodeId);
   }
-  function removeRetry(id) {
-    curNodes()[id].retry = null;
-    renderNodePanel(id);
+  function removeRetry() {
+    if (!editingDraft) return;
+    editingDraft.retry = null;
+    renderNodePanel(editingNodeId);
   }
-
-  function setRetry(id, key, val) {
-    var r = curNodes()[id].retry;
-    if (!r) return;
+  function setRetry(key, val) {
+    if (!editingDraft || !editingDraft.retry) return;
     if (key === 'max' || key === 'interval') val = parseInt(val, 10) || 0;
-    r[key] = val;
+    editingDraft.retry[key] = val;
   }
 
   /* ==================== 节点详情面板拖拽宽度 ==================== */
@@ -1694,13 +1773,22 @@
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
   }
+  var exportDirHandle = null;
   function pickExportDirectory() {
-    window.showDirectoryPicker().then(function (dirHandle) {
-      document.getElementById('exportDir').value = dirHandle.name;
-      document.getElementById('confirmExportBtn').disabled = false;
-    }).catch(function () {
-      // 用户取消选择
-    });
+    if (window.showDirectoryPicker) {
+      window.showDirectoryPicker().then(function (dirHandle) {
+        exportDirHandle = dirHandle;
+        document.getElementById('exportDir').value = dirHandle.name;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }).catch(function () {});
+    } else {
+      var dir = prompt('请输入导出目录路径：', 'C:\\export');
+      if (dir) {
+        exportDirHandle = null;
+        document.getElementById('exportDir').value = dir;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }
+    }
   }
   async function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
@@ -1714,14 +1802,23 @@
         ops.file(op + '.yaml', 'name: ' + op + '\nversion: v2\n');
       });
       var blob = await zip.generateAsync({ type: 'blob' });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-      alert('已导出：' + dir + '\\' + fileName);
+
+      if (exportDirHandle) {
+        var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
+        var writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+      } else {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        alert('已导出：' + dir + '\\' + fileName);
+      }
       closeModal('exportModal');
     } catch (e) {
       alert('导出失败：' + e.message);
@@ -1767,7 +1864,7 @@
   /* ==================== 初始化 ==================== */
   renderOpLib();
   renderCanvas();
-  renderNodePanel('node_deploy');
+  renderNodePanel(null);
 </script>
 </body>
 </html>

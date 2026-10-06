@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Job 管理 · AI 自动化</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="mock-data.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -71,12 +72,15 @@
   .job-card{display:flex;align-items:flex-start;gap:13px;padding:15px 16px;border-bottom:1px solid var(--border-soft);transition:background .12s;flex-wrap:wrap}
   .expand-arrow{display:inline-block;font-size:10px;color:var(--text-3);transition:transform .15s;width:14px}
   .job-card.expanded .expand-arrow{transform:rotate(90deg)}
-  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft);border-bottom:1px solid var(--border-soft)}
+  .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft,#f9fafc);border-bottom:1px solid var(--border-soft)}
   .detail-table{width:100%;border-collapse:collapse;font-size:13px}
-  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft)}
-  .detail-table .dt-k{color:var(--text-3);width:80px;white-space:nowrap;font-weight:500}
-  .detail-table .dt-v{color:var(--text-1)}
-  .detail-table .mono{font-family:var(--mono);font-size:12px}
+  .detail-table td{padding:6px 10px;border-bottom:1px solid var(--border-soft);vertical-align:top}
+  .detail-table .dt-k{color:var(--text-3);width:90px;white-space:nowrap;font-weight:500}
+  .detail-table .dt-v{color:var(--text)}
+  .detail-table .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .sub-table{width:100%;border-collapse:collapse;font-size:12px}
+  .sub-table td{padding:3px 8px;border-bottom:1px solid var(--border-soft)}
+  .sub-table .st-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:180px}
   .job-card:last-child{border-bottom:0}
   .job-card:hover{background:#fafbfd}
   .job-icon{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:15px}
@@ -127,16 +131,16 @@
 
   .editor-foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 20px;border-top:1px solid var(--border-soft);background:#fafbfd}
 
-  /* 键值对表格 */
-  .kv-table{width:100%;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:12.5px}
-  .kv-table .kv-head,.kv-table .kv-row{display:grid;grid-template-columns:1.1fr 1.6fr 34px;gap:8px;padding:8px 10px;align-items:center}
-  .kv-table .kv-head{background:#f7f8fb;color:var(--text-3);font-weight:600;font-size:11.5px;border-bottom:1px solid var(--border)}
-  .kv-table .kv-row{border-bottom:1px solid var(--border-soft);background:#fff}
-  .kv-table .kv-row:last-child{border-bottom:0}
-  .kv-table .kv-row input{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:12.5px;outline:none;background:#fbfbfd}
-  .kv-table .kv-row input:focus{border-color:#b9cbfb;background:#fff}
-  .kv-del{width:26px;height:26px;border:0;background:#fff;color:#c3c8d0;border-radius:5px;cursor:pointer;font-size:15px;line-height:1}
-  .kv-del:hover{background:#fdf2f2;color:var(--failed)}
+  /* 初始入参表格（name 只读，value 可编辑） */
+  .input-table{width:100%;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:12.5px}
+  .input-table .it-head,.input-table .it-row{display:grid;grid-template-columns:1.2fr 2fr;gap:8px;padding:8px 10px;align-items:center}
+  .input-table .it-head{background:#f7f8fb;color:var(--text-3);font-weight:600;font-size:11.5px;border-bottom:1px solid var(--border)}
+  .input-table .it-row{border-bottom:1px solid var(--border-soft);background:#fff}
+  .input-table .it-row:last-child{border-bottom:0}
+  .input-table .it-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--text-2)}
+  .input-table .it-row input{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:12.5px;outline:none;background:#fbfbfd}
+  .input-table .it-row input:focus{border-color:#b9cbfb;background:#fff}
+  .input-table .it-empty{padding:14px;text-align:center;color:var(--text-3);font-size:12.5px;background:#fbfbfd}
 
   /* 触发方式 / 并发 */
   .cron-row{display:flex;align-items:center;gap:10px;margin-top:8px;padding-left:24px}
@@ -175,7 +179,7 @@
   .opt-desc{font-size:12px;color:var(--text-3);margin-top:2px}
 
   .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
-  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-2);line-height:1.9;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:12px 14px;margin-top:12px;white-space:pre;max-height:280px;overflow:auto}
   .required{color:var(--failed);margin-left:2px}
 </style>
 </head>
@@ -228,149 +232,26 @@
           </div>
         </div>
 
-        <!-- daily_cleanup：定时 OP Job，启用，需要更新 -->
-        <article class="job-card">
-          <div class="job-icon">⏰</div>
-          <div class="job-main">
-            <div class="job-title">
-              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'daily_cleanup','v2','op')"><span class="expand-arrow">▶</span> daily_cleanup</span>
-              <span class="tag tag-ver">v2</span>
-              <span class="badge badge-success">✅ 启用</span>
-              <span class="tag tag-warn">⚠ 需要更新</span>
-            </div>
-            <div class="job-sub">
-              <span><span class="k">OP:</span>clean_logs <span class="tag tag-op">v2</span></span>
-              <span><span class="k">非交互</span></span>
-              <span><span class="k">Cron:</span><span class="mono">0 2 * * *</span></span>
-            </div>
-            <div class="job-last">
-              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 3.2s · 1 周前</span>
-            </div>
-          </div>
-          <div class="job-actions">
-            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
-            <button class="btn btn-sm" onclick="openEditor('daily_cleanup','op')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('daily_cleanup','v2','op')">导出</button>
-            <button class="btn btn-sm">禁用</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
-        </article>
+        <div id="jobList"></div>
 
-        <!-- hourly_check：定时 Workflow Job，需要更新，失败 -->
-        <article class="job-card">
-          <div class="job-icon">⏰</div>
-          <div class="job-main">
-            <div class="job-title">
-              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'hourly_check','v1','workflow')"><span class="expand-arrow">▶</span> hourly_check</span>
-              <span class="tag tag-ver">v1</span>
-              <span class="badge badge-success">✅ 启用</span>
-              <span class="tag tag-warn">⚠ 需要更新</span>
-            </div>
-            <div class="job-sub">
-              <span><span class="k">Workflow:</span>deploy_workflow <span class="tag tag-wf">v1</span></span>
-              <span><span class="k">非交互</span></span>
-              <span><span class="k">Cron:</span><span class="mono">0 * * * *</span></span>
-            </div>
-            <div class="job-last">
-              <span><span class="k">最近执行:</span><span class="badge badge-failed">✗ 失败</span> 8.1s · 2 小时前</span>
-            </div>
+        <!-- 分页控件 -->
+        <div class="pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 0;margin-top:12px;font-size:13px;color:var(--text-dim)">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>每页</span>
+            <select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="10">10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="1000">1000</option>
+            </select>
+            <span id="totalCount">共 0 条</span>
           </div>
-          <div class="job-actions">
-            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
-            <button class="btn btn-sm btn-ghost-primary" disabled title="需要更新后才能重试">重试</button>
-            <button class="btn btn-sm" onclick="openEditor('hourly_check','workflow')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('hourly_check','v1','workflow')">导出</button>
-            <button class="btn btn-sm">禁用</button>
-            <button class="btn btn-sm btn-danger">删除</button>
+          <div style="display:flex;align-items:center;gap:4px">
+            <button class="btn btn-sm" id="prevPage" onclick="changePage(-1)">上一页</button>
+            <span id="pageInfo" style="padding:0 12px">1 / 1</span>
+            <button class="btn btn-sm" id="nextPage" onclick="changePage(1)">下一页</button>
           </div>
-          <div class="detail-panel" style="display:none"></div>
-        </article>
-
-        <!-- manual_deploy：手动 Workflow Job -->
-        <article class="job-card">
-          <div class="job-icon">📌</div>
-          <div class="job-main">
-            <div class="job-title">
-              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'manual_deploy','v2','workflow')"><span class="expand-arrow">▶</span> manual_deploy</span>
-              <span class="tag tag-ver">v2</span>
-            </div>
-            <div class="job-sub">
-              <span><span class="k">Workflow:</span>deploy_workflow <span class="tag tag-wf">v2</span></span>
-              <span><span class="k">非交互</span></span>
-              <span><span class="k">触发:</span>手动</span>
-            </div>
-            <div class="job-last">
-              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 15.3s · 3 小时前</span>
-            </div>
-          </div>
-          <div class="job-actions">
-            <button class="btn btn-sm btn-ghost-primary" onclick="openRun('manual_deploy','Workflow','deploy_workflow','v2','手动')">运行</button>
-            <button class="btn btn-sm" onclick="openEditor('manual_deploy','workflow')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('manual_deploy','v2','workflow')">导出</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
-        </article>
-
-        <!-- weekly_report：定时 Workflow Job，已禁用 + 需要更新 -->
-        <article class="job-card">
-          <div class="job-icon">⏰</div>
-          <div class="job-main">
-            <div class="job-title">
-              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'weekly_report','v1','op')"><span class="expand-arrow">▶</span> weekly_report</span>
-              <span class="tag tag-ver">v1</span>
-              <span class="badge badge-off">⏸ 已禁用</span>
-              <span class="tag tag-warn">⚠ 需要更新</span>
-            </div>
-            <div class="job-sub">
-              <span><span class="k">Workflow:</span>log_analysis <span class="tag tag-wf">v1</span></span>
-              <span><span class="k">非交互</span></span>
-              <span><span class="k">Cron:</span><span class="mono">0 9 * * 1</span></span>
-            </div>
-            <div class="job-last">
-              <span><span class="k">最近执行:</span><span class="badge badge-success">✓ 成功</span> 22.7s · 5 天前</span>
-            </div>
-          </div>
-          <div class="job-actions">
-            <button class="btn btn-sm" disabled title="已禁用 / 需要更新">运行</button>
-            <button class="btn btn-sm" onclick="openEditor('weekly_report','workflow')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('weekly_report','v1','workflow')">导出</button>
-            <button class="btn btn-sm">启用</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
-        </article>
-
-        <!-- data_sync：定时 OP Job，启用，需要更新，失败 -->
-        <article class="job-card">
-          <div class="job-icon">⏰</div>
-          <div class="job-main">
-            <div class="job-title">
-              <span class="job-name" style="cursor:pointer" onclick="toggleDetail(this,'data_sync','v3','op')"><span class="expand-arrow">▶</span> data_sync</span>
-              <span class="tag tag-ver">v2</span>
-              <span class="badge badge-success">✅ 启用</span>
-              <span class="tag tag-warn">⚠ 需要更新</span>
-            </div>
-            <div class="job-sub">
-              <span><span class="k">OP:</span>process_data <span class="tag tag-op">v2</span></span>
-              <span><span class="k">非交互</span></span>
-              <span><span class="k">Cron:</span><span class="mono">0 3 * * *</span></span>
-            </div>
-            <div class="job-last">
-              <span><span class="k">最近执行:</span><span class="badge badge-failed">✗ 失败</span> 4.1s · 5 小时前</span>
-            </div>
-          </div>
-          <div class="job-actions">
-            <button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>
-            <button class="btn btn-sm" onclick="openEditor('data_sync','op')">编辑</button>
-            <button class="btn btn-sm" onclick="openExport('data_sync','v2','op')">导出</button>
-            <button class="btn btn-sm">禁用</button>
-            <button class="btn btn-sm btn-danger">删除</button>
-          </div>
-          <div class="detail-panel" style="display:none"></div>
-        </article>
-
+        </div>
       </div>
     </div>
 
@@ -396,36 +277,38 @@
             </div>
           </div>
 
-          <!-- 目标类型 -->
+          <!-- 目标类型（新建时无勾选） -->
           <div class="field">
             <label>目标类型</label>
             <div class="radio-group">
               <label><input type="radio" name="targetKind" value="op" onchange="switchTarget('op')" /> 单个 OP</label>
-              <label><input type="radio" name="targetKind" value="workflow" checked onchange="switchTarget('workflow')" /> 整个 Workflow</label>
+              <label><input type="radio" name="targetKind" value="workflow" onchange="switchTarget('workflow')" /> 整个 Workflow</label>
             </div>
           </div>
 
-          <!-- OP target -->
+          <!-- OP target（选择"单个 OP"时显示） -->
           <div class="target-config" id="target-op">
             <div class="field">
-              <label>OP</label>
-              <select id="opSelect">
-                <option>check_tests</option>
-                <option>review</option>
-                <option>deploy</option>
-                <option>notify</option>
-                <option>notify_fail</option>
-                <option>clean_logs</option>
-                <option>process_data</option>
-                <option>health_check</option>
-                <option>collect_metrics</option>
-                <option>run_lint</option>
+              <label>OP<span class="required">*</span></label>
+              <select id="opSelect" onchange="onOpSelected()">
+                <option value="">— 请选择 OP —</option>
+                <option value="check_tests">check_tests</option>
+                <option value="review">review</option>
+                <option value="deploy">deploy</option>
+                <option value="notify">notify</option>
+                <option value="notify_fail">notify_fail</option>
+                <option value="clean_logs">clean_logs</option>
+                <option value="process_data">process_data</option>
+                <option value="health_check">health_check</option>
+                <option value="collect_metrics">collect_metrics</option>
+                <option value="run_lint">run_lint</option>
               </select>
               <div class="hint">ℹ 超时由 OP 定义</div>
             </div>
             <div class="field">
               <label>Client<span class="required">*</span></label>
               <select id="clientSelect">
+                <option value="">— 请选择 Client —</option>
                 <option>Claude Code</option>
                 <option>Codex CLI</option>
                 <option>本地 Bash</option>
@@ -436,14 +319,15 @@
             </div>
           </div>
 
-          <!-- Workflow target -->
-          <div class="target-config active" id="target-workflow">
+          <!-- Workflow target（选择"整个 Workflow"时显示） -->
+          <div class="target-config" id="target-workflow">
             <div class="field">
-              <label>Workflow</label>
-              <select id="wfSelect">
-                <option>deploy_workflow</option>
-                <option>log_analysis</option>
-                <option>code_review</option>
+              <label>Workflow<span class="required">*</span></label>
+              <select id="wfSelect" onchange="onWfSelected()">
+                <option value="">— 请选择 Workflow —</option>
+                <option value="deploy_workflow">deploy_workflow</option>
+                <option value="log_analysis">log_analysis</option>
+                <option value="code_review">code_review</option>
               </select>
               <div class="hint">ℹ 超时由各节点引用的 OP 定义</div>
             </div>
@@ -453,45 +337,40 @@
           <div class="field">
             <label>工作区<span class="required">*</span></label>
             <div style="display:flex;gap:8px">
-              <input type="text" value="/path/to/workspace" style="flex:1" />
+              <input type="text" id="jobWorkspace" value="" placeholder="请选择或填写工作区" style="flex:1" />
               <button class="btn">选择</button>
             </div>
           </div>
 
-          <!-- 初始入参 -->
+          <!-- 初始入参：name 来源于 OP/Workflow，value 由用户填写 -->
           <div class="section-title">
             <span>初始入参</span>
-            <button class="btn btn-sm" onclick="addInputRow()">＋ 添加</button>
           </div>
-          <div class="kv-table" id="inputTable">
-            <div class="kv-head"><span>name</span><span>value</span><span></span></div>
-            <div class="kv-row">
-              <input type="text" value="endpoint" />
-              <input type="text" value="https://..." />
-              <button class="kv-del" onclick="this.closest('.kv-row').remove()">✕</button>
-            </div>
+          <div class="input-table" id="inputTable">
+            <div class="it-empty">选择 OP 或 Workflow 后，将自动带出参数列表</div>
           </div>
 
-          <!-- 触发方式（手动 / 定时 二选一） -->
+          <!-- 触发方式（新建时无勾选） -->
           <div class="section-title">触发方式</div>
           <div class="radio-group">
             <label><input type="radio" name="triggerKind" value="manual" onchange="switchTrigger('manual')" /> 手动</label>
-            <label><input type="radio" name="triggerKind" value="schedule" checked onchange="switchTrigger('schedule')" /> 定时</label>
+            <label><input type="radio" name="triggerKind" value="schedule" onchange="switchTrigger('schedule')" /> 定时</label>
           </div>
-          <div class="cron-row" id="cronRow">
-            <input type="text" value="0 * * * *" placeholder="Cron 表达式" />
+          <div class="cron-row" id="cronRow" style="display:none">
+            <input type="text" id="cronInput" value="" placeholder="Cron 表达式，如 0 * * * *" />
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2);cursor:pointer">
               <input type="checkbox" checked style="accent-color:var(--accent);width:14px;height:14px" /> 启用
             </label>
           </div>
 
-          <!-- 并发策略 -->
+          <!-- 并发策略（界面中文） -->
           <div class="field" style="margin-top:18px;max-width:260px">
             <label>并发策略</label>
-            <select>
-              <option>skip</option>
-              <option>queue</option>
-              <option>parallel</option>
+            <select id="concurrency">
+              <option value="">— 请选择 —</option>
+              <option value="skip">跳过</option>
+              <option value="queue">排队</option>
+              <option value="parallel">并行</option>
             </select>
           </div>
 
@@ -609,9 +488,9 @@
 ├── manifest.json
 ├── job.yaml
 ├── workflows/
-│   └── health.yaml
+│   └── deploy_workflow.yaml
 └── ops/
-    ├── health_check.yaml
+    ├── check_tests.yaml
     └── ...</div>
       <div class="field" style="margin-top:14px">
         <label>导出目录</label>
@@ -619,7 +498,7 @@
           <input type="text" id="exportDir" placeholder="未选择目录" style="flex:1" />
           <button class="btn" onclick="pickExportDirectory()">选择</button>
         </div>
-        <div class="hint">点击 [选择] 弹出系统目录选择框（标题"选择导出目录"），选中后回填绝对路径</div>
+        <div class="hint">点击 [选择] 弹出系统文件夹选择框，选中后回填目录名</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -629,83 +508,13 @@
   </div>
 </div>
 
-<!-- ==================== 目录选择框（模拟系统对话框） ==================== -->
-<div class="overlay" id="dirPickerModal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-head">选择导出目录</div>
-    <div class="modal-body">
-      <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">请选择导出文件保存到的目录</div>
-      <div class="field">
-        <label>目录绝对路径</label>
-        <input type="text" id="dirPickerPath" placeholder="如 F:\export\my-dir" style="width:100%" />
-      </div>
-      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Desktop')">桌面</button>
-        <button class="btn btn-sm" onclick="setDirPath('C:\\Users\\guohua\\Downloads')">下载</button>
-        <button class="btn btn-sm" onclick="setDirPath('D:\\\\')">D:\</button>
-        <button class="btn btn-sm" onclick="setDirPath('E:\\\\')">E:\</button>
-      </div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" onclick="closeModal('dirPickerModal')">取消</button>
-      <button class="btn btn-primary" onclick="confirmDirPicker()">选择文件夹</button>
-    </div>
-  </div>
-</div>
-
 <script>
   /* ==================== 视图切换 ==================== */
   var views = {
     list: document.getElementById('view-list'),
     editor: document.getElementById('view-editor'),
-    run: document.getElementById('view-run'),
-    detail: document.getElementById('view-detail')
+    run: document.getElementById('view-run')
   };
-  var currentDetail = { name: '', version: '', type: '' };
-
-  function toggleDetail(el, name, version, type) {
-    var card = el.closest('.job-card');
-    var panel = card.querySelector('.detail-panel');
-    var isOpen = panel.style.display !== 'none';
-    document.querySelectorAll('.job-card.expanded').forEach(function(r) {
-      r.classList.remove('expanded');
-      var p = r.querySelector('.detail-panel');
-      if (p) p.style.display = 'none';
-    });
-    if (!isOpen) {
-      if (!panel.dataset.loaded) {
-        panel.innerHTML = buildDetailTable(name, version, type);
-        panel.dataset.loaded = '1';
-      }
-      card.classList.add('expanded');
-      panel.style.display = 'block';
-    }
-  }
-  function buildDetailTable(name, version, type) {
-    var data = {
-      'daily_cleanup': { target: 'OP clean_logs v2', cron: '0 2 * * *', enabled: true, note: '需要更新', params: { endpoint: 'localhost:8080' } },
-      'hourly_check': { target: 'Workflow deploy_workflow v1', cron: '0 * * * *', enabled: true, note: '需要更新', params: {} },
-      'manual_deploy': { target: 'Workflow deploy_workflow v2', cron: '手动触发', enabled: true, note: '', params: { target_env: 'production' } },
-      'weekly_report': { target: 'OP report v1', cron: '0 0 * * 1', enabled: true, note: '', params: {} },
-      'data_sync': { target: 'OP process_data v2', cron: '0 */6 * * *', enabled: false, note: '', params: { source: 'db://primary' } }
-    };
-    var s = data[name] || { target: type, cron: '-', enabled: true, note: '', params: {} };
-    var html = '<table class="detail-table">';
-    html += '<tr><td class="dt-k">类型</td><td class="dt-v">' + type + '</td><td class="dt-k">状态</td><td class="dt-v">' + (s.enabled ? '✅ 启用' : '⏸ 禁用') + '</td><td class="dt-k">备注</td><td class="dt-v">' + (s.note || '-') + '</td></tr>';
-    html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + s.target + '</td></tr>';
-    html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + s.cron + '</td></tr>';
-    if (Object.keys(s.params).length) {
-      html += '<tr><td class="dt-k">入参</td><td colspan="5">';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      Object.keys(s.params).forEach(function(k) {
-        html += '<tr><td class="mono" style="padding:3px 8px;width:180px;border-bottom:1px solid var(--border-soft)">' + k + '</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + s.params[k] + '</td></tr>';
-      });
-      html += '</table>';
-      html += '</td></tr>';
-    }
-    html += '</table>';
-    return html;
-  }
 
   function showView(name) {
     Object.keys(views).forEach(function (k) {
@@ -718,53 +527,325 @@
     showView('list');
   }
 
+  /* ==================== 分页状态 ==================== */
+  var allJobs = [];
+  var currentPage = 1;
+  var pageSize = 10;
+
+  function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSize').value);
+    currentPage = 1;
+    renderJobList();
+  }
+
+  function changePage(delta) {
+    currentPage += delta;
+    renderJobList();
+  }
+
+  /* ==================== 渲染 Job 列表 ==================== */
+  function renderJobList(jobs) {
+    if (jobs) { allJobs = jobs; }
+    var container = document.getElementById('jobList');
+
+    var total = allJobs.length;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start = (currentPage - 1) * pageSize;
+    var end = Math.min(start + pageSize, total);
+    var pageData = allJobs.slice(start, end);
+
+    // 表头
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">' +
+      '<thead>' +
+        '<tr style="border-bottom:2px solid var(--border)">' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:18%">名称</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:20%">Target</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">工作区</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">触发方式</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:8%">是否启用</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:12%">最近运行结果</th>' +
+          '<th style="text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:500;width:18%">操作</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>';
+
+    pageData.forEach(function(j) {
+      var enabledBadge = j.trigger.enabled
+        ? '<span class="badge badge-success">✅ 启用</span>'
+        : '<span class="badge badge-off">⏸ 已禁用</span>';
+      var warnTag = j.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
+      var cronText = j.trigger.kind === 'schedule' ? 'Cron: ' + j.trigger.cron : '手动';
+      var targetType = j.target.kind === 'op' ? 'OP' : 'Workflow';
+      var targetName = j.target.op || j.target.workflow;
+      var workspace = j.workspace || '-';
+      var lastStatus = j.lastRun.status === 'success'
+        ? '<span class="badge badge-success">✓ 成功</span>'
+        : '<span class="badge badge-failed">✗ 失败</span>';
+      var runBtn = j.needsUpdate || !j.trigger.enabled
+        ? '<button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>'
+        : '<button class="btn btn-sm btn-ghost-primary" onclick="openRun(\'' + j.name + '\',\'' + targetType + '\',\'' + targetName + '\',\'v' + (j.target.opVersion || j.target.workflowVersion) + '\',\'手动\')">运行</button>';
+      var retryBtn = (j.lastRun.status === 'failed' && !j.needsUpdate && j.trigger.enabled)
+        ? '<button class="btn btn-sm btn-ghost-primary" disabled title="需要更新后才能重试">重试</button>'
+        : '';
+      var toggleBtn = j.trigger.enabled
+        ? '<button class="btn btn-sm">禁用</button>'
+        : '<button class="btn btn-sm">启用</button>';
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="toggleDetail(this,\'' + j.name + '\',\'v' + j.version + '\',\'' + j.target.kind + '\')">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + j.name + '</span> <span class="tag tag-ver">v' + j.version + '</span>' + warnTag +
+        '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+          '<span class="tag ' + (j.target.kind === 'op' ? 'tag-op' : 'tag-wf') + '">' + targetType + '</span> ' + targetName + ' v' + (j.target.opVersion || j.target.workflowVersion) +
+        '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + workspace + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px">' + cronText + '</td>' +
+        '<td style="padding:10px 8px">' + enabledBadge + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px">' + lastStatus + ' ' + j.lastRun.duration + '</td>' +
+        '<td style="padding:10px 8px">' +
+          runBtn + retryBtn +
+          '<button class="btn btn-sm" onclick="openEditor(\'' + j.name + '\',\'' + j.target.kind + '\')">编辑</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + j.name + '\',\'v' + j.version + '\',\'' + j.target.kind + '\')">导出</button>' +
+          toggleBtn +
+          '<button class="btn btn-sm btn-danger">删除</button>' +
+        '</td>' +
+      '</tr>' +
+      '<tr class="detail-row" style="display:none">' +
+        '<td colspan="7" style="padding:0;background:var(--bg-hover, #f8f9fa)">' +
+          '<div class="detail-panel" style="display:none"></div>' +
+        '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // 更新分页信息
+    document.getElementById('totalCount').textContent = '共 ' + total + ' 条';
+    document.getElementById('pageInfo').textContent = currentPage + ' / ' + totalPages;
+    document.getElementById('prevPage').disabled = currentPage <= 1;
+    document.getElementById('nextPage').disabled = currentPage >= totalPages;
+  }
+  // 调用接口获取数据
+  mockFetch('/api/jobs').then(renderJobList);
+
+  /* ==================== 行内展开详情（列表） ==================== */
+  function toggleDetail(el, name, version, type) {
+    var row = el.closest('tr');
+    var detailRow = row.nextElementSibling;
+    var isOpen = detailRow && detailRow.classList.contains('detail-row') && detailRow.style.display !== 'none';
+    // 折叠所有其他展开的
+    document.querySelectorAll('.detail-row').forEach(function(r) {
+      r.style.display = 'none';
+      var p = r.querySelector('.detail-panel');
+      if (p) p.style.display = 'none';
+    });
+    document.querySelectorAll('.expand-arrow').forEach(function(a) {
+      a.textContent = '▶';
+    });
+    if (!isOpen && detailRow) {
+      var panel = detailRow.querySelector('.detail-panel');
+      if (!panel.dataset.loaded) {
+        panel.innerHTML = buildDetailTable(name, version, type);
+        panel.dataset.loaded = '1';
+      }
+      panel.style.display = 'block';
+      detailRow.style.display = 'table-row';
+      el.querySelector('.expand-arrow').textContent = '▼';
+    }
+  }
+
+  function buildDetailTable(name, version, type) {
+    var data = {
+      'daily_cleanup': { target: 'OP clean_logs v2', cron: '0 2 * * *', enabled: true, note: '需要更新', params: { endpoint: 'localhost:8080' } },
+      'hourly_check': { target: 'Workflow deploy_workflow v1', cron: '0 * * * *', enabled: true, note: '需要更新', params: {} },
+      'manual_deploy': { target: 'Workflow deploy_workflow v2', cron: '手动触发', enabled: true, note: '', params: { target_env: 'production' } },
+      'weekly_report': { target: 'Workflow log_analysis v1', cron: '0 9 * * 1', enabled: false, note: '需要更新', params: {} },
+      'data_sync': { target: 'OP process_data v2', cron: '0 3 * * *', enabled: true, note: '需要更新', params: { source: 'db://primary' } }
+    };
+    var s = data[name] || { target: type, cron: '-', enabled: true, note: '', params: {} };
+
+    var html = '<table class="detail-table">';
+    html += '<tr>' +
+      '<td class="dt-k">类型</td><td class="dt-v">' + type + '</td>' +
+      '<td class="dt-k">状态</td><td class="dt-v">' + (s.enabled ? '✅ 启用' : '⏸ 禁用') + '</td>' +
+      '<td class="dt-k">备注</td><td class="dt-v">' + (s.note || '-') + '</td>' +
+      '</tr>';
+    html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + s.target + '</td></tr>';
+    html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + s.cron + '</td></tr>';
+
+    if (Object.keys(s.params).length) {
+      html += '<tr><td class="dt-k">入参</td><td colspan="5">';
+      html += '<table class="sub-table">';
+      Object.keys(s.params).forEach(function(k) {
+        html += '<tr><td class="st-name">' + k + '</td><td>' + s.params[k] + '</td></tr>';
+      });
+      html += '</table>';
+      html += '</td></tr>';
+    }
+    html += '</table>';
+    return html;
+  }
+
   /* ==================== 编辑器 ==================== */
   var currentVersion = 'v1';
+  var isNewJob = false;
+
+  /* OP / Workflow 参数定义（用于带出初始入参 name） */
+  var OP_INPUTS = {
+    check_tests:    ['test_cmd'],
+    review:         ['test_result'],
+    deploy:         ['target_env'],
+    notify:         ['message'],
+    notify_fail:    [],
+    clean_logs:     ['endpoint'],
+    process_data:   ['source'],
+    health_check:   ['endpoint'],
+    collect_metrics:['endpoint'],
+    run_lint:       ['target']
+  };
+
+  var WF_INPUTS = {
+    deploy_workflow: ['target_env'],
+    log_analysis:    ['target_env'],
+    code_review:     ['target_env']
+  };
+
+  /* 保留的入参值（切换目标时按 name 保留已有的 value） */
+  var inputValues = {};
 
   function openEditor(name, targetKind) {
     var isNew = !name;
+    isNewJob = isNew;
+
     document.getElementById('editorName').textContent = name || '（未命名）';
     var ver = (name === 'daily_cleanup' || name === 'manual_deploy' || name === 'data_sync') ? 'v2' : 'v1';
+    if (isNew) ver = 'v1';
     document.getElementById('editorVersion').textContent = ver;
     currentVersion = ver;
 
     document.getElementById('jobName').value = name || '';
-    document.getElementById('jobDesc').value = name ? (name + ' 作业') : '';
+    document.getElementById('jobDesc').value = isNew ? '' : (name + ' 作业');
 
-    var kind = targetKind || 'workflow';
-    document.querySelector('input[name="targetKind"][value="' + kind + '"]').checked = true;
-    switchTarget(kind);
+    // 目标类型
+    if (isNew) {
+      // 新建：不勾选
+      document.querySelectorAll('input[name="targetKind"]').forEach(function(r) { r.checked = false; });
+      switchTarget('');
+      document.getElementById('opSelect').value = '';
+      document.getElementById('clientSelect').value = '';
+      document.getElementById('wfSelect').value = '';
+    } else {
+      var kind = targetKind || 'workflow';
+      document.querySelector('input[name="targetKind"][value="' + kind + '"]').checked = true;
+      switchTarget(kind);
+      if (kind === 'op') {
+        // 编辑已有 Job：按 name 填演示数据
+        if (name === 'daily_cleanup') {
+          document.getElementById('opSelect').value = 'clean_logs';
+          document.getElementById('clientSelect').value = '本地 PowerShell';
+        } else if (name === 'data_sync') {
+          document.getElementById('opSelect').value = 'process_data';
+          document.getElementById('clientSelect').value = '本地 Python';
+        } else {
+          document.getElementById('opSelect').value = 'check_tests';
+          document.getElementById('clientSelect').value = 'Claude Code';
+        }
+        onOpSelected();
+      } else {
+        if (name === 'hourly_check') {
+          document.getElementById('wfSelect').value = 'deploy_workflow';
+        } else if (name === 'manual_deploy') {
+          document.getElementById('wfSelect').value = 'deploy_workflow';
+        } else if (name === 'weekly_report') {
+          document.getElementById('wfSelect').value = 'log_analysis';
+        } else {
+          document.getElementById('wfSelect').value = 'deploy_workflow';
+        }
+        onWfSelected();
+      }
+    }
 
-    // 重置入参为 endpoint
-    document.getElementById('inputTable').innerHTML =
-      '<div class="kv-head"><span>name</span><span>value</span><span></span></div>' +
-      '<div class="kv-row">' +
-        '<input type="text" value="endpoint" />' +
-        '<input type="text" value="https://..." />' +
-        '<button class="kv-del" onclick="this.closest(\'.kv-row\').remove()">✕</button>' +
-      '</div>';
+    // 工作区
+    document.getElementById('jobWorkspace').value = isNew ? '' : '/path/to/workspace';
 
+    // 触发方式
+    if (isNew) {
+      document.querySelectorAll('input[name="triggerKind"]').forEach(function(r) { r.checked = false; });
+      document.getElementById('cronRow').style.display = 'none';
+      document.getElementById('cronInput').value = '';
+      document.getElementById('concurrency').value = '';
+    } else {
+      // 编辑已有 Job
+      var trig = 'schedule';
+      if (name === 'manual_deploy') trig = 'manual';
+      document.querySelector('input[name="triggerKind"][value="' + trig + '"]').checked = true;
+      switchTrigger(trig);
+      if (trig === 'schedule') {
+        var cronMap = { daily_cleanup: '0 2 * * *', hourly_check: '0 * * * *', weekly_report: '0 9 * * 1', data_sync: '0 3 * * *' };
+        document.getElementById('cronInput').value = cronMap[name] || '0 * * * *';
+      }
+      document.getElementById('concurrency').value = 'skip';
+    }
+
+    inputValues = {};
     showView('editor');
   }
 
   function switchTarget(kind) {
     document.getElementById('target-op').classList.toggle('active', kind === 'op');
     document.getElementById('target-workflow').classList.toggle('active', kind === 'workflow');
+    if (!kind) {
+      // 都不选时，隐藏两个 target 配置，清空初始入参
+      document.getElementById('target-op').classList.remove('active');
+      document.getElementById('target-workflow').classList.remove('active');
+      renderInitialInputs([]);
+    }
   }
 
   function switchTrigger(kind) {
     document.getElementById('cronRow').style.display = (kind === 'schedule') ? 'flex' : 'none';
   }
 
-  function addInputRow() {
+  /* 选择 OP 后带出参数 */
+  function onOpSelected() {
+    var opName = document.getElementById('opSelect').value;
+    if (!opName) { renderInitialInputs([]); return; }
+    var names = OP_INPUTS[opName] || [];
+    renderInitialInputs(names);
+  }
+
+  /* 选择 Workflow 后带出参数 */
+  function onWfSelected() {
+    var wfName = document.getElementById('wfSelect').value;
+    if (!wfName) { renderInitialInputs([]); return; }
+    var names = WF_INPUTS[wfName] || [];
+    renderInitialInputs(names);
+  }
+
+  /* 渲染初始入参：name 只读，value 由用户填写 */
+  function renderInitialInputs(names) {
     var table = document.getElementById('inputTable');
-    var row = document.createElement('div');
-    row.className = 'kv-row';
-    row.innerHTML =
-      '<input type="text" placeholder="name" />' +
-      '<input type="text" placeholder="value" />' +
-      '<button class="kv-del" onclick="this.closest(\'.kv-row\').remove()">✕</button>';
-    table.appendChild(row);
+    if (!names || !names.length) {
+      table.innerHTML = '<div class="it-empty">选择 OP 或 Workflow 后，将自动带出参数列表</div>';
+      return;
+    }
+    var html = '<div class="it-head"><span>name（来自 OP / Workflow）</span><span>value</span></div>';
+    names.forEach(function(nm) {
+      var val = inputValues[nm] != null ? inputValues[nm] : '';
+      html += '<div class="it-row">' +
+        '<span class="it-name">' + nm + '</span>' +
+        '<input type="text" data-name="' + nm + '" value="' + escapeAttr(val) + '" placeholder="填写参数值" oninput="onInputValue(this)" />' +
+      '</div>';
+    });
+    table.innerHTML = html;
+  }
+
+  function onInputValue(el) {
+    inputValues[el.dataset.name] = el.value;
+  }
+
+  function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
   /* ==================== 手动运行 ==================== */
@@ -776,7 +857,6 @@
   }
 
   function doRun() {
-    // 创建 Job Run → 后台执行 → 进入运行历史
     closeView();
   }
 
@@ -807,7 +887,7 @@
     closeView();
   }
 
-  /* ==================== 导出（选择目录并下载 ZIP） ==================== */
+  /* ==================== 导出 ==================== */
   var exportTargetName = '';
   var exportTargetVersion = '';
   var exportTargetType = '';
@@ -839,13 +919,22 @@
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
   }
+  var exportDirHandle = null;
   function pickExportDirectory() {
-    window.showDirectoryPicker().then(function (dirHandle) {
-      document.getElementById('exportDir').value = dirHandle.name;
-      document.getElementById('confirmExportBtn').disabled = false;
-    }).catch(function () {
-      // 用户取消选择
-    });
+    if (window.showDirectoryPicker) {
+      window.showDirectoryPicker().then(function (dirHandle) {
+        exportDirHandle = dirHandle;
+        document.getElementById('exportDir').value = dirHandle.name;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }).catch(function () {});
+    } else {
+      var dir = prompt('请输入导出目录路径：', 'C:\\export');
+      if (dir) {
+        exportDirHandle = null;
+        document.getElementById('exportDir').value = dir;
+        document.getElementById('confirmExportBtn').disabled = false;
+      }
+    }
   }
   async function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
@@ -859,14 +948,23 @@
       }
       zip.folder('ops').file('check_tests.yaml', 'name: check_tests\nversion: v2\n');
       var blob = await zip.generateAsync({ type: 'blob' });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-      alert('已导出：' + dir + '\\' + fileName);
+
+      if (exportDirHandle) {
+        var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
+        var writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+      } else {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        alert('已导出：' + dir + '\\' + fileName);
+      }
       closeModal('exportModal');
     } catch (e) {
       alert('导出失败：' + e.message);
@@ -914,8 +1012,7 @@
   }
 
   /* ==================== 初始化 ==================== */
-  switchTarget('workflow');
-  switchTrigger('schedule');
+  switchTarget('');
 </script>
 </body>
 </html>
