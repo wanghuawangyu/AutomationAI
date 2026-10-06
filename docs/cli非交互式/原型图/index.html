@@ -1026,22 +1026,9 @@
       // 查找对应的 Workflow 定义：
       // 1. 如果 jobName 直接在 WORKFLOWS 中，直接查询
       // 2. 否则先查 Job，再查 target.workflow
-      var wfName = run.jobName;
       var wfVersion = run.jobVersion;
-      return mockFetch('/api/workflows/' + wfName).then(function(wf) {
-        if (!wf) {
-          // 可能是 Job 触发的 Workflow，先查 Job
-          return mockFetch('/api/jobs/' + run.jobName).then(function(job) {
-            if (job && job.target && job.target.kind === 'workflow') {
-              wfName = job.target.workflow;
-              wfVersion = job.target.workflowVersion || run.jobVersion;
-              return mockFetch('/api/workflows/' + wfName).then(function(wf) {
-                return { run: run, wf: wf, wfVersion: wfVersion };
-              });
-            }
-            return { run: run, wf: null, wfVersion: wfVersion };
-          });
-        }
+      // 通过 run.workflowId 查询 Workflow 定义
+      return mockFetch('/api/workflows/' + run.workflowId).then(function(wf) {
         return { run: run, wf: wf, wfVersion: wfVersion };
       });
     }).then(function(result) {

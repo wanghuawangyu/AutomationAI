@@ -476,6 +476,7 @@ var RUN_HISTORY = [
     duration: 8.2,
     jobName: 'deploy_workflow',
     jobType: 'Workflow',
+    workflowId: 'wf-deploy',
     failedNode: 'node_deploy',
     steps: [
       { resultId: 'step-002', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON', outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2, attempts: [] },
@@ -498,6 +499,7 @@ var RUN_HISTORY = [
     duration: 8.2,
     jobName: 'hourly_check',
     jobType: 'Workflow',
+    workflowId: 'wf-hourly-check',
     failedNode: 'node_health',
     steps: [
       { resultId: 'step-006', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2, attempts: [] }
@@ -589,6 +591,7 @@ var RUN_HISTORY = [
     duration: 5.3,
     jobName: 'hourly_check',
     jobType: 'Workflow',
+    workflowId: 'wf-hourly-check',
     steps: [
       { resultId: 'step-011', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, duration: 5.3, attempts: [] }
     ]
@@ -606,7 +609,11 @@ function mockFetch(path) {
       else if (path === '/api/jobs') resolve(Object.values(JOBS));
       else if (path === '/api/runs') resolve(RUN_HISTORY);
       else if (path.startsWith('/api/ops/')) resolve(OPS[path.split('/')[3]]);
-      else if (path.startsWith('/api/workflows/')) resolve(WORKFLOWS[path.split('/')[3]]);
+      else if (path.startsWith('/api/workflows/')) {
+        var wfId = path.split('/')[3];
+        var found = Object.values(WORKFLOWS).find(function(w) { return w.id === wfId; });
+        resolve(found || null);
+      }
       else if (path.startsWith('/api/jobs/')) resolve(JOBS[path.split('/')[3]]);
       else if (path.startsWith('/api/runs/')) {
         var run = RUN_HISTORY.find(function(r) { return r.id === path.split('/')[3]; });

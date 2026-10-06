@@ -606,6 +606,7 @@
           runBtn + retryBtn +
           '<button class="btn btn-sm" onclick="openEditor(\'' + j.name + '\',\'' + j.target.kind + '\')">编辑</button>' +
           '<button class="btn btn-sm" onclick="openExport(\'' + j.name + '\',\'v' + j.version + '\',\'' + j.target.kind + '\')">导出</button>' +
+          '<button class="btn btn-sm" onclick="copyJob(\'' + j.name + '\')">复制</button>' +
           toggleBtn +
           '<button class="btn btn-sm btn-danger">删除</button>' +
         '</td>' +
@@ -712,6 +713,12 @@
 
   /* 保留的入参值（切换目标时按 name 保留已有的 value） */
   var inputValues = {};
+
+  function copyJob(name) {
+    var job = JOBS[name];
+    if (!job) return;
+    openEditor(name + '_copy', job.target.kind);
+  }
 
   function openEditor(name, targetKind) {
     var isNew = !name;
