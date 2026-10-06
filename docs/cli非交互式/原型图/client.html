@@ -773,13 +773,7 @@
         document.getElementById('confirmExportBtn').disabled = false;
       }).catch(function () {});
     } else {
-      // 浏览器不支持 showDirectoryPicker，让用户手动输入目录路径
-      var dir = prompt('请输入导出目录路径：', 'C:\\export');
-      if (dir) {
-        exportDirHandle = null;
-        document.getElementById('exportDir').value = dir;
-        document.getElementById('confirmExportBtn').disabled = false;
-      }
+      alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
   function buildClientYaml(name, type) {
@@ -794,33 +788,23 @@
   }
   function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
-    var dir = document.getElementById('exportDir').value;
     var yaml = buildClientYaml(exportTargetName, exportTargetType);
 
-    if (exportDirHandle) {
-      // 通过 showDirectoryPicker 选择了目录，直接写入文件
-      exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
-        return fileHandle.createWritable();
-      }).then(function (writable) {
-        writable.write(yaml);
-        return writable.close();
-      }).then(function () {
-        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-        closeModal('exportModal');
-      });
-    } else {
-      // 没有目录句柄，触发浏览器下载
-      var blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-      alert('已导出：' + dir + '\\' + fileName);
-      closeModal('exportModal');
+    if (!exportDirHandle) {
+      alert('请先选择导出目录');
+      return;
     }
+    exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
+      return fileHandle.createWritable();
+    }).then(function (writable) {
+      writable.write(yaml);
+      return writable.close();
+    }).then(function () {
+      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+      closeModal('exportModal');
+    }).catch(function (err) {
+      alert('导出失败：' + err.message);
+    });
   }
 
   // 初始化

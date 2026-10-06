@@ -748,12 +748,7 @@
         document.getElementById('confirmExportBtn').disabled = false;
       }).catch(function () {});
     } else {
-      var dir = prompt('请输入导出目录路径：', 'C:\\export');
-      if (dir) {
-        exportDirHandle = null;
-        document.getElementById('exportDir').value = dir;
-        document.getElementById('confirmExportBtn').disabled = false;
-      }
+      alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
   function doExport() {
@@ -800,21 +795,22 @@
     XLSX.utils.book_append_sheet(wb, ws1, '运行历史');
     XLSX.utils.book_append_sheet(wb, ws2, '运行明细');
 
-    if (exportDirHandle) {
-      var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
-        return fileHandle.createWritable();
-      }).then(function (writable) {
-        writable.write(wbout);
-        return writable.close();
-      }).then(function () {
-        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-        closeModal('exportModal');
-      });
-    } else {
-      XLSX.writeFile(wb, fileName);
-      closeModal('exportModal');
+    if (!exportDirHandle) {
+      alert('请先选择导出目录');
+      return;
     }
+    var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
+      return fileHandle.createWritable();
+    }).then(function (writable) {
+      writable.write(wbout);
+      return writable.close();
+    }).then(function () {
+      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+      closeModal('exportModal');
+    }).catch(function (err) {
+      alert('导出失败：' + err.message);
+    });
   }
 
   /* ==================== 分页状态 ==================== */

@@ -1782,17 +1782,15 @@
         document.getElementById('confirmExportBtn').disabled = false;
       }).catch(function () {});
     } else {
-      var dir = prompt('请输入导出目录路径：', 'C:\\export');
-      if (dir) {
-        exportDirHandle = null;
-        document.getElementById('exportDir').value = dir;
-        document.getElementById('confirmExportBtn').disabled = false;
-      }
+      alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
   async function confirmExport() {
     var fileName = document.getElementById('exportFileName').value;
-    var dir = document.getElementById('exportDir').value;
+    if (!exportDirHandle) {
+      alert('请先选择导出目录');
+      return;
+    }
     try {
       var zip = new JSZip();
       zip.file('manifest.json', JSON.stringify({ name: exportTargetName, version: exportTargetVersion, kind: 'workflow' }, null, 2));
@@ -1803,22 +1801,11 @@
       });
       var blob = await zip.generateAsync({ type: 'blob' });
 
-      if (exportDirHandle) {
-        var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
-        var writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-      } else {
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
-        alert('已导出：' + dir + '\\' + fileName);
-      }
+      var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
+      var writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
       closeModal('exportModal');
     } catch (e) {
       alert('导出失败：' + e.message);
