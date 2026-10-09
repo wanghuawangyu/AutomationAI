@@ -53,27 +53,27 @@
 
 | 实体 | ID 字段 |
 |-|-|
-| Client | id |
-| OP | id（写入 DB 时生成，界面不感知） |
-| Workflow | id |
+| Client | clientId |
+| OP | opId（写入 DB 时生成，界面不感知） |
+| Workflow | workflowId |
 | WorkflowNode | nodeId |
-| Job | id |
-| JobRun | id |
+| Job | jobId |
+| JobRun | runId |
 | StepRecord | stepId（等于对应 nodeId） |
 
 ### 2.3 命名与 ID 分离
 
 | 字段 | 用途 |
 |-|-|
-| id | 系统内部引用 |
+| xxxId（clientId/opId/...） | 系统内部引用 |
 | name | 界面展示 |
 
 **规则**：
 
 - 界面展示 name。
-- 内部引用使用 id。
+- 内部引用使用各实体的业务 id（xxxId）。
 - **OP 的 name 全局唯一**。
-- **OP 的 id 界面不感知**。
+- **OP 的 opId 界面不感知**。
 
 ---
 
@@ -316,14 +316,14 @@ interface NodeRetry {
 type ClientType = "prompt" | "bash" | "python" | "powershell";
 
 interface CliProfile {
-  id: string;
+  clientId: string;
   name: string;
   description?: string;
   type: ClientType;
 
   // prompt 类型专用
   command?: string;
-  argsTemplate?: string[];               // 支持 {{prompt}}、{{workspace}} 占位符；{{workspace}} 运行时由 Job 工作区注入
+  argsTemplate?: string;                  // 参数模板字符串；占位符按输入方式区分: arg={{prompt}}(提示词文本) / file={{prompt-file}}(提示词文件路径) / stdin=无占位符
   inputMode?: "arg" | "stdin" | "file";   // 内容源统一来自 OP.content
   outputParser?: {
     mode: "text" | "json" | "jsonl";
@@ -411,7 +411,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 │                                              │
 │  ── Prompt 类型配置 ──                        │
 │  命令: [claude               ]                │
-│  参数模板: ["-p","{{prompt}}","--output-format","json"] │
+│  参数模板: -p {{prompt}} --output-format json         │
 │  输入方式: [arg ▾]  (arg / stdin / file)      │
 │  输出解析: mode [json ▾]  jsonPath [$.result] │
 │  退出码语义: 成功 [0]                          │
@@ -423,8 +423,9 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 > 说明：
 > - **新建 Client 时，「命令」字段默认为空**（不预填 `claude`），由用户填写。
 > - Client **不含超时字段**（超时只属于 OP）。
-> - Client **不含工作目录字段**（工作目录只属于 Job 运行时，见 JobDefinition.workspace / JobRun.workspace；参数模板中的 `{{workspace}}` 占位符在运行时由 Job 工作区注入）。
+> - Client **不含工作目录字段**（工作目录只属于 Job 运行时，见 JobDefinition.workspace / JobRun.workspace；参数模板**不支持** `{{workspace}}` 占位符）。
 > - inputMode 只决定 prompt 的投递方式，内容源统一来自 OP.content。
+> - **参数模板占位符按输入方式区分**（前端在「参数模板」输入框旁实时提示）：`arg` 用 `{{prompt}}`（替换为提示词文本）；`file` 用 `{{prompt-file}}`（替换为提示词文件路径）；`stdin` 无占位符（提示词经标准输入喂入，模板仅填固定参数）。
 
 ### 8.7 编辑器视图（bash / python / powershell 类型）
 
@@ -461,7 +462,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 ├──────────────────────────────────────┤
 │  类型: prompt                         │
 │  命令: claude                         │
-│  参数: ["-p","hello","--output-format","json"] │
+│  参数: -p hello --output-format json                │
 │                                      │
 │  [运行测试]                           │
 │  ── 结果 ──                           │
@@ -539,7 +540,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 
 1. OP 是最小单元，**不含 retry 字段**。
 2. OP **不与 Client 绑定**。
-3. OP **不展示 id**。
+3. OP **不展示 opId**。
 4. OP 的 **name 全局唯一**。
 5. OpInput / OpOutput 的 **type 只支持 string**。
 6. OP 有 **版本概念**，默认 v1。
@@ -549,7 +550,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 
 ```typescript
 interface OpDefinition {
-  id: string;
+  opId: string;
   name: string;
   description?: string;
   type: "prompt" | "bash" | "python" | "powershell";
@@ -781,7 +782,7 @@ interface OpOutput {
 
 ```typescript
 interface WorkflowDefinition {
-  id: string;
+  workflowId: string;
   name: string;
   description?: string;
   version: number;
@@ -812,6 +813,9 @@ type WorkflowNodeKind = "start" | "op" | "end";
 interface WorkflowNode {
   nodeId: string;                   // 32 位 UUID
   kind: WorkflowNodeKind;           // 节点类型
+
+  // 画布坐标（由前端布局后随创建/更新请求传入并持久化；导入/脚本创建无坐标时可空）
+  position?: { x: number; y: number };
 
   // kind === "op" 时的字段
   opId?: string;
@@ -884,7 +888,7 @@ type EdgeCondition =
 
 **新建时的默认布局**：
 
-> **新建 Workflow 时，画布仅包含 Start 和 End 两个节点。** 名称、描述、入参、出参均为空，由用户填写。用户从 OP 库拖动 OP 到画布创建节点，并连线到 Start / End。
+> **新建 Workflow 时，画布仅包含 Start 和 End 两个节点。** 名称、描述、入参、出参均为空，由用户填写。用户从 OP 库拖动 OP 到画布创建节点，并连线到 Start / End。**节点坐标（position）由前端画布生成，创建/更新时随 nodes 传入后端持久化，后端据此在画布还原固定位置。**
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -986,7 +990,7 @@ interface NodeRetry {
 | 名称 | Workflow 名称 + 版本号，点击可展开/折叠详情 |
 | 入参数 | 入参数量 |
 | 出参数 | 出参数量 |
-| 节点数 | 节点数量 |
+| 节点数 | OP 节点数（不含 Start/End） |
 | 操作 | 执行、编辑、复制、导出、删除 |
 
 > 点击名称行展开只读画布预览。顶部参数定义区用子表格（参数名(类型)|描述）；边按条件着色（绿=成功，红=失败，蓝=总是）；点击节点橙色高亮，右侧显示节点配置（OP/版本/Client/参数/重试策略）。
@@ -1106,6 +1110,7 @@ interface NodeRetry {
 | 释放到画布已有节点上 | 不创建，提示"此处已有节点" |
 | 释放到画布外 | 不创建，取消拖动 |
 | 释放后 | **节点详情面板立即展示该新节点的配置**，用户可编辑参数绑定、Client、重试策略 |
+| **画布内移动节点** | **画布中已创建的节点（含 Start / End 系统节点）可按住鼠标左键拖动，自由调整布局位置；拖动过程中连线实时跟随；位移不超过阈值时视为点击（选中节点），不触发移动** |
 
 **搜索行为**：
 
@@ -1281,7 +1286,7 @@ deploy_workflow-v2.zip
 
 ```typescript
 interface JobDefinition {
-  id: string;
+  jobId: string;
   name: string;
   description?: string;
   kind: "persistent";
@@ -1518,7 +1523,7 @@ type RunStatus =
   | "cancelled" | "timeout" | "interrupted";
 
 interface JobRun {
-  id: string;
+  runId: string;
   jobId: string;
   jobKind: "persistent" | "virtual";
   jobVersion?: number;
@@ -1661,7 +1666,7 @@ interface StepRecord {
 
 **布局**：执行信息 + 入参/出参（本次执行值）+ 画布（只读执行状态）。**无 OP 库，无右侧节点详情面板。**
 
-> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{id}` 获取运行记录，再根据运行记录中的 `workflowId` 调用 `GET /api/workflows/{id}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染，执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 nodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
+> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录中的 `workflowId` 调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 nodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -1885,8 +1890,8 @@ interface StepRecord {
 |-|-|-|
 | 运行历史列表（有运行中的 Run） | 每 3~5 秒 | `/api/runs` |
 | 运行历史列表（无运行中的 Run） | 每 30 秒或手动刷新 | `/api/runs` |
-| Run 详情（有运行中的 Step） | 每 2~3 秒 | `/api/runs/{id}` |
-| Run 详情（已完成） | 不轮询，手动刷新 | `/api/runs/{id}` |
+| Run 详情（有运行中的 Step） | 每 2~3 秒 | `/api/runs/{runId}` |
+| Run 详情（已完成） | 不轮询，手动刷新 | `/api/runs/{runId}` |
 
 **不使用**：SSE 事件流、WebSocket。
 
@@ -1908,7 +1913,7 @@ interface StepRecord {
 
 | 列 | 说明 |
 |-|-|
-| id | Run ID |
+| runId | Run ID |
 | jobId | Job ID |
 | jobKind | persistent / virtual |
 | jobVersion | Job 版本 |
@@ -2352,23 +2357,23 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | 方法 | URL | 说明 |
 |-|-|-|
 | GET | `/api/clients` | 获取 Client 列表 |
-| GET | `/api/clients/{id}` | 获取单个 Client |
+| GET | `/api/clients/{clientId}` | 获取单个 Client |
 | POST | `/api/clients` | 创建 Client |
-| PUT | `/api/clients/{id}` | 更新 Client |
-| DELETE | `/api/clients/{id}` | 删除 Client |
-| POST | `/api/clients/{id}/test` | 测试 Client 命令或路径 |
+| PUT | `/api/clients/{clientId}` | 更新 Client |
+| DELETE | `/api/clients/{clientId}` | 删除 Client |
+| POST | `/api/clients/{clientId}/test` | 测试 Client 命令或路径 |
 
 ### 16.2 OP 相关
 
 | 方法 | URL | 说明 |
 |-|-|-|
 | GET | `/api/ops` | 获取 OP 列表 |
-| GET | `/api/ops/{id}` | 获取单个 OP |
+| GET | `/api/ops/{opId}` | 获取单个 OP |
 | POST | `/api/ops` | 创建 OP |
-| PUT | `/api/ops/{id}` | 更新 OP |
-| DELETE | `/api/ops/{id}` | 删除 OP |
-| POST | `/api/ops/{id}/execute` | 单次执行 OP |
-| POST | `/api/ops/{id}/export` | 导出 OP 为 YAML（指定目标目录） |
+| PUT | `/api/ops/{opId}` | 更新 OP |
+| DELETE | `/api/ops/{opId}` | 删除 OP |
+| POST | `/api/ops/{opId}/execute` | 单次执行 OP |
+| POST | `/api/ops/{opId}/export` | 导出 OP 为 YAML（指定目标目录） |
 | POST | `/api/ops/import` | 从 YAML 导入 OP |
 
 ### 16.3 Workflow 相关
@@ -2376,13 +2381,13 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | 方法 | URL | 说明 |
 |-|-|-|
 | GET | `/api/workflows` | 获取 Workflow 列表 |
-| GET | `/api/workflows/{id}` | 获取单个 Workflow |
+| GET | `/api/workflows/{workflowId}` | 获取单个 Workflow |
 | POST | `/api/workflows` | 创建 Workflow |
-| PUT | `/api/workflows/{id}` | 更新 Workflow |
-| DELETE | `/api/workflows/{id}` | 删除 Workflow |
-| POST | `/api/workflows/{id}/validate` | 校验 Workflow |
-| POST | `/api/workflows/{id}/execute` | 单次执行 Workflow |
-| POST | `/api/workflows/{id}/export` | 导出 Workflow 为 ZIP |
+| PUT | `/api/workflows/{workflowId}` | 更新 Workflow |
+| DELETE | `/api/workflows/{workflowId}` | 删除 Workflow |
+| POST | `/api/workflows/{workflowId}/validate` | 校验 Workflow |
+| POST | `/api/workflows/{workflowId}/execute` | 单次执行 Workflow |
+| POST | `/api/workflows/{workflowId}/export` | 导出 Workflow 为 ZIP |
 | POST | `/api/workflows/import` | 从 ZIP 导入 Workflow |
 
 ### 16.4 Job 相关
@@ -2390,38 +2395,38 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | 方法 | URL | 说明 |
 |-|-|-|
 | GET | `/api/jobs` | 获取 Job 列表 |
-| GET | `/api/jobs/{id}` | 获取单个 Job |
+| GET | `/api/jobs/{jobId}` | 获取单个 Job |
 | POST | `/api/jobs` | 创建 Job |
-| PUT | `/api/jobs/{id}` | 更新 Job |
-| DELETE | `/api/jobs/{id}` | 删除 Job |
-| POST | `/api/jobs/{id}/run` | 手动运行 Job |
-| POST | `/api/jobs/{id}/enable` | 启用 Job |
-| POST | `/api/jobs/{id}/disable` | 禁用 Job |
-| POST | `/api/jobs/{id}/export` | 导出 Job 为 ZIP |
+| PUT | `/api/jobs/{jobId}` | 更新 Job |
+| DELETE | `/api/jobs/{jobId}` | 删除 Job |
+| POST | `/api/jobs/{jobId}/run` | 手动运行 Job |
+| POST | `/api/jobs/{jobId}/enable` | 启用 Job |
+| POST | `/api/jobs/{jobId}/disable` | 禁用 Job |
+| POST | `/api/jobs/{jobId}/export` | 导出 Job 为 ZIP |
 | POST | `/api/jobs/import` | 从 ZIP 导入 Job |
-| GET | `/api/jobs/{id}/last-run` | 获取 Job 最近一次执行 |
+| GET | `/api/jobs/{jobId}/last-run` | 获取 Job 最近一次执行 |
 
 ### 16.5 运行历史相关
 
 | 方法 | URL | 说明 |
 |-|-|-|
 | GET | `/api/runs` | 获取 Run 列表（支持筛选） |
-| GET | `/api/runs/{id}` | 获取 Run 详情 |
-| GET | `/api/runs/{id}/status` | 轻量接口，仅返回状态和最后更新时间（轮询用） |
-| GET | `/api/runs/{id}/steps` | 获取 Run 的步骤列表 |
-| GET | `/api/runs/{id}/steps/{stepId}` | 获取单个步骤详情 |
-| POST | `/api/runs/{id}/terminate` | 终止 Run |
-| POST | `/api/runs/{id}/rerun` | 重跑 Run |
-| POST | `/api/runs/{id}/retry` | 重试 Run（从失败 step 开始） |
-| GET | `/api/runs/{id}/can-retry` | 检查 Run 是否可重试 |
+| GET | `/api/runs/{runId}` | 获取 Run 详情 |
+| GET | `/api/runs/{runId}/status` | 轻量接口，仅返回状态和最后更新时间（轮询用） |
+| GET | `/api/runs/{runId}/steps` | 获取 Run 的步骤列表 |
+| GET | `/api/runs/{runId}/steps/{stepId}` | 获取单个步骤详情 |
+| POST | `/api/runs/{runId}/terminate` | 终止 Run |
+| POST | `/api/runs/{runId}/rerun` | 重跑 Run |
+| POST | `/api/runs/{runId}/retry` | 重试 Run（从失败 step 开始） |
+| GET | `/api/runs/{runId}/can-retry` | 检查 Run 是否可重试 |
 
 ### 16.6 版本与更新相关
 
 | 方法 | URL | 说明 |
 |-|-|-|
-| GET | `/api/workflows/{id}/needs-update` | 检查 Workflow 是否需要更新 |
-| GET | `/api/jobs/{id}/needs-update` | 检查 Job 是否需要更新 |
-| GET | `/api/workflows/{id}/outdated-nodes` | 获取 Workflow 中落后的节点 |
+| GET | `/api/workflows/{workflowId}/needs-update` | 检查 Workflow 是否需要更新 |
+| GET | `/api/jobs/{jobId}/needs-update` | 检查 Job 是否需要更新 |
+| GET | `/api/workflows/{workflowId}/outdated-nodes` | 获取 Workflow 中落后的节点 |
 
 ### 16.7 系统与配置相关
 
@@ -2618,6 +2623,18 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | Client（Bash / Python / PowerShell） | 名称空、描述空、二进制路径空 |
 | OP | 名称空、描述空、超时空、入参空、出参空、类型 prompt、内容空 |
 | Workflow | 名称空、描述空、入参空、出参空、画布仅 Start + End、节点详情面板空状态 |
+
+### 17.9 共享 Workflow 画布模块
+
+三个界面（Workflow 编辑界面、Workflow 行内展开查看、运行历史 Workflow 执行详情）的画布展示统一：节点、连线、锚点、状态色样式一致（以编辑界面样式为主），由共享文件提供：
+
+| 文件 | 说明 |
+|-|-|
+| `workflow-canvas.css` | 画布统一样式：节点（130×46 白底圆角，Start / End 绿色胶囊）、连线（贝塞尔曲线 + 红 / 绿 / 蓝三色箭头）、三色锚点、节点执行状态色（成功 / 失败 / 超时 / 运行中 / 未执行）、点状画布背景（1100×400） |
+| `workflow-canvas.js` | 共享渲染 `WFCanvas.render(canvas, nodes, edges, opts)`：支持只读模式（查看 / 运行历史）与编辑模式（节点拖动移动、锚点拖拽连线、连线右键删除）；节点坐标、连线条件、状态色由调用方数据驱动 |
+
+- `workflow.html` 与 `index.html` 均通过 `<link>` / `<script>` 引入上述文件，不再各自维护画布实现。
+- 三个界面节点形态、连线形态、锚点颜色语义完全一致；仅内容有差异：编辑界面节点 meta 显示「OP vX · 超时」，查看界面显示「vX」，运行历史叠加执行状态文本。
 | Job | 名称空、描述空、目标类型无勾选、OP / Workflow 下拉空、Client 空、工作区空、初始入参空、触发方式无勾选、Cron 空、并发策略空 |
 
 ---

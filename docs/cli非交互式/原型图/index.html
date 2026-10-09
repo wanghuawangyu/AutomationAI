@@ -6,6 +6,8 @@
 <title>运行历史 · AI 自动化</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="mock-data.js"></script>
+<link rel="stylesheet" href="workflow-canvas.css" />
+<script src="workflow-canvas.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -138,49 +140,8 @@
   .lb-skip{background:#f3f4f6;border-color:#9ca3af}
   .lb-system{background:#e8f7ee;border-color:#16a34a;border-radius:50%}
 
-  .exec-dag-scroll{overflow:auto;background:
-    radial-gradient(circle, #e7eaf0 1px, transparent 1px) 0 0/18px 18px, #fcfcfe}
-  .exec-dag-canvas{position:relative;width:1100px;height:360px}
-  .exec-edges{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
-
-  .exec-node{position:absolute;width:150px;height:64px;background:#fff;border:2px solid #d8dde6;border-radius:9px;padding:8px 10px;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;transition:box-shadow .15s;box-sizing:border-box}
-  .exec-node:hover{box-shadow:0 2px 10px rgba(0,0,0,.1)}
-  .exec-node.selected{box-shadow:0 0 0 3px rgba(59,110,246,.2)}
-  .en-title{font-size:13px;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;line-height:1.4}
-  .en-meta{font-size:11px;color:#6b7280;margin-top:1px;flex-shrink:0;line-height:1.4}
-  .en-state{font-size:11px;margin-top:2px;font-weight:600;flex-shrink:0;line-height:1.4}
-
-  /* 系统节点（Start / End） */
-  .exec-node.node-system{
-    width:110px;height:50px;
-    border-radius:25px;
-    background:#e8f7ee;
-    border-color:#16a34a;
-    padding:5px 8px;
-    text-align:center;
-    align-items:center;
-  }
-  .exec-node.node-system .en-title{color:#15803d;font-weight:700;font-size:13px}
-  .exec-node.node-system .en-meta{color:#4d9f68}
-  .exec-node.node-system.st-skip{
-    background:#f3f4f6;
-    border-color:#9ca3af;
-  }
-  .exec-node.node-system.st-skip .en-title{color:#6b7280}
-  .exec-node.node-system.st-skip .en-meta{color:#9ca3af}
-
-  /* 节点状态边框 */
-  .st-success{border-color:#16a34a;background:#f4fdf8}
-  .st-failed{border-color:#dc2626;background:#fdf6f6}
-  .st-timeout{border-color:#d97706;background:#fdf9f2}
-  .st-running{border-color:#eab308;background:#fefce8}
-  .st-skip{border-color:#9ca3af;background:#f9fafb}
-
-  .st-success .en-state{color:#16a34a}
-  .st-failed .en-state{color:#dc2626}
-  .st-timeout .en-state{color:#d97706}
-  .st-running .en-state{color:#ca8a04}
-  .st-skip .en-state{color:#9ca3af}
+  .exec-dag-scroll{overflow:auto;background:var(--bg)}
+  /* 画布节点/连线/状态样式统一由 workflow-canvas.css 提供 */
 
   /* ---------- 弹窗 ---------- */
   .overlay{position:fixed;inset:0;background:rgba(23,27,37,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
@@ -571,8 +532,8 @@
         </div>
 
         <div class="exec-dag-scroll">
-          <div class="exec-dag-canvas" id="execCanvas">
-            <!-- 节点和连线由 JS 动态渲染 -->
+          <div id="execCanvas">
+            <!-- 节点和连线由 workflow-canvas.js 统一渲染 -->
           </div>
         </div>
       </div>
@@ -767,7 +728,7 @@
       { id: 'run-006', jobId: 'job-data-sync', jobKind: 'persistent', jobVersion: 2, triggeredBy: 'schedule', workspace: '/path/ws-005', status: 'failed', terminatedBy: 'error', startedAtMs: 1728087600000, finishedAtMs: 1728087604100, duration: 4.1 }
     ];
     historyData.forEach(function (r) {
-      historyRows.push([r.id, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace, r.status, r.terminatedBy, r.startedAtMs, r.finishedAtMs, r.duration]);
+      historyRows.push([r.runId, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace, r.status, r.terminatedBy, r.startedAtMs, r.finishedAtMs, r.duration]);
     });
 
     var detailHeader = ['ResultId', 'jobId', 'stepId', 'opId', 'opVersion', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'duration'];
@@ -776,7 +737,7 @@
     RUN_HISTORY.forEach(function(run) {
       run.steps.forEach(function(s) {
         detailRows.push([
-          s.resultId, run.id, s.stepId, s.opId, s.opVersion, s.clientId,
+          s.recordId, run.runId, s.stepId, s.opId, s.opVersion, s.clientId,
           s.status, s.exitCode,
           JSON.stringify(s.inputs),
           s.bodySnapshot || '',
@@ -864,7 +825,7 @@
       var tagClass = r.jobType === 'OP' ? 'tag-op' : 'tag-wf';
       var clickHandler = r.jobType === 'OP'
         ? "openOpDetail('" + r.jobName + "','v" + r.jobVersion + "','v" + r.jobVersion + "','from-list')"
-        : "openWfDetail('" + r.id + "')";
+        : "openWfDetail('" + r.runId + "')";
       var actions = '';
       if (r.status === 'running') {
         actions = '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + r.jobName + '\')">终止</button>';
@@ -1042,6 +1003,7 @@
     Object.keys(wf.nodes).forEach(function (nodeId) {
       var n = wf.nodes[nodeId];
       currentWfNodes[nodeId] = Object.assign({}, n);
+      // 坐标直接保留 position（与编辑画布结构体一致，由 workflow-canvas.js 渲染）
 
       if (n.kind === 'start') {
         currentWfNodes[nodeId].status = 'success';
@@ -1176,122 +1138,35 @@
 
   function renderExecCanvas() {
     var canvas = document.getElementById('execCanvas');
-    canvas.querySelectorAll('.exec-node').forEach(function (n) { n.remove(); });
 
-    // 清除旧 SVG，重新生成
-    var oldSvg = document.getElementById('execEdges');
-    if (oldSvg) oldSvg.remove();
+    var STATUS_MAP = {
+      success:  { cls: 'st-success',  text: '✓ 成功' },
+      failed:   { cls: 'st-failed',   text: '✗ 失败' },
+      timeout:  { cls: 'st-timeout',  text: '⏱ 超时' },
+      running:  { cls: 'st-running',  text: '● 运行中' },
+      skipped:  { cls: 'st-skip',     text: '⊘ 未执行' }
+    };
 
-    // 动态生成 SVG
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('id', 'execEdges');
-    svg.setAttribute('class', 'exec-edges');
-    svg.setAttribute('width', '1100');
-    svg.setAttribute('height', '360');
-    svg.setAttribute('viewBox', '0 0 1100 360');
-
-    // 箭头标记
-    var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    [['x-arr-g', '#16a34a'], ['x-arr-r', '#dc2626'], ['x-arr-b', '#3b6ef6'], ['x-arr-gray', '#c3c8d0']].forEach(function (m) {
-      var marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-      marker.setAttribute('id', m[0]);
-      marker.setAttribute('markerWidth', '7');
-      marker.setAttribute('markerHeight', '7');
-      marker.setAttribute('refX', '6.5');
-      marker.setAttribute('refY', '3.5');
-      marker.setAttribute('orient', 'auto');
-      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', 'M0,0 L7,3.5 L0,7 Z');
-      path.setAttribute('fill', m[1]);
-      marker.appendChild(path);
-      defs.appendChild(marker);
-    });
-    svg.appendChild(defs);
-
-    // 渲染连线
-    currentWfEdges.forEach(function (edge) {
-      var from = currentWfNodes[edge[0]];
-      var to = currentWfNodes[edge[1]];
-      var cond = edge[2] || 'on_success';
-      if (!from || !to) return;
-
-      // 根据节点类型计算尺寸：系统节点(Start/End) 110x50，OP节点 150x64
-      var fromW = (from.kind === 'start' || from.kind === 'end') ? 110 : 150;
-      var fromH = (from.kind === 'start' || from.kind === 'end') ? 50 : 64;
-      var toW = (to.kind === 'start' || to.kind === 'end') ? 110 : 150;
-      var toH = (to.kind === 'start' || to.kind === 'end') ? 50 : 64;
-
-      var x1 = from.x + fromW;
-      var y1 = from.y + fromH / 2;
-      var x2 = to.x;
-      var y2 = to.y + toH / 2;
-
-      var color = '#16a34a';
-      var marker = 'url(#x-arr-g)';
-      var dashed = false;
-      if (cond === 'on_failure') { color = '#dc2626'; marker = 'url(#x-arr-r)'; }
-      else if (cond === 'always') { color = '#3b6ef6'; marker = 'url(#x-arr-b)'; }
-
-      // 如果目标节点未执行，用灰色虚线
-      if (to.status === 'skipped' || to.status === 'pending') {
-        color = '#c3c8d0';
-        marker = 'url(#x-arr-gray)';
-        dashed = true;
-      }
-
-      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      var d = 'M' + x1 + ' ' + y1 + ' L' + x2 + ' ' + y2;
-      path.setAttribute('d', d);
-      path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', '2');
-      path.setAttribute('fill', 'none');
-      path.setAttribute('marker-end', marker);
-      if (dashed) path.setAttribute('stroke-dasharray', '5 4');
-      svg.appendChild(path);
-    });
-
-    canvas.appendChild(svg);
-
-    // 渲染节点
-    Object.keys(currentWfNodes).forEach(function (id) {
-      var n = currentWfNodes[id];
-      var el = document.createElement('div');
-      var statusClass = 'st-' + (n.status || 'skipped');
-      var sysClass = (n.kind === 'start' || n.kind === 'end') ? ' node-system' : '';
-      el.className = 'exec-node' + sysClass + ' ' + statusClass;
-      el.dataset.node = id;
-      el.style.left = n.x + 'px';
-      el.style.top = n.y + 'px';
-
-      if (n.kind === 'start') {
-        el.innerHTML =
-          '<div class="en-title">▶ Start</div>' +
-          '<div class="en-meta">' + (n.status === 'success' ? '已开始' : '未开始') + '</div>';
-      } else if (n.kind === 'end') {
-        el.innerHTML =
-          '<div class="en-title">End ◉</div>' +
-          '<div class="en-meta">' + (n.status === 'success' ? '已到达' : '未到达') + '</div>';
-      } else {
-        var stateText = '';
-        if (n.status === 'success') stateText = '✓ 成功';
-        else if (n.status === 'failed') stateText = '✗ 失败';
-        else if (n.status === 'timeout') stateText = '⏱ 超时';
-        else if (n.status === 'running') stateText = '● 运行中';
-        else stateText = '⊘ 未执行';
-
-        el.innerHTML =
-          '<div class="en-title">' + n.op + '</div>' +
-          '<div class="en-meta">v' + n.opVersion + '</div>' +
-          '<div class="en-state">' + stateText + '</div>';
-      }
-
-      el.addEventListener('click', function (e) {
-        e.stopPropagation();
+    WFCanvas.render(canvas, currentWfNodes, currentWfEdges, {
+      nodeStatus: function (id, n) {
+        if (n.kind === 'start') {
+          return n.status === 'success' ? { cls: 'st-success', text: '已开始' } : { cls: 'st-skip', text: '未开始' };
+        }
+        if (n.kind === 'end') {
+          return n.status === 'success' ? { cls: 'st-success', text: '已到达' } : { cls: 'st-skip', text: '未到达' };
+        }
+        return STATUS_MAP[n.status] || STATUS_MAP.skipped;
+      },
+      nodeMeta: function (id, n) {
+        return 'v' + (n.opVersion || '1');
+      },
+      edgeDashed: function (edge, to) {
+        return (to.status === 'skipped' || to.status === 'pending');
+      },
+      onNodeClick: function (id, n) {
         if (n.kind === 'start' || n.kind === 'end') return;
         openOpDetail(n.op, n.opVersion, n.opVersion, 'from-wf', n);
-      });
-
-      canvas.appendChild(el);
+      }
     });
   }
 

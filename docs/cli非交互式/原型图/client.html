@@ -265,14 +265,14 @@
 
             <div class="field">
               <label>参数模板</label>
-              <input type="text" id="promptArgs" value='["-p","{{prompt}}","--output-format","json"]' />
-              <div class="hint">JSON 数组格式，支持 {{prompt}}、{{workspace}} 等占位符（{{workspace}} 运行时由 Job 工作区注入）</div>
+              <input type="text" id="promptArgs" value="-p {{prompt}} --output-format json" />
+              <div class="hint" id="argHint">占位符按输入方式区分：arg=`{{prompt}}`（提示词文本）/ file=`{{prompt-file}}`（提示词文件路径）/ stdin=无占位符</div>
             </div>
 
             <div class="form-row">
               <div class="field">
                 <label>输入方式</label>
-                <select id="promptInputMode">
+                <select id="promptInputMode" onchange="updateArgHint()">
                   <option>arg</option>
                   <option>stdin</option>
                   <option>file</option>
@@ -374,7 +374,7 @@
       <div class="summary" id="testSummary">
         <div><span class="k">类型:</span><span class="v" id="testType">prompt</span></div>
         <div><span class="k">命令:</span><span class="v mono" id="testCommand">claude</span></div>
-        <div><span class="k">参数:</span><span class="v mono" id="testArgs">["-p","hello","--output-format","json"]</span></div>
+        <div><span class="k">参数:</span><span class="v mono" id="testArgs">-p hello --output-format json</span></div>
       </div>
       <div style="margin-top:14px;display:flex;justify-content:flex-end">
         <button class="btn btn-primary btn-sm" onclick="runTest()">运行测试</button>
@@ -497,16 +497,16 @@
         detailRows += '<tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">' + c.paramTemplate + '</td></tr>';
       }
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + c.id + '\',\'' + c.type + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.id + '</span>' +
+        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + c.clientId + '\',\'' + c.type + '\')">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.clientId + '</span>' +
         '</td>' +
         '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + c.type + '</span></td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + c.binaryPath + '</td>' +
         '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim)">' + inputMethod + '</td>' +
         '<td style="padding:10px 8px">' + c.format + '</td>' +
         '<td style="padding:10px 8px">' +
-          '<button class="btn btn-sm" onclick="editClient(\'' + c.id + '\',\'' + c.type + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + c.id + '\',\'' + c.type + '\')">导出</button>' +
+          '<button class="btn btn-sm" onclick="editClient(\'' + c.clientId + '\',\'' + c.type + '\')">编辑</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + c.clientId + '\',\'' + c.type + '\')">导出</button>' +
           '<button class="btn btn-sm">复制</button>' +
           '<button class="btn btn-sm btn-danger">删除</button>' +
         '</td>' +
@@ -600,8 +600,8 @@
 
     // 演示数据：按 name 填充
     var samples = {
-      'Claude Code': { cmd: 'claude', args: '["-p","{{prompt}}","--output-format","json"]', bin: 'claude' },
-      'Codex CLI': { cmd: 'codex', args: '["exec","--silent"]', bin: 'codex' },
+      'Claude Code': { cmd: 'claude', args: '-p {{prompt}} --output-format json', bin: 'claude' },
+      'Codex CLI': { cmd: 'codex', args: 'exec --silent', bin: 'codex' },
       '本地 Bash': { cmd: '', args: '', bin: '/usr/bin/bash' },
       '本地 Python': { cmd: '', args: '', bin: '/usr/bin/python3' },
       '本地 PowerShell': { cmd: '', args: '', bin: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' }
@@ -643,6 +643,17 @@
   }
 
   // ---------- 类型切换 ----------
+  function updateArgHint() {
+    var mode = document.getElementById('promptInputMode').value;
+    var el = document.getElementById('argHint');
+    if (mode === 'file') {
+      el.textContent = '占位符：file 用 {{prompt-file}}（替换为提示词文件路径 = main_file）';
+    } else if (mode === 'stdin') {
+      el.textContent = '无占位符：提示词经标准输入喂入，模板仅填固定参数';
+    } else {
+      el.textContent = '占位符：arg 用 {{prompt}}（替换为提示词文本）';
+    }
+  }
   function switchType(type) {
     // 隐藏所有配置
     document.querySelectorAll('.type-config').forEach(function (el) {
@@ -671,7 +682,7 @@
 
     if (type === 'prompt') {
       document.getElementById('testCommand').textContent = document.getElementById('promptCommand').value || '(未填写)';
-      document.getElementById('testArgs').textContent = '["-p","hello","--output-format","json"]';
+      document.getElementById('testArgs').textContent = '-p hello --output-format json';
     } else if (type === 'bash') {
       document.getElementById('testCommand').textContent = document.getElementById('bashPath').value || '(未填写)';
       document.getElementById('testArgs').textContent = '—';
@@ -782,7 +793,7 @@
     yaml += 'type: ' + c.type + '\n';
     yaml += 'description: ' + c.description + '\n';
     yaml += 'bin: ' + c.binaryPath + '\n';
-    if (c.paramTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.paramTemplate.split(' ')) + '\n';
+    if (c.paramTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.paramTemplate) + '\n';
     yaml += 'outputFormat: ' + c.format + '\n';
     return yaml;
   }

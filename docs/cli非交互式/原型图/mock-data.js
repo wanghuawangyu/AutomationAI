@@ -7,7 +7,7 @@
 // ========== Client 数据 ==========
 var CLIENTS = {
   'Claude Code': {
-    id: 'client-claude',
+    clientId: 'client-claude',
     type: 'prompt',
     format: 'json',
     description: 'Claude Code CLI',
@@ -16,7 +16,7 @@ var CLIENTS = {
     inputMode: 'stdin'
   },
   'Codex CLI': {
-    id: 'client-codex',
+    clientId: 'client-codex',
     type: 'prompt',
     format: 'text',
     description: 'OpenAI Codex CLI',
@@ -25,21 +25,21 @@ var CLIENTS = {
     inputMode: 'stdin'
   },
   '本地 Bash': {
-    id: 'client-bash',
+    clientId: 'client-bash',
     type: 'bash',
     format: 'text',
     description: '本地 Bash Shell',
     binaryPath: '/usr/bin/bash'
   },
   '本地 Python': {
-    id: 'client-python',
+    clientId: 'client-python',
     type: 'python',
     format: 'json',
     description: '本地 Python',
     binaryPath: '/usr/bin/python3'
   },
   '本地 PowerShell': {
-    id: 'client-powershell',
+    clientId: 'client-powershell',
     type: 'powershell',
     format: 'text',
     description: '本地 PowerShell',
@@ -50,7 +50,7 @@ var CLIENTS = {
 // ========== OP 数据 ==========
 var OPS = {
   'check_tests': {
-    id: 'op-check-tests',
+    opId: 'op-check-tests',
     name: 'check_tests',
     version: 2,
     type: 'prompt',
@@ -68,7 +68,7 @@ var OPS = {
     content: '在当前工作区运行测试，并输出结果 JSON'
   },
   'review': {
-    id: 'op-review',
+    opId: 'op-review',
     name: 'review',
     version: 2,
     type: 'prompt',
@@ -84,7 +84,7 @@ var OPS = {
     content: '审查测试结果并给出结论'
   },
   'deploy': {
-    id: 'op-deploy',
+    opId: 'op-deploy',
     name: 'deploy',
     version: 2,
     type: 'prompt',
@@ -100,7 +100,7 @@ var OPS = {
     content: '将当前工作区部署到指定环境，并返回访问 URL'
   },
   'notify': {
-    id: 'op-notify',
+    opId: 'op-notify',
     name: 'notify',
     version: 1,
     type: 'prompt',
@@ -114,7 +114,7 @@ var OPS = {
     content: '发送通知消息'
   },
   'notify_fail': {
-    id: 'op-notify-fail',
+    opId: 'op-notify-fail',
     name: 'notify_fail',
     version: 1,
     type: 'prompt',
@@ -126,7 +126,7 @@ var OPS = {
     content: '发送失败告警通知'
   },
   'clean_logs': {
-    id: 'op-clean-logs',
+    opId: 'op-clean-logs',
     name: 'clean_logs',
     version: 3,
     type: 'powershell',
@@ -140,7 +140,7 @@ var OPS = {
     content: 'Get-ChildItem -Path $env:WORKSPACE -Recurse -Filter *.log | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item'
   },
   'process_data': {
-    id: 'op-process-data',
+    opId: 'op-process-data',
     name: 'process_data',
     version: 3,
     type: 'python',
@@ -156,7 +156,7 @@ var OPS = {
     content: 'import json\n# 处理数据源并输出结果'
   },
   'health_check': {
-    id: 'op-health-check',
+    opId: 'op-health-check',
     name: 'health_check',
     version: 1,
     type: 'bash',
@@ -172,7 +172,7 @@ var OPS = {
     content: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"'
   },
   'collect_metrics': {
-    id: 'op-collect-metrics',
+    opId: 'op-collect-metrics',
     name: 'collect_metrics',
     version: 1,
     type: 'python',
@@ -188,7 +188,7 @@ var OPS = {
     content: 'import json\n# 采集指标'
   },
   'run_lint': {
-    id: 'op-run-lint',
+    opId: 'op-run-lint',
     name: 'run_lint',
     version: 2,
     type: 'bash',
@@ -208,7 +208,7 @@ var OPS = {
 // ========== Workflow 数据 ==========
 var WORKFLOWS = {
   'deploy_workflow': {
-    id: 'wf-deploy',
+    workflowId: 'wf-deploy',
     name: 'deploy_workflow',
     version: 2,
     description: '部署工作流',
@@ -220,33 +220,33 @@ var WORKFLOWS = {
       { name: 'status', type: 'string', description: '最终状态' }
     ],
     nodes: {
-      '__start__': { kind: 'start', x: 20, y: 155 },
+      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
       'node_check': {
-        kind: 'op', op: 'check_tests', opVersion: 2, x: 180, y: 50,
+        kind: 'op', op: 'check_tests', opVersion: 2, position: { x: 180, y: 50 },
         params: { test_cmd: '${workspace}/run-tests.sh' },
         retry: null
       },
       'node_review': {
-        kind: 'op', op: 'review', opVersion: 2, x: 360, y: 50,
+        kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
         params: { test_result: '${node_check.outputs.passed}' },
         retry: { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 }
       },
       'node_deploy': {
-        kind: 'op', op: 'deploy', opVersion: 2, x: 540, y: 50,
+        kind: 'op', op: 'deploy', opVersion: 2, position: { x: 540, y: 50 },
         params: { target_env: '${workflow.target_env}' },
         retry: { on: 'failure', max: 2, backoff: 'linear', interval: 2000 }
       },
       'node_notify': {
-        kind: 'op', op: 'notify', opVersion: 1, x: 720, y: 50,
+        kind: 'op', op: 'notify', opVersion: 1, position: { x: 720, y: 50 },
         params: { message: '部署成功' },
         retry: null
       },
       'node_notify_fail': {
-        kind: 'op', op: 'notify_fail', opVersion: 1, x: 360, y: 230,
+        kind: 'op', op: 'notify_fail', opVersion: 1, position: { x: 360, y: 230 },
         params: { error: '${node_check.error}' },
         retry: null
       },
-      '__end__': { kind: 'end', x: 940, y: 155 }
+      '__end__': { kind: 'end', position: { x: 940, y: 155 } }
     },
     edges: [
       ['__start__', 'node_check', 'on_success'],
@@ -259,7 +259,7 @@ var WORKFLOWS = {
     ]
   },
   'log_analysis': {
-    id: 'wf-log-analysis',
+    workflowId: 'wf-log-analysis',
     name: 'log_analysis',
     version: 1,
     description: '日志分析工作流',
@@ -271,18 +271,18 @@ var WORKFLOWS = {
       { name: 'report', type: 'string', description: '分析报告' }
     ],
     nodes: {
-      '__start__': { kind: 'start', x: 20, y: 155 },
+      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
       'node_collect': {
-        kind: 'op', op: 'collect_metrics', opVersion: 1, x: 180, y: 50,
+        kind: 'op', op: 'collect_metrics', opVersion: 1, position: { x: 180, y: 50 },
         params: { endpoint: '${workflow.log_source}' },
         retry: null
       },
       'node_process': {
-        kind: 'op', op: 'process_data', opVersion: 3, x: 360, y: 50,
+        kind: 'op', op: 'process_data', opVersion: 3, position: { x: 360, y: 50 },
         params: { source: '${node_collect.outputs.metrics}' },
         retry: null
       },
-      '__end__': { kind: 'end', x: 540, y: 155 }
+      '__end__': { kind: 'end', position: { x: 540, y: 155 } }
     },
     edges: [
       ['__start__', 'node_collect', 'always'],
@@ -291,7 +291,7 @@ var WORKFLOWS = {
     ]
   },
   'code_review': {
-    id: 'wf-code-review',
+    workflowId: 'wf-code-review',
     name: 'code_review',
     version: 3,
     description: '代码审查工作流',
@@ -302,18 +302,18 @@ var WORKFLOWS = {
       { name: 'result', type: 'string', description: '审查结果' }
     ],
     nodes: {
-      '__start__': { kind: 'start', x: 20, y: 155 },
+      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
       'node_lint': {
-        kind: 'op', op: 'run_lint', opVersion: 2, x: 180, y: 50,
+        kind: 'op', op: 'run_lint', opVersion: 2, position: { x: 180, y: 50 },
         params: { target: '${workflow.repo}' },
         retry: null
       },
       'node_review': {
-        kind: 'op', op: 'review', opVersion: 2, x: 360, y: 50,
+        kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
         params: { test_result: '${node_lint.outputs.issues}' },
         retry: null
       },
-      '__end__': { kind: 'end', x: 540, y: 155 }
+      '__end__': { kind: 'end', position: { x: 540, y: 155 } }
     },
     edges: [
       ['__start__', 'node_lint', 'always'],
@@ -322,7 +322,7 @@ var WORKFLOWS = {
     ]
   },
   'hourly_check': {
-    id: 'wf-hourly-check',
+    workflowId: 'wf-hourly-check',
     name: 'hourly_check',
     version: 1,
     description: '每小时健康检查',
@@ -333,13 +333,13 @@ var WORKFLOWS = {
       { name: 'healthy', type: 'string', description: '是否健康' }
     ],
     nodes: {
-      '__start__': { kind: 'start', x: 20, y: 155 },
+      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
       'node_health': {
-        kind: 'op', op: 'health_check', opVersion: 1, x: 180, y: 155,
+        kind: 'op', op: 'health_check', opVersion: 1, position: { x: 180, y: 155 },
         params: { endpoint: '${workflow.endpoint}' },
         retry: null
       },
-      '__end__': { kind: 'end', x: 380, y: 155 }
+      '__end__': { kind: 'end', position: { x: 380, y: 155 } }
     },
     edges: [
       ['__start__', 'node_health', 'on_success'],
@@ -351,7 +351,7 @@ var WORKFLOWS = {
 // ========== Job 数据 ==========
 var JOBS = {
   'daily_cleanup': {
-    id: 'job-daily-cleanup',
+    jobId: 'job-daily-cleanup',
     name: 'daily_cleanup',
     version: 2,
     kind: 'persistent',
@@ -365,7 +365,7 @@ var JOBS = {
     lastRun: { status: 'success', duration: '3.2s', time: '1周前' }
   },
   'hourly_check': {
-    id: 'job-hourly-check',
+    jobId: 'job-hourly-check',
     name: 'hourly_check',
     version: 1,
     kind: 'persistent',
@@ -379,7 +379,7 @@ var JOBS = {
     lastRun: { status: 'failed', duration: '8.1s', time: '2小时前' }
   },
   'manual_deploy': {
-    id: 'job-manual-deploy',
+    jobId: 'job-manual-deploy',
     name: 'manual_deploy',
     version: 2,
     kind: 'virtual',
@@ -393,7 +393,7 @@ var JOBS = {
     lastRun: { status: 'success', duration: '15.3s', time: '3小时前' }
   },
   'weekly_report': {
-    id: 'job-weekly-report',
+    jobId: 'job-weekly-report',
     name: 'weekly_report',
     version: 1,
     kind: 'persistent',
@@ -407,7 +407,7 @@ var JOBS = {
     lastRun: { status: 'success', duration: '45.6s', time: '2天前' }
   },
   'data_sync': {
-    id: 'job-data-sync',
+    jobId: 'job-data-sync',
     name: 'data_sync',
     version: 3,
     kind: 'persistent',
@@ -425,7 +425,7 @@ var JOBS = {
 // ========== 运行历史数据 ==========
 var RUN_HISTORY = [
   {
-    id: 'run-001',
+    runId: 'run-001',
     jobId: 'job-check-tests',
     jobKind: 'virtual',
     jobVersion: 2,
@@ -440,7 +440,7 @@ var RUN_HISTORY = [
     jobType: 'OP',
     steps: [
       {
-        resultId: 'step-001',
+        recordId: 'step-001',
         stepId: 'step-1',
         opId: 'check_tests',
         opVersion: 2,
@@ -463,7 +463,7 @@ var RUN_HISTORY = [
     ]
   },
   {
-    id: 'run-002',
+    runId: 'run-002',
     jobId: 'job-deploy',
     jobKind: 'virtual',
     jobVersion: 2,
@@ -479,14 +479,14 @@ var RUN_HISTORY = [
     workflowId: 'wf-deploy',
     failedNode: 'node_deploy',
     steps: [
-      { resultId: 'step-002', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON', outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2, attempts: [] },
-      { resultId: 'step-003', stepId: 'step-2', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728104720200, finishedAtMs: 1728104728700, duration: 8.5, attempts: [] },
-      { resultId: 'step-004', stepId: 'step-3', opId: 'deploy', opVersion: 2, clientId: 'client-bash', status: 'failed', exitCode: 1, inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL', outputs: {}, rawOutput: 'Deploy failed: connection refused', timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104730800, duration: 2.1, attempts: [] },
-      { resultId: 'step-005', stepId: 'step-4', opId: 'notify_fail', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { error: 'Deploy failed' }, bodySnapshot: '发送失败告警通知', outputs: {}, rawOutput: 'Notification sent', timedOut: false, startedAtMs: 1728104730800, finishedAtMs: 1728104732600, duration: 1.8, attempts: [] }
+      { recordId: 'step-002', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON', outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2, attempts: [] },
+      { recordId: 'step-003', stepId: 'step-2', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728104720200, finishedAtMs: 1728104728700, duration: 8.5, attempts: [] },
+      { recordId: 'step-004', stepId: 'step-3', opId: 'deploy', opVersion: 2, clientId: 'client-bash', status: 'failed', exitCode: 1, inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL', outputs: {}, rawOutput: 'Deploy failed: connection refused', timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104730800, duration: 2.1, attempts: [] },
+      { recordId: 'step-005', stepId: 'step-4', opId: 'notify_fail', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { error: 'Deploy failed' }, bodySnapshot: '发送失败告警通知', outputs: {}, rawOutput: 'Notification sent', timedOut: false, startedAtMs: 1728104730800, finishedAtMs: 1728104732600, duration: 1.8, attempts: [] }
     ]
   },
   {
-    id: 'run-003',
+    runId: 'run-003',
     jobId: 'job-hourly-check',
     jobKind: 'persistent',
     jobVersion: 1,
@@ -502,11 +502,11 @@ var RUN_HISTORY = [
     workflowId: 'wf-hourly-check',
     failedNode: 'node_health',
     steps: [
-      { resultId: 'step-006', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2, attempts: [] }
+      { recordId: 'step-006', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2, attempts: [] }
     ]
   },
   {
-    id: 'run-004',
+    runId: 'run-004',
     jobId: 'job-review',
     jobKind: 'virtual',
     jobVersion: 1,
@@ -520,11 +520,11 @@ var RUN_HISTORY = [
     jobName: 'review',
     jobType: 'OP',
     steps: [
-      { resultId: 'step-007', stepId: 'step-1', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1, attempts: [] }
+      { recordId: 'step-007', stepId: 'step-1', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1, attempts: [] }
     ]
   },
   {
-    id: 'run-005',
+    runId: 'run-005',
     jobId: 'job-notify',
     jobKind: 'persistent',
     jobVersion: 2,
@@ -538,11 +538,11 @@ var RUN_HISTORY = [
     jobName: 'notify',
     jobType: 'OP',
     steps: [
-      { resultId: 'step-008', stepId: 'step-1', opId: 'notify', opVersion: 1, clientId: 'client-claude', status: 'timeout', exitCode: null, inputs: { message: '告警' }, outputs: {}, rawOutput: 'Timeout after 300s', timedOut: true, startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0, attempts: [] }
+      { recordId: 'step-008', stepId: 'step-1', opId: 'notify', opVersion: 1, clientId: 'client-claude', status: 'timeout', exitCode: null, inputs: { message: '告警' }, outputs: {}, rawOutput: 'Timeout after 300s', timedOut: true, startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0, attempts: [] }
     ]
   },
   {
-    id: 'run-006',
+    runId: 'run-006',
     jobId: 'job-daily-cleanup',
     jobKind: 'persistent',
     jobVersion: 2,
@@ -556,11 +556,11 @@ var RUN_HISTORY = [
     jobName: 'daily_cleanup',
     jobType: 'OP',
     steps: [
-      { resultId: 'step-009', stepId: 'step-1', opId: 'clean_logs', opVersion: 3, clientId: 'client-powershell', status: 'success', exitCode: 0, inputs: { endpoint: 'localhost:8080' }, outputs: {}, rawOutput: 'Logs cleaned', timedOut: false, startedAtMs: 1728019200000, finishedAtMs: 1728019203200, duration: 3.2, attempts: [] }
+      { recordId: 'step-009', stepId: 'step-1', opId: 'clean_logs', opVersion: 3, clientId: 'client-powershell', status: 'success', exitCode: 0, inputs: { endpoint: 'localhost:8080' }, outputs: {}, rawOutput: 'Logs cleaned', timedOut: false, startedAtMs: 1728019200000, finishedAtMs: 1728019203200, duration: 3.2, attempts: [] }
     ]
   },
   {
-    id: 'run-007',
+    runId: 'run-007',
     jobId: 'job-data-sync',
     jobKind: 'persistent',
     jobVersion: 3,
@@ -574,11 +574,11 @@ var RUN_HISTORY = [
     jobName: 'data_sync',
     jobType: 'OP',
     steps: [
-      { resultId: 'step-010', stepId: 'step-1', opId: 'process_data', opVersion: 3, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { source: 's3://bucket/data' }, outputs: { count: '1024' }, rawOutput: '1024 records processed', timedOut: false, startedAtMs: 1728106800000, finishedAtMs: 1728106812400, duration: 12.4, attempts: [] }
+      { recordId: 'step-010', stepId: 'step-1', opId: 'process_data', opVersion: 3, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { source: 's3://bucket/data' }, outputs: { count: '1024' }, rawOutput: '1024 records processed', timedOut: false, startedAtMs: 1728106800000, finishedAtMs: 1728106812400, duration: 12.4, attempts: [] }
     ]
   },
   {
-    id: 'run-008',
+    runId: 'run-008',
     jobId: 'job-hourly-check',
     jobKind: 'persistent',
     jobVersion: 1,
@@ -593,7 +593,7 @@ var RUN_HISTORY = [
     jobType: 'Workflow',
     workflowId: 'wf-hourly-check',
     steps: [
-      { resultId: 'step-011', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, duration: 5.3, attempts: [] }
+      { recordId: 'step-011', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, duration: 5.3, attempts: [] }
     ]
   }
 ];
@@ -611,12 +611,12 @@ function mockFetch(path) {
       else if (path.startsWith('/api/ops/')) resolve(OPS[path.split('/')[3]]);
       else if (path.startsWith('/api/workflows/')) {
         var wfId = path.split('/')[3];
-        var found = Object.values(WORKFLOWS).find(function(w) { return w.id === wfId; });
+        var found = Object.values(WORKFLOWS).find(function(w) { return w.workflowId === wfId; });
         resolve(found || null);
       }
       else if (path.startsWith('/api/jobs/')) resolve(JOBS[path.split('/')[3]]);
       else if (path.startsWith('/api/runs/')) {
-        var run = RUN_HISTORY.find(function(r) { return r.id === path.split('/')[3]; });
+        var run = RUN_HISTORY.find(function(r) { return r.runId === path.split('/')[3]; });
         resolve(run);
       }
       else resolve(null);

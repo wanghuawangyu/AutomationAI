@@ -1,0 +1,61 @@
+/* ============================================================
+ * workflow-canvas.css — Workflow 画布统一样式
+ * 以 workflow.html 编辑界面画布样式为主，供以下界面复用：
+ *   - workflow.html 编辑界面（可编辑模式）
+ *   - workflow.html 查看界面（只读模式）
+ *   - index.html 运行历史 Workflow 执行详情（只读模式 + 状态）
+ * ============================================================ */
+
+/* ---------- 画布容器 ---------- */
+.dag-canvas{position:relative;width:1100px;height:400px;background:radial-gradient(circle,#e7eaf0 1px,transparent 1px) 0 0/18px 18px,#fcfcfe}
+.dag-canvas.drop-hover{box-shadow:inset 0 0 0 2px rgba(59,110,246,.35)}
+
+/* ---------- 连线 SVG ---------- */
+.dag-edges{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
+.dag-edges path{pointer-events:stroke;cursor:pointer}
+
+/* ---------- 节点（OP 块） ---------- */
+.dag-node{position:absolute;width:130px;min-height:46px;background:#fff;border:1.5px solid #d8dde6;border-radius:9px;padding:5px 10px;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box;transition:border-color .15s,box-shadow .15s}
+.dag-node:hover{border-color:#b9cbfb}
+.dag-node.selected{border-color:#3b6ef6;box-shadow:0 0 0 3px rgba(59,110,246,.16)}
+.dag-node.outdated{border-color:#e8b84b;background:#fffdf7}
+.dag-node.node-dragging{cursor:grabbing;border-color:#3b6ef6;box-shadow:0 6px 18px rgba(59,110,246,.28);z-index:4;transition:none}
+.dn-title{font-size:12.5px;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}
+.dn-meta{font-size:10.5px;color:#6b7280;margin-top:1px;line-height:1.4}
+.dn-warn{position:absolute;top:-8px;right:-8px;width:17px;height:17px;border-radius:50%;background:#f5a623;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff}
+
+/* ---------- Start / End 系统节点 ---------- */
+.dag-node.node-system{
+  background:#e8f7ee;
+  border-color:#16a34a;
+  border-radius:23px;
+  padding:5px 12px;
+}
+.dag-node.node-system:hover{border-color:#15803d;box-shadow:0 0 0 3px rgba(22,163,74,.16)}
+.dag-node.node-system.selected{border-color:#15803d;box-shadow:0 0 0 3px rgba(22,163,74,.24)}
+.dag-node.node-system .dn-title{color:#15803d;font-weight:700;font-size:13px}
+.dag-node.node-system .dn-meta{color:#4d9f68}
+
+/* ---------- 锚点（仅编辑模式展示） ---------- */
+.anchor{position:absolute;right:-6px;width:9px;height:9px;border-radius:50%;border:1.5px solid #fff;box-sizing:content-box;cursor:crosshair;z-index:3}
+.anchor-fail{top:7px;background:#dc2626}
+.anchor-success{top:17px;background:#16a34a}
+.anchor-always{top:27px;background:#3b6ef6}
+.anchor-center{top:50%;margin-top:-6px}
+.anchor:hover{transform:scale(1.35)}
+
+/* ---------- 节点执行状态（运行历史 / 只读查看叠加） ---------- */
+.dag-node.st-success{border-color:#16a34a;background:#f4fdf8}
+.dag-node.st-failed{border-color:#dc2626;background:#fdf6f6}
+.dag-node.st-timeout{border-color:#d97706;background:#fdf9f2}
+.dag-node.st-running{border-color:#eab308;background:#fefce8}
+.dag-node.st-skip{border-color:#9ca3af;background:#f9fafb}
+.dag-node.node-system.st-skip{background:#f3f4f6;border-color:#9ca3af}
+.dag-node.node-system.st-skip .dn-title{color:#6b7280}
+.dag-node.node-system.st-skip .dn-meta{color:#9ca3af}
+.dn-state{font-size:10.5px;font-weight:600;margin-top:1px;line-height:1.4}
+.dag-node.st-success .dn-state{color:#16a34a}
+.dag-node.st-failed .dn-state{color:#dc2626}
+.dag-node.st-timeout .dn-state{color:#d97706}
+.dag-node.st-running .dn-state{color:#ca8a04}
+.dag-node.st-skip .dn-state{color:#9ca3af}

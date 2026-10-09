@@ -6,6 +6,8 @@
 <title>Workflow 管理 · AI 自动化</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="mock-data.js"></script>
+<link rel="stylesheet" href="workflow-canvas.css" />
+<script src="workflow-canvas.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -73,13 +75,9 @@
   .detail-panel{width:100%;padding:12px 16px 16px 40px;background:var(--bg-soft,#f9fafc);border-bottom:1px solid var(--border-soft)}
   .detail-canvas{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;height:420px}
   .detail-canvas .dc-body{display:flex;flex:1;overflow:hidden}
-  .detail-canvas .dc-left{flex:1;overflow:auto;position:relative;background:var(--bg)}
+  .detail-canvas .dc-left{flex:1;overflow:auto;position:relative}
   .detail-canvas .dc-right{width:260px;border-left:1px solid var(--border);overflow:auto;padding:14px 16px}
-  .dc-node{position:absolute;width:130px;padding:8px 12px;background:#fff;border:2px solid #3b6ef6;border-radius:8px;cursor:pointer;font-size:12px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-  .dc-node.sys{border-color:#16a34a;color:#16a34a}
-  .dc-node:hover{box-shadow:0 2px 8px rgba(59,110,246,.3)}
-  .dc-node .en-title{font-weight:600}
-  .dc-node .en-meta{font-size:10px;color:var(--text-3);margin-top:2px}
+  .dc-left .dag-node.dc-highlight{border-color:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.3)}
   .row:last-child{border-bottom:0}
   .row:hover{background:#fafbfd}
   .row-icon{width:32px;height:32px;flex:0 0 32px;border-radius:8px;background:#f3f5f9;border:1px solid var(--border-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -156,40 +154,9 @@
   .legend-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
   .ld-fail{background:#dc2626}.ld-success{background:#16a34a}.ld-always{background:#3b6ef6}.ld-system{background:#16a34a}
 
-  .dag-scroll{flex:1;overflow:auto;background:
-    radial-gradient(circle, #e7eaf0 1px, transparent 1px) 0 0/18px 18px, #fcfcfe}
-  .dag-canvas{position:relative;width:1000px;height:400px}
-  .dag-canvas.drop-hover{box-shadow:inset 0 0 0 2px rgba(59,110,246,.35)}
-  .dag-edges{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
-  .dag-edges path{pointer-events:stroke}
+  .dag-scroll{flex:1;overflow:auto;background:var(--bg)}
 
-  .dag-node{position:absolute;width:130px;height:46px;background:#fff;border:1.5px solid #d8dde6;border-radius:9px;padding:5px 10px;cursor:pointer;z-index:2;display:flex;flex-direction:column;justify-content:center;transition:border-color .15s,box-shadow .15s}
-  .dag-node:hover{border-color:#b9cbfb}
-  .dag-node.selected{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,110,246,.16)}
-  .dag-node.outdated{border-color:#e8b84b;background:#fffdf7}
-  .dn-title{font-size:12.5px;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dn-meta{font-size:10.5px;color:var(--text-3);margin-top:1px}
-  .dn-warn{position:absolute;top:-8px;right:-8px;width:17px;height:17px;border-radius:50%;background:#f5a623;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff}
-
-  /* Start / End 系统节点 */
-  .dag-node.node-system{
-    background:#e8f7ee;
-    border-color:#16a34a;
-    border-radius:23px;
-    padding:5px 12px;
-  }
-  .dag-node.node-system:hover{border-color:#15803d;box-shadow:0 0 0 3px rgba(22,163,74,.16)}
-  .dag-node.node-system.selected{border-color:#15803d;box-shadow:0 0 0 3px rgba(22,163,74,.24)}
-  .dag-node.node-system .dn-title{color:#15803d;font-weight:700;font-size:13px}
-  .dag-node.node-system .dn-meta{color:#4d9f68}
-
-  /* 锚点 */
-  .anchor{position:absolute;right:-6px;width:9px;height:9px;border-radius:50%;border:1.5px solid #fff;box-sizing:content-box;cursor:crosshair;z-index:3}
-  .anchor-fail{top:7px;background:#dc2626}
-  .anchor-success{top:17px;background:#16a34a}
-  .anchor-always{top:27px;background:#3b6ef6}
-  .anchor-center{top:50%;margin-top:-6px}
-  .anchor:hover{transform:scale(1.35)}
+  /* 画布节点/连线/锚点样式统一由 workflow-canvas.css 提供 */
 
   /* 右侧节点详情面板（常驻） */
   .node-panel{width:320px;flex:0 0 320px;border-left:1px solid var(--border);display:flex;flex-direction:column;background:#fcfcfe;position:relative}
@@ -624,9 +591,6 @@
   var START_ID = '__start__';
   var END_ID   = '__end__';
   var NODE_W = 130, NODE_H = 46;
-  var ANCHOR_Y = { on_failure: 11.5, on_success: 21.5, always: 31.5 };
-  var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
-  var EDGE_MARKER = { on_success: 'arr-g', on_failure: 'arr-r', always: 'arr-b' };
 
   /* ==================== OP 库数据 ==================== */
   var OP_LIB = [
@@ -667,8 +631,8 @@
 
   /* ==================== Workflow 数据 ==================== */
 
-  function makeStartNode() { return { kind: 'start', x: 20,  y: 175 }; }
-  function makeEndNode()   { return { kind: 'end',   x: 850, y: 175 }; }
+  function makeStartNode() { return { kind: 'start', position: { x: 20, y: 175 } }; }
+  function makeEndNode()   { return { kind: 'end',   position: { x: 850, y: 175 } }; }
 
   /* 空 Workflow：仅 Start + End */
   function makeEmptyNodes() {
@@ -688,8 +652,10 @@
       var n = wf.nodes[id];
       if (n.kind === 'start') {
         nodes[id] = makeStartNode();
+        if (n.position) { nodes[id].position.x = n.position.x; nodes[id].position.y = n.position.y; }
       } else if (n.kind === 'end') {
         nodes[id] = makeEndNode();
+        if (n.position) { nodes[id].position.x = n.position.x; nodes[id].position.y = n.position.y; }
       } else {
         // OP 节点：从 mock-data 读取基础字段，补充编辑所需字段
         nodes[id] = {
@@ -703,8 +669,7 @@
           params: n.params || {},
           retry: n.retry || null,
           outdated: false,
-          x: n.x || 200,
-          y: n.y || 60
+          position: { x: (n.position ? n.position.x : n.x) || 200, y: (n.position ? n.position.y : n.y) || 60 }
         };
         // 把 params 转成 bindings
         if (n.params) {
@@ -815,7 +780,7 @@
       '<tbody>';
 
     pageData.forEach(function(w) {
-      var nodeCount = Object.keys(w.nodes).length;
+      var nodeCount = Object.keys(w.nodes).filter(function(k){ return w.nodes[k].kind === 'op'; }).length;
       var warnTag = w.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
       var execBtn = w.needsUpdate
         ? '<button class="btn btn-sm" disabled>执行</button>'
@@ -872,6 +837,7 @@
       panel.id = 'panel_' + name;
       if (!panel.dataset.loaded) {
         panel.innerHTML = buildDetailPanel(name, version);
+        renderDcCanvas(name);
         panel.dataset.loaded = '1';
       }
       panel.style.display = 'block';
@@ -884,28 +850,7 @@
     var wf = WORKFLOWS[name];
     if (!wf) return '<div style="padding:20px">未找到 Workflow 数据</div>';
 
-    // 从 WORKFLOWS 数据中动态生成节点
-    var nodeData = {};
-    var nodeIds = Object.keys(wf.nodes);
-    nodeIds.forEach(function(id) {
-      var n = wf.nodes[id];
-      // 系统节点显示特殊标签，OP 节点显示 OP 名
-      var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.op || id);
-      nodeData[id] = {
-        x: n.x,
-        y: n.y,
-        label: label,
-        kind: n.kind,
-        op: n.op,
-        opVersion: n.opVersion,
-        params: n.params,
-        retry: n.retry
-      };
-    });
-
-    // 直接使用 mock-data 中定义的边（包含成功/失败/完成分支）
-    var edges = wf.edges || [];
-
+    // 画布节点/连线由 renderDcCanvas() 通过 workflow-canvas.js 统一渲染
     var html = '<div class="detail-canvas">';
     html += '<div style="width:100%;background:#fff;border-bottom:1px solid var(--border);padding:10px 16px;font-size:13px">';
     html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
@@ -925,30 +870,7 @@
     html += '</table>';
     html += '</div>';
     html += '<div class="dc-body">';
-    html += '<div class="dc-left" id="dcLeft_' + name + '">';
-    html += '<svg width="950" height="300" style="position:absolute;top:0;left:0">';
-    edges.forEach(function(e) {
-      var p1 = nodeData[e[0]], p2 = nodeData[e[1]];
-      var x1 = p1.x + 65, y1 = p1.y + 23, x2 = p2.x, y2 = p2.y + 23;
-      var dx = Math.max(30, Math.abs(x2 - x1) * 0.5);
-      var color = EDGE_COLOR[e[2]] || '#16a34a';
-      html += '<path d="M' + x1 + ' ' + y1 + ' C' + (x1+dx) + ' ' + y1 + ' ' + (x2-dx) + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" stroke="' + color + '" stroke-width="2" fill="none"/>';
-    });
-    html += '</svg>';
-    Object.keys(nodeData).forEach(function(id) {
-      var n = nodeData[id];
-      var cls = n.kind === 'sys' ? 'dc-node sys' : 'dc-node';
-      var style = 'left:' + n.x + 'px;top:' + n.y + 'px';
-      var onclick = n.kind === 'sys' ? '' : 'onclick="showDcNode(this,\'' + id + '\')"';
-      html += '<div class="' + cls + '" style="' + style + '" ' + onclick + '>';
-      if (n.kind === 'sys') {
-        html += '<div class="en-title">' + n.label + '</div>';
-      } else {
-        html += '<div class="en-title">' + n.label + '</div><div class="en-meta">v' + n.opVersion + '</div>';
-      }
-      html += '</div>';
-    });
-    html += '</div>';
+    html += '<div class="dc-left" id="dcLeft_' + name + '"></div>';
     html += '<div class="dc-right" id="dcRight_' + name + '">';
     html += '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:40px 0">点击左侧节点<br>查看节点配置</div>';
     html += '</div>';
@@ -957,17 +879,42 @@
     return html;
   }
 
-  function showDcNode(el, id) {
-    el.closest('.detail-panel').querySelectorAll('.dc-node').forEach(function(n) {
-      n.style.borderColor = '';
-      n.style.boxShadow = '';
+  /* 查看界面画布：由 workflow-canvas.js 统一渲染（只读模式） */
+  function renderDcCanvas(name) {
+    var wf = WORKFLOWS[name];
+    if (!wf) return;
+    var container = document.getElementById('dcLeft_' + name);
+    if (!container) return;
+
+    var nodes = {};
+    Object.keys(wf.nodes).forEach(function (id) {
+      var n = wf.nodes[id];
+      nodes[id] = {
+        kind: n.kind,
+        position: { x: (n.position ? n.position.x : n.x) || 0, y: (n.position ? n.position.y : n.y) || 0 },
+        op: n.op,
+        opVersion: n.opVersion
+      };
     });
-    el.style.borderColor = '#f59e0b';
-    el.style.boxShadow = '0 0 0 3px rgba(245,158,11,.3)';
-    var panel = el.closest('.detail-panel').querySelector('.dc-right');
+
+    WFCanvas.render(container, nodes, wf.edges, {
+      onNodeClick: function (id) { showDcNode(id, name); },
+      nodeMeta: function (id, n) { return 'v' + (n.opVersion || '1'); }
+    });
+  }
+
+  function showDcNode(id, name) {
+    var panelEl = document.getElementById('panel_' + name);
+    if (!panelEl) return;
+    panelEl.querySelectorAll('.dc-left .dag-node').forEach(function (n) {
+      n.classList.remove('dc-highlight');
+    });
+    var target = panelEl.querySelector('.dc-left .dag-node[data-node="' + id + '"]');
+    if (target) target.classList.add('dc-highlight');
+
+    var panel = panelEl.querySelector('.dc-right');
     // 从当前展开的 Workflow 数据中动态读取节点
-    var wfName = el.closest('.detail-panel').id.replace('panel_', '');
-    var wf = WORKFLOWS[wfName];
+    var wf = WORKFLOWS[name];
     var n = wf && wf.nodes ? wf.nodes[id] : null;
     if (!n) return;
     var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.op || id);
@@ -1137,112 +1084,35 @@
     });
   }
 
-  /* ==================== 画布渲染 ==================== */
+  /* ==================== 画布渲染（统一由 workflow-canvas.js 渲染） ==================== */
   function renderCanvas() {
     var canvas = document.getElementById('dagCanvas');
-    canvas.querySelectorAll('.dag-node').forEach(function (n) { n.remove(); });
-
-    var nodes = curNodes();
-
-    Object.keys(nodes).forEach(function (id) {
-      var n = nodes[id];
-      var isSys = (n.kind === 'start' || n.kind === 'end');
-      var el = document.createElement('div');
-      el.className = 'dag-node'
-        + (isSys ? ' node-system' : '')
-        + (n.outdated ? ' outdated' : '');
-      el.dataset.node = id;
-      el.style.left = n.x + 'px';
-      el.style.top = n.y + 'px';
-
-      if (n.kind === 'start') {
-        el.innerHTML =
-          '<div class="dn-title">▶ Start</div>' +
-          '<div class="dn-meta">开始节点</div>' +
-          '<span class="anchor anchor-success anchor-center" data-anchor="on_success" data-node="' + id + '"></span>';
-      } else if (n.kind === 'end') {
-        el.innerHTML =
-          '<div class="dn-title">End ◉</div>' +
-          '<div class="dn-meta">结束节点</div>';
-      } else {
-        el.innerHTML =
-          '<div class="dn-title">' + n.op + '</div>' +
-          '<div class="dn-meta">OP v' + n.opVersion + ' · ' + n.timeout + 's</div>' +
-          '<span class="dn-warn" style="' + (n.outdated ? 'display:flex' : 'display:none') + '">⚠</span>' +
-          '<span class="anchor anchor-fail" data-anchor="on_failure" data-node="' + id + '"></span>' +
-          '<span class="anchor anchor-success" data-anchor="on_success" data-node="' + id + '"></span>' +
-          '<span class="anchor anchor-always" data-anchor="always" data-node="' + id + '"></span>';
-      }
-
-      el.addEventListener('click', function (e) {
-        e.stopPropagation();
-        selectNode(id);
-      });
-
-      canvas.appendChild(el);
+    WFCanvas.render(canvas, curNodes(), curEdges(), {
+      editable: true,
+      selectedId: selectedNodeId,
+      nodeMeta: function (id, n) {
+        return 'OP v' + n.opVersion + ' · ' + n.timeout + 's';
+      },
+      onNodeClick: function (id) { selectNode(id); },
+      beforeAddEdge: function (from, to, condition) {
+        if (to === START_ID) { showToast('Start 节点不能有入边'); return false; }
+        if (to === from) { showToast('不能连接到自身'); return false; }
+        var exists = curEdges().some(function (ed) {
+          return ed.from === from && ed.to === to && ed.condition === condition;
+        });
+        if (exists) { showToast('该连线已存在'); return false; }
+        return true;
+      },
+      onEdgesChanged: function () {},
+      onEdgeContextMenu: function (x, y, edge) { showEdgeContextMenu(x, y, edge); },
+      connectingNow: function () { return !!connecting; },
+      setConnecting: function (st) { connecting = st; }
     });
-
-    canvas.querySelectorAll('.anchor').forEach(function (a) {
-      a.addEventListener('mousedown', function (e) {
-        e.stopPropagation();
-        e.preventDefault();
-        startConnect(a.dataset.node, a.dataset.anchor, e);
-      });
-    });
-
-    if (selectedNodeId && nodes[selectedNodeId]) markSelected(selectedNodeId);
-    renderEdges();
-  }
-
-  function getNodeOutPoint(id, condition) {
-    var n = curNodes()[id];
-    if (!n) return null;
-    if (n.kind === 'start') {
-      return { x: n.x + NODE_W + 6, y: n.y + NODE_H / 2 };
-    }
-    return { x: n.x + NODE_W + 6, y: n.y + (ANCHOR_Y[condition] || ANCHOR_Y.on_success) };
-  }
-  function getNodeInPoint(id) {
-    var n = curNodes()[id];
-    if (!n) return null;
-    return { x: n.x - 4, y: n.y + NODE_H / 2 };
-  }
-
-  function renderEdges() {
-    var svg = document.getElementById('dagEdges');
-    var defs = svg.querySelector('defs');
-    svg.innerHTML = '';
-    if (defs) svg.appendChild(defs);
-
-    var edges = curEdges();
-
-    edges.forEach(function (edge) {
-      var p1 = getNodeOutPoint(edge.from, edge.condition);
-      var p2 = getNodeInPoint(edge.to);
-      if (!p1 || !p2) return;
-
-      var x1 = p1.x, y1 = p1.y, x2 = p2.x, y2 = p2.y;
-      var dx = Math.max(40, Math.abs(x2 - x1) * 0.5);
-      var d = 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' + (x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
-
-      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d);
-      path.setAttribute('stroke', EDGE_COLOR[edge.condition] || '#16a34a');
-      path.setAttribute('stroke-width', '2');
-      path.setAttribute('fill', 'none');
-      path.setAttribute('marker-end', 'url(#' + (EDGE_MARKER[edge.condition] || 'arr-g') + ')');
-      path.style.cursor = 'pointer';
-      path.addEventListener('contextmenu', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        showEdgeContextMenu(e.clientX, e.clientY, edge);
-      });
-      svg.appendChild(path);
-    });
+    if (selectedNodeId && curNodes()[selectedNodeId]) markSelected(selectedNodeId);
   }
 
   function markSelected(id) {
-    document.querySelectorAll('.dag-node').forEach(function (n) {
+    document.querySelectorAll('#dagCanvas .dag-node').forEach(function (n) {
       n.classList.toggle('selected', n.dataset.node === id);
     });
   }
@@ -1266,7 +1136,7 @@
       var edges = curEdges();
       var idx = edges.indexOf(edge);
       if (idx >= 0) edges.splice(idx, 1);
-      renderEdges();
+      renderCanvas();
     }
   }
   document.addEventListener('click', function () {
@@ -1327,7 +1197,7 @@
       bindings: bindings,
       retry: null,
       outdated: false,
-      x: x, y: y
+      position: { x: x, y: y }
     };
     renderCanvas();
     selectNode(id);
@@ -1335,74 +1205,8 @@
   }
 
   /* ==================== 锚点拖拽连线 ==================== */
+  /* 连线交互由 workflow-canvas.js 统一接管，此处仅保留状态标记 */
   var connecting = null;
-  var tempPath = null;
-
-  function startConnect(fromNode, condition, e) {
-    connecting = { from: fromNode, condition: condition };
-    var canvas = document.getElementById('dagCanvas');
-    var rect = canvas.getBoundingClientRect();
-    var svg = document.getElementById('dagEdges');
-
-    tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    tempPath.setAttribute('stroke', EDGE_COLOR[condition] || '#16a34a');
-    tempPath.setAttribute('stroke-width', '2');
-    tempPath.setAttribute('stroke-dasharray', '5 4');
-    tempPath.setAttribute('fill', 'none');
-    svg.appendChild(tempPath);
-
-    var p1 = getNodeOutPoint(fromNode, condition);
-    var x1 = p1.x, y1 = p1.y;
-
-    function onMove(ev) {
-      if (!connecting) return;
-      var x2 = ev.clientX - rect.left;
-      var y2 = ev.clientY - rect.top;
-      var dx = Math.max(40, Math.abs(x2 - x1) * 0.5);
-      tempPath.setAttribute('d',
-        'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' + (x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2);
-    }
-
-    function onUp(ev) {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-
-      if (tempPath && tempPath.parentNode) tempPath.parentNode.removeChild(tempPath);
-      tempPath = null;
-
-      if (!connecting) return;
-      var cn = connecting;
-      connecting = null;
-
-      var el = document.elementFromPoint(ev.clientX, ev.clientY);
-      var targetEl = el && el.closest ? el.closest('.dag-node') : null;
-      if (!targetEl) return;
-      var toId = targetEl.dataset.node;
-
-      if (toId === START_ID) {
-        showToast('Start 节点不能有入边');
-        return;
-      }
-      if (toId === cn.from) {
-        showToast('不能连接到自身');
-        return;
-      }
-
-      var exists = curEdges().some(function (ed) {
-        return ed.from === cn.from && ed.to === toId && ed.condition === cn.condition;
-      });
-      if (exists) {
-        showToast('该连线已存在');
-        return;
-      }
-
-      curEdges().push({ from: cn.from, to: toId, condition: cn.condition });
-      renderEdges();
-    }
-
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }
 
   /* ==================== 节点选中与编辑草稿 ==================== */
 
