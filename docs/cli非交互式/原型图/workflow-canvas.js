@@ -32,6 +32,10 @@ var WFCanvas = (function () {
   var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
   var EDGE_MARKER = { on_success: 'wf-arr-g', on_failure: 'wf-arr-r', always: 'wf-arr-b' };
   var DEFAULT_W = 1100, DEFAULT_H = 400;
+  /* 画布实例计数器：每个画布生成唯一 marker id，避免同页多画布
+   * （查看画布 + 编辑画布共存）因 marker id 重名导致箭头引用到
+   * 隐藏容器中的 marker 而不渲染 */
+  var canvasSeq = 0;
 
   function isSysNode(n) { return n.kind === 'start' || n.kind === 'end'; }
 
@@ -45,13 +49,14 @@ var WFCanvas = (function () {
     });
   }
 
-  /* 创建 SVG 容器（含箭头 marker） */
-  function createSvg(W, H) {
+  /* 创建 SVG 容器（含箭头 marker，id 带画布实例序号保证唯一） */
+  function createSvg(W, H, seq) {
     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'dag-edges');
     svg.setAttribute('width', W);
     svg.setAttribute('height', H);
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('data-seq', seq);
 
     var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     [
@@ -61,7 +66,7 @@ var WFCanvas = (function () {
       ['wf-arr-gray', '#c3c8d0']
     ].forEach(function (m) {
       var marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-      marker.setAttribute('id', m[0]);
+      marker.setAttribute('id', m[0] + '-' + seq);
       marker.setAttribute('markerWidth', '7');
       marker.setAttribute('markerHeight', '7');
       marker.setAttribute('refX', '6.5');
@@ -77,12 +82,14 @@ var WFCanvas = (function () {
     return svg;
   }
 
-  /* 节点出点 / 入点坐标（与编辑界面锚点位置一致） */
+  /* 节点出点 / 入点坐标（与编辑界面锚点位置一致）
+     X 轴：出点贴锚点中心（节点右边缘外 1.5px，锚点 right:-6px 宽 9px 的中心），
+           入点贴节点左边缘内侧 1px，使线头/箭头贴近 OP 块 */
   function getOutPoint(n, condition) {
-    if (n.kind === 'start') return { x: n.position.x + NODE_W + 6, y: n.position.y + NODE_H / 2 };
-    return { x: n.position.x + NODE_W + 6, y: n.position.y + (ANCHOR_Y[condition] || ANCHOR_Y.on_success) };
+    if (n.kind === 'start') return { x: n.position.x + NODE_W + 1.5, y: n.position.y + NODE_H / 2 };
+    return { x: n.position.x + NODE_W + 1.5, y: n.position.y + (ANCHOR_Y[condition] || ANCHOR_Y.on_success) };
   }
-  function getInPoint(n) { return { x: n.position.x - 4, y: n.position.y + NODE_H / 2 }; }
+  function getInPoint(n) { return { x: n.position.x + 1, y: n.position.y + NODE_H / 2 }; }
 
   /* 绘制一条边（贝塞尔曲线，与编辑界面一致） */
   function drawEdge(svg, edge, nodes, opts) {
@@ -97,11 +104,11 @@ var WFCanvas = (function () {
     var d = 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' + (x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
 
     var color = EDGE_COLOR[edge.condition] || '#16a34a';
-    var marker = 'url(#' + (EDGE_MARKER[edge.condition] || 'wf-arr-g') + ')';
+    var marker = 'url(#' + (EDGE_MARKER[edge.condition] || 'wf-arr-g') + '-' + svg.getAttribute('data-seq') + ')';
     var dashed = false;
     if (opts.edgeDashed && opts.edgeDashed(edge, to)) {
       color = '#c3c8d0';
-      marker = 'url(#wf-arr-gray)';
+      marker = 'url(#wf-arr-gray-' + svg.getAttribute('data-seq') + ')';
       dashed = true;
     }
 
@@ -303,7 +310,8 @@ var WFCanvas = (function () {
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
 
-    var svg = createSvg(W, H);
+    var seq = ++canvasSeq;
+    var svg = createSvg(W, H, seq);
     canvas.appendChild(svg);
 
     var norm = normalizeEdges(edges);
