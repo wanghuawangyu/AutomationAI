@@ -539,8 +539,10 @@ Engine 不靠轮询、也不仅靠内存推进 workflow，而是参考 Mistral �
       │     → 交给 Worker 执行 → 完成后写 step_completed（见 Worker 钩子机制）
       ├─ workflow_done
       │     → 更新 job_run 终态 success + duration, 刷新界面
+      │     → 调用 on_complete(success) 回报 Task Runner（释放并发, 触发下一任务）
       └─ terminate{run, reason}
             → 终止调度, 更新 job_run 终态 (failed / timeout / cancelled)
+            → 调用 on_complete(终态) 回报 Task Runner（释放并发, 触发下一任务）
 ```
 
 **状态机**：
@@ -566,7 +568,7 @@ Runner 与 Engine 是并行的后台任务，之间用一条**异步消息通道
 ```text
 Task Runner 调度线程（生产者）:
   └─ 取出 workflow 任务 → 置 running
-        └─ 向 Engine.inbox 发送 EngineStart{run_id, workflow_id}（非阻塞，发完即调度下一个任务）
+        └─ 向 Engine.inbox 发送 EngineStart{run_id, workflow_id}，并注入 on_complete 钩子（非阻塞，发完即调度下一个任务）
 
 Engine 事件循环（常驻消费者）:
   └─ loop: 接收 Engine.inbox
@@ -580,13 +582,43 @@ Engine 事件循环（常驻消费者）:
 - Engine 是常驻后台任务，维护事件循环持续接收消息，**不主动扫描**。
 - 收到 `EngineStart` 后，Engine **直接**为该 workflow 启动一条独立的调度循环（引擎内部的调度执行体）；Engine 自身不阻塞、继续处理后续消息。真正的 DAG 调度就在这条 Engine 调度循环内部（见上方）。
 
+**Engine / Worker 入口函数**：
+
+```rust
+/// Engine 入口（异步，非阻塞）：
+/// Runner 调度线程（或终止接口）投递控制消息到 Engine.inbox，立即返回；
+/// Engine 事件循环消费消息后直接调度，调用方不被阻塞。
+/// on_complete 由 Runner 注入：workflow 到达终态（success / failed / timeout / cancelled）
+/// 时回调 Task Runner，更新运行历史、释放并发名额、触发下一个 queued 任务。
+impl Engine {
+    /// 异步通知入口：投递 EngineStart / Terminate 等消息，立即返回
+    pub fn notify(msg: EngineMessage, on_complete: OnCompleteFn) -> Result<(), EngineError>;
+}
+
+/// Engine 控制消息（Runner → Engine / 外部 → Engine）
+pub enum EngineMessage {
+    EngineStart { run_id: String, workflow_id: String,
+                  inputs: HashMap<String, String>, workspace: PathBuf },  // Runner 调度线程投递
+    Terminate    { run_id: String, reason: String },                      // 终止接口投递
+}
+
+/// Worker 入口（异步，非阻塞）：
+/// 内部独立线程调用 Executor::execute；调用方不被阻塞；
+/// 执行完成后在线程内调用 on_complete(result) 处理后续。
+impl Worker {
+    /// 异步执行一个 OP：内部起独立线程调 Executor，立即返回句柄
+    pub fn run_async(req: ExecuteRequest, on_complete: OnCompleteFn) -> WorkerHandle;
+}
+```
+
 **Worker 钩子机制（执行完成后的回调）**：
 
-Worker 是真正的执行者：**同步触发、整个任务跑完才返回**。执行完一次 OP 后，调用注入的钩子 `on_complete(result)` 处理后续操作。钩子由触发方注入，**OP 触发的 worker 与 workflow 触发的 worker 回调方式不同**：
+Worker 是真正的执行者，但**入口是异步的**：`Worker::run_async` 内部**起一条独立线程**调用 `Executor::execute`，调用方（Runner 调度线程 / Engine 调度循环）**不被阻塞**；执行完一次 OP 后，由该线程调用注入的钩子 `on_complete(result)` 处理后续操作。钩子由触发方注入，**OP 触发的 worker 与 workflow 触发的 worker 回调方式不同**：
 
 ```text
-Worker.run(op)   # 同步执行整个 op
-  └─ 完成后调用 this.on_complete(ExecuteResult)
+Worker::run_async(req, on_complete)   # 异步入口，内部独立线程执行
+  ├─ 线程内: Executor::execute(req)   # 同步跑完整个 OP（最小原子执行，见 crud-01 5.1）
+  └─ 线程内: 调用 this.on_complete(ExecuteResult)
         ├─ OP 场景（钩子注入: 终结单次运行）:
         │     → 写单次 JobRun 终态 success/failed/timeout + 刷新界面（运行历史）
         └─ Workflow 场景（钩子注入: 回报 Engine 继续推进 DAG）:
@@ -594,7 +626,8 @@ Worker.run(op)   # 同步执行整个 op
               → Engine 应用 retry / 走 condition 边 / 累积出参 / 找下一批就绪节点 / 直至 End
 ```
 
-- **钩子差异的本质**：OP 钩子终结运行记录（一次执行到此结束）；Workflow 钩子只回报 Engine（仅 DAG 中一个节点完成，由 Engine 决定下一步）。这就是"回调方式不一样"的原因，也是 worker 需要钩子机制的意义。
+- **钩子差异的本质**：OP 钩子终结运行记录（一次执行到此结束）；Workflow 钩子只回报 Engine（仅 DAG 中一个节点完成，由 Engine 决定下一步）。这就是回调方式不一样的原因，也是 worker 需要钩子机制的意义。
+- **Engine 事件循环同样不被阻塞**：收到 `EngineStart` 后为该 workflow 启动**独立的调度循环（内部执行体）**，主循环继续接收下一条消息（见上「Runner → Engine 通知机制」）。
 
 ### 4.3 边路由逻辑
 
@@ -667,6 +700,7 @@ Engine (调度器)                              Worker (执行器)
 - 处理循环回跳（计数 max × 3）
 - 超时检测：step 超时 → 立即终止整个 Run（不走边、不重试）
 - 写入 job_run 的状态流转
+- 完成后经注入的 on_complete 钩子回报 Task Runner（终态入运行历史、释放并发、触发下一任务）
 
 **Worker 职责**：
 - 接收 dispatch_step 的节点，绑定 Client
@@ -675,3 +709,4 @@ Engine (调度器)                              Worker (执行器)
 - 捕获 stdout / stderr / exit_code
 - 超时 kill 进程
 - 把结果写回 step_records，写 `step_completed` 命令回报 Engine
+- **入口异步**：`Worker::run_async(req, on_complete)` 内部独立线程调 Executor，调用方（Runner / Engine 调度循环）不被阻塞

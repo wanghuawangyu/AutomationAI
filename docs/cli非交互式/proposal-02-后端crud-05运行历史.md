@@ -359,8 +359,8 @@
 | - | - | - | - |
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
 | **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（queued / running / 终态）、并发控制、按序调度分派 | — |
-| **Engine** | crud-03 第 4.2 节 | workflow DAG 调度（并行后台任务）：收到 `EngineStart` 通知后，按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker | 与 Worker 并行（互不嵌套） |
-| **Worker** | crud-03 第 4.2 节 | 单个 OP 的实际执行（同步跑完，调 Executor）；完成后经 **on_complete 钩子**回报 | 与 Engine 并行（互不嵌套） |
+| **Engine** | crud-03 第 4.2 节 | workflow DAG 调度（并行后台任务）：**异步入口 `Engine::notify(EngineStart, on_complete)`**，事件循环消费后按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker | 与 Worker 并行（互不嵌套） |
+| **Worker** | crud-03 第 4.2 节 | 单个 OP 的实际执行（**异步入口 `Worker::run_async`**：内部独立线程调 Executor，调用方不被阻塞）；完成后经 **on_complete 钩子**回报 | 与 Engine 并行（互不嵌套） |
 
 > Engine 与 Worker 是两个**互相并行**的后台组件（均在 crud-03 4.2 描述），不是「Engine 套 Worker」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
@@ -387,7 +387,7 @@ impl TaskRunner {
 
 ```rust
 /// 单次 OP 运行请求（kind=single_op，virtual JobRun）
-/// 上游只需传 clientId / opId，Client / Op 实例由 add_op 内部查询后组装 StepTask
+/// 上游只需传 clientId / opId，Client / Op 实例由 add_op 内部查询后组装 ExecuteRequest
 pub struct OpRunRequest {
     pub run_id:    String,                  // 运行实例 id（后端生成）
     pub client_id: String,                  // Client id（Task Runner 内部查 Client 实例）
@@ -412,13 +412,6 @@ pub struct WorkflowRunRequest {
     pub workspace:   PathBuf,
 }
 
-/// 单个步骤任务（由 Task Runner 内部按来源组装：查询实例、展开 DAG）
-pub struct StepTask {
-    pub step_id: String,                  // 步骤 id（Job/Workflow=DAG 节点；单次 OP=runId 本身）
-    pub client:  Client,                  // Client 实例（内部按 client_id 查询）
-    pub op:      Op,                      // OP 定义（内部按 op_id 查询）
-    pub inputs:  HashMap<String, String>, // 本步骤运行入参
-}
 
 /// 任务状态机
 pub enum TaskStatus {
@@ -449,13 +442,14 @@ add_op / add_job / add_workflow(req)
   │     后台调度线程（按入库顺序）:
   │       ├─ 检查并发：job_runs 中 status=running 数量 < 最大并发数？否则保持 queued 等待
   │       ├─ ① 取出任务：运行历史状态 queued → running（本线程完成）
-  │       ├─ 按任务类型组装步骤并分派执行（Task Runner 不亲自执行 OP）:
-  │       │     ├─ 单次 OP（add_op）: 内部按 client_id/op_id 查询实例 → 组装单步
-  │       │     │     StepTask → 直接调用 Worker 执行
+  │       ├─ 按任务类型分派（Task Runner 不亲自执行 OP，直接以入口函数调用）:
+  │       │     ├─ 单次 OP（add_op）:
+  │       │     │     内部按 client_id/op_id 查询实例 → 组装 ExecuteRequest
+  │       │     │     → Worker::run_async(req, on_complete)      // 异步入口，不阻塞
   │       │     └─ Job / Workflow（add_job / add_workflow）:
-  │       │           发送 EngineStart{run_id, workflow_id} 通知 Engine 启动
-  │       │           → Engine 直接调度 → Engine 派发 op 给 Worker 执行
-  │       │           （Engine / Worker 见 crud-03 4.2；Worker 同步跑完）
+  │       │           Engine::notify(EngineStart{run_id, workflow_id}, on_complete)  // 异步入口，不阻塞（Runner 注入完成钩子）
+  │       │           → Engine 调度循环按 DAG 派发 op → Worker::run_async(...)
+  │       │           （Engine / Worker 入口定义见 crud-03 4.2；Worker 内部线程跑完）
   │       └─ ② 等待 Worker / Engine 的 on_complete 钩子回调：
   │             更新运行历史为终态（success/failed/timeout），释放并发名额，
   │             触发下一个 queued 任务调度，刷新界面状态
@@ -463,7 +457,7 @@ add_op / add_job / add_workflow(req)
 ```
 
 **同步 vs 异步**：
-- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `queued(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（OP 直接调 Worker / Workflow 通知 Engine），由 on_complete 钩子回调驱动终态更新、自动刷新界面状态。
+- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `queued(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `Worker::run_async` / Job·Workflow 调 `Engine::notify`，均为异步入口、不阻塞**），由 on_complete 钩子回调驱动终态更新、自动刷新界面状态。
 - **client test**：**同步例外**——不投递 Task Runner、不入队，直接同步调 `Executor::execute` 实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
 
 ---
