@@ -375,7 +375,41 @@
 
 ### 3.3.10 GET /api/workflows/{workflowId}/needs-update —— 检查是否需要更新
 
-**功能说明**：动态计算 Workflow 是否需要更新（存在节点 opVersion 落后于对应 OP 当前 version）。供列表/详情显示「需要更新」标记。
+**功能说明**：动态计算 Workflow 是否需要更新。判定依据：遍历 Workflow 内全部 `kind=op` 的业务节点，逐一比对节点保存的 `opVersion` 快照与节点所绑定 OP 的当前 `version`，只要存在任一节点落后（或处于版本异常 / 悬挂引用状态），即 `needsUpdate=true`，并在 `outdatedNodes` 中列出这些节点。供列表/详情显示「需要更新」标记（列表接口 3.3.1 的 `needsUpdate` 过滤、执行前的 409 拦截均基于同一判定）。
+
+**判定逻辑**（与 3.3.11 共用同一内核，动态计算、不落库存储）：
+
+1. **遍历范围**：仅遍历 `kind=op` 的节点；`start` / `end` 系统节点无 opVersion，不参与判定。
+2. **比对对象**：节点字段 `opVersion`（创建 / 上次保存时锁定的 OP 版本快照） vs `ops` 表中 `opId` 对应 OP 的当前 `version`。
+3. **逐节点判定**：
+
+| 节点状态 | 条件 | 是否需更新 |
+|-|-|-|
+| 已同步 | `node.opVersion == op.version` | 否 |
+| 落后 | `node.opVersion < op.version`（OP 已发布新版本） | 是 |
+| 超前 | `node.opVersion > op.version`（OP 版本被回滚） | 是（版本异常，需重新绑定） |
+| 悬挂引用 | `opId` 在 `ops` 中不存在（OP 被删除） | 是（失效节点，需修复绑定） |
+
+4. **聚合规则**：`needsUpdate` = 存在任一需更新节点；`outdatedNodes` = 全部需更新节点的 nodeId，按画布拓扑顺序（start → end 方向，同级按 nodeId 稳定排序）返回，保证前端高亮顺序稳定。
+5. **边界情况**：仅含 start / end 的骨架 Workflow 无 op 节点 → `needsUpdate=false`、`outdatedNodes=[]`。
+6. **伪代码**：
+
+```
+function evaluateWorkflowOutdated(workflow):
+    outdated = []
+    for node in workflow.nodes where node.kind == 'op':
+        op = ops.find(node.opId)
+        if op is null:
+            outdated.push(node.nodeId)          # 悬挂引用（OP 已删除）
+        elif node.opVersion != op.version:
+            outdated.push(node.nodeId)          # 落后 或 超前
+    return outdated
+
+needsUpdate   = evaluateWorkflowOutdated(workflow).length > 0
+outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结果
+```
+
+**注意**：`opVersion` 是节点侧的版本快照，OP 发布新版本后节点**不会自动跟随**；仅当用户重新保存节点（重新绑定该 OP 并锁定新版本）后，该节点才恢复为「已同步」。
 
 **路径参数**：`workflowId`（32 位 UUID，必填）
 
@@ -389,7 +423,7 @@
 
 | 响应字段 | 类型 | 说明 |
 |-|-|-|
-| needsUpdate | boolean | 是否存在节点 opVersion != OP 当前 version |
+| needsUpdate | boolean | 是否存在需更新节点（落后 / 版本超前 / OP 悬挂引用），判定规则见上文 |
 | outdatedNodes | string[] | 落后节点的 nodeId 列表 |
 
 **错误响应**：404 `WORKFLOW_NOT_FOUND`。
@@ -398,7 +432,9 @@
 
 ### 3.3.11 GET /api/workflows/{workflowId}/outdated-nodes —— 获取落后节点
 
-**功能说明**：返回 opVersion 落后于对应 OP 当前 version 的节点 nodeId 列表，供前端在画布上高亮提示需要更新的节点。
+**功能说明**：返回所有需更新节点的 nodeId 列表——节点 `opVersion` 落后于 / 超前于 OP 当前 `version`，或 OP 已删除形成悬挂引用，均计入。供前端在画布上高亮提示需要更新的节点。
+
+**与 3.3.10 的关系**：本接口与 3.3.10 共用同一判定内核（见 3.3.10「判定逻辑」1–6 步），本接口返回 `evaluateWorkflowOutdated` 的直接结果；前端仅需节点列表时调用本接口，需同时判断布尔标记时调用 3.3.10（二者计算结果一致）。
 
 **路径参数**：`workflowId`（32 位 UUID，必填）
 
