@@ -937,6 +937,36 @@ type EdgeCondition =
 
 **删除连线**：在连线上点击鼠标右键，弹出右键菜单（含"删除连线"选项）；点击"删除连线"后弹出确认框"删除连线：A → B？"，确认后从 edges 数据中移除该边并重新渲染画布。
 
+
+
+**边的端点坐标计算**（`workflow-canvas.js` 渲染期实时计算，**边本身不存坐标**）：
+
+
+
+- 节点尺寸：`NODE_W = 130`、`NODE_H = 46`；节点左上角 = `position.x / position.y`。
+
+- **起点（出点）** = 上游节点**右侧锚点中心**：
+
+
+
+| 节点类型 | 起点 X | 起点 Y |
+
+|-|-|-|
+
+| Start | `position.x + NODE_W + 1.5` | `position.y + NODE_H / 2`（右侧垂直居中） |
+
+| OP | `position.x + NODE_W + 1.5` | `position.y + ANCHOR_Y[condition]` |
+
+
+
+- `ANCHOR_Y = { on_failure: 11.5, on_success: 21.5, always: 31.5 }`（对应三色锚点 CSS `top` 7 / 17 / 27 + 锚点半高 4.5）。
+
+- **终点（入点）** = 下游节点**左侧垂直中点**：`x = position.x + 1`，`y = position.y + NODE_H / 2`。
+
+- 起点 X 取 `+1.5` 是贴锚点中心（锚点 CSS `right:-6px`、宽 9px → 中心在节点右边缘外 6 − 4.5 = 1.5px）；终点 `+1` 使箭头尖端贴近节点左边缘。
+
+- 连线为贝塞尔曲线，水平控制点外扩 `dx = max(40, |x2 − x1| × 0.5)`；起止点随节点 `position` 动态计算——**节点拖动时仅更新 position，连线实时重算跟随，边数据不存任何坐标**。
+
 ### 10.7 节点重试策略
 
 ```typescript
