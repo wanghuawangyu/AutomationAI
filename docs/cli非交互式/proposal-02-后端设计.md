@@ -25,27 +25,56 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    AI Automation Daemon                      │
 │                                                             │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐               │
-│  │  HTTP     │   │ Scheduler│   │ Engine   │  ← 编排控制    │
-│  │  Server   │   │ (cron)   │   │ (dispatcher)          │
-│  │ (axum)    │   │          │   │          │               │
-│  └────┬─────┘   └────┬─────┘   └────┬─────┘               │
-│       │               │              │                     │
-│       └───────────────┼──────────────┘                     │
-│                       ▼                                     │
+│  ┌──────────┐   ┌──────────┐                                │
+│  │  HTTP     │   │ Scheduler│                                │
+│  │  Server   │   │ (cron)   │                                │
+│  │ (axum)    │   │          │                                │
+│  └────┬─────┘   └────┬─────┘                                │
+│       │ 执行入口      │ 定时触发                              │
+│       └───────┬───────┘                                      │
+│               ▼  add_op / add_job / add_workflow             │
+│  ┌────────────────────┐      ┌──────────────────┐           │
+│  │  Task Runner       │      │ Engine           │ ← 编排控制  │
+│  │  (后台任务① 调度层)  │      │ (后台任务② 并行)   │           │
+│  │  队列 / 并发 / 状态机│      │ DAG 调度          │           │
+│  └───┬────────┬───────┘      └────────┬─────────┘           │
+│      │        │  EngineStart 通知      │ 派发 OP             │
+│      │        └───────────────────────┘│                     │
+│      │            ▼                    ▼                     │
+│      │   ┌──────────────────────────────────────┐           │
+│      │   │  Worker Pool (N 个并发槽)             │           │
+│      │   │  ┌──────┐ ┌──────┐ ┌──────┐          │           │
+│      │   │  │W-1   │ │W-2   │ │W-3   │  ...      │           │
+│      │   │  │执行OP │ │执行OP │ │执行OP │→ Executor│          │
+│      │   │  └──────┘ └──────┘ └──────┘          │           │
+│      │   └──────────────────────────────────────┘           │
+│      │   on_complete 钩子（Worker / Engine → Task Runner）    │
+│      └───────────────────────┬──────────────────┘           │
+│                              ▼ 更新运行历史终态              │
 │              ┌─────────────────┐                            │
 │              │  Repository     │  ← DB 操作层                │
-│              │  (SQLite)        │                            │
+│              │  (SQLite)        │  job_runs / step_records   │
 │              └─────────────────┘                            │
-│                                                             │
-│  ┌──────────────────────────────────────┐                  │
-│  │  Worker Pool (N 个并发槽)             │                  │
-│  │  ┌──────┐ ┌──────┐ ┌──────┐          │                  │
-│  │  │W-1   │ │W-2   │ │W-3   │  ...      │                  │
-│  │  │执行OP │ │执行OP │ │执行OP │          │                  │
-│  │  └──────┘ └──────┘ └──────┘          │                  │
-│  └──────────────────────────────────────┘                  │
 └─────────────────────────────────────────────────────────────┘
+```
+
+**后台任务关系**（三个后台任务，互不嵌套、相互并行）：
+
+| 后台任务 | 职责 | 与其它任务的关系 |
+|-|-|-|
+| **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（queued → running → 终态）、并发控制、按序调度分派 | 与 Engine 并行；Worker / Engine 完成后经 **on_complete 钩子**回调它 |
+| **Engine**（编排控制，后台任务②） | 收到 `EngineStart` 通知后，按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker | 与 Task Runner、Worker 并行（互不嵌套） |
+| **Worker Pool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），完成后经 **on_complete 钩子**回报 | 与 Engine 并行；完成后回调 Task Runner |
+
+**执行数据流**：
+
+1. **触发**：接口触发（HTTP 手动 / Scheduler cron 定时 / 单次 OP / Workflow 执行）统一调用 `TaskRunner.add_op / add_job / add_workflow`；
+2. **创建运行历史**：Task Runner 写入一条 JobRun（status=queued）到 `job_runs` 并返回 runId，接口即结束；
+3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 queued → running；**单次 OP 直接派发 Worker**；**Job / Workflow 发送 `EngineStart{run_id, workflow_id}` 通知 Engine**；
+4. **执行**：Engine 按 DAG 顺序派发各 OP 给 Worker；Worker 同步执行（调 Executor）；
+5. **完成回调**：Worker / Engine 执行完成后经 **on_complete 钩子**回调 Task Runner → 更新运行历史终态（success / failed / timeout）→ 释放并发名额 → 触发下一个 queued 任务 → 刷新界面状态。
+
+> 注：Task Runner 与 Engine 是两个并行的后台任务（同见 crud-05 4.6、crud-03 4.2）；Worker Pool 是执行资源池，与 Engine 并行接收派发。
 ```
 
 ### 1.3 Engine / Worker 模式（参考 mistral）
