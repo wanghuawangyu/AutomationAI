@@ -88,6 +88,8 @@
 | `Job.clientId` | `jobs.client_id` | 引用 clients.client_id |
 | `JobRun.runId` | `job_runs.run_id` | 主键，32 位 UUID |
 | `StepRecord.recordId` | `step_records.record_id` | 主键，32 位 UUID |
+| `StepRecord.activationSeq` | `step_records.activation_seq` | 第几次激活（循环回跳重入 +1） |
+| `StepRecord.retrySeq` | `step_records.retry_seq` | activation 内第几次尝试（含首次；apply_retry +1） |
 | `JobRun.jobId` | `job_runs.job_id` | 引用 jobs.job_id |
 
 ---

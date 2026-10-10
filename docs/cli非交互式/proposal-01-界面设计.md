@@ -27,7 +27,7 @@
 13. **运行历史是默认首页。**
 14. **失败的 Workflow 支持从失败 OP 重试。**
 15. **超时只属于 OP，超时是终止信号。**
-16. **循环终止由 max × 3 控制。**
+16. **循环终止由 min(max × 3, max_loop_multiplier) 控制。**
 17. **所有任务后台运行，前端轮询 DB 获取状态，不使用事件流。**
 18. **Workflow 编辑器布局：左侧 OP 库（可搜索、可拖动）+ 中间画布 + 右侧节点详情面板（常驻）。**
 19. **Job target 为单个 OP 时，创建 Job 时必须选择一个 Client。**
@@ -1579,10 +1579,12 @@ interface JobRun {
 }
 
 type StepStatus =
-  | "waiting" | "running" | "success" | "failed" | "timeout";
+  | "waiting" | "running" | "success" | "failed" | "timeout" | "cancelled";
 
 interface StepRecord {
   stepId: string;
+  activationSeq: number;    // 第几次激活（首次=1；循环回跳重入 +1）
+  retrySeq: number;         // activation 内第几次尝试（含首次；首次=1，apply_retry +1）
   opId: string;
   opVersion: number;
   clientId?: string;
@@ -1602,7 +1604,7 @@ interface StepRecord {
 }
 ```
 
-> **同一 step 多次执行**：若 step 因临时错误自动重试，每次重试都会产生一条独立的 StepRecord（通过 `startedAtMs` 区分）。查看 OP 执行详情时，执行历史以下拉选项展示，**按时间降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。
+> **同一 step 多次执行**：step 因**重试**或**循环回跳重入**会多次执行，每次执行产生一条独立的 StepRecord，由 `(activationSeq, retrySeq)` 唯一区分（`activationSeq` 回跳 +1；`retrySeq` 重试 +1）。查看 OP 执行详情时，执行历史以下拉选项展示，**按 `(activationSeq, retrySeq)` 降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。
 
 ### 12.4 第一层：Job 运行历史列表
 
@@ -1666,7 +1668,7 @@ interface StepRecord {
 │                                                          │
 │  【执行历史】                                             │
 │  [ 第2次 12:01:35 成功（12.3s）← 当前 ▾ ]                │
-│    └ 下拉选项(按时间降序): 第2次成功 / 第1次失败         │
+│    └ 下拉选项(按 activation/attempt 降序): 第2次成功 / 第1次失败  │
 │                                                          │
 │  【入参】                                                 │
 │  ┌──────────────┬──────────────────────┐               │
@@ -1691,7 +1693,7 @@ interface StepRecord {
 > 说明：
 > - OP 执行详情页以 `check_tests` 为静态示例内容，不随 OP 变化。
 > - 入参/出参用表格展示：左列=参数名固定宽度，右列=参数值，多个参数换行展示。
-> - 每次重试（执行历史下拉切换）的入参、出参、输出一一对应，切换时同步更新。
+> - 每次执行（重试 / 循环回跳，执行历史下拉切换）的入参、出参、输出一一对应，切换时同步更新。
 
 ### 12.6 第二层 B：Workflow 执行详情
 
@@ -1777,6 +1779,7 @@ interface StepRecord {
 | 失败 | 🔴 红框 | ✗ |
 | 超时 | 🟠 橙框 | ⏱ |
 | 运行中 | 🟡 黄框 | ● |
+| 已取消（cancelled） | ⚫ 深灰框 | ✕ |
 | 未执行 / 跳过 | ⚪ 灰框 | ⊘ |
 
 **Start / End 在运行历史中的状态**：
@@ -1819,7 +1822,7 @@ interface StepRecord {
 > - 从 Workflow 进入时，入参展示的是 Workflow 对该 node 配置的参数值（如 `${workflow.target_env}` 解析后的值）。
 > - 出参展示的是该 node 实际执行产出的参数值。
 > - 多个参数时换行展示，左列=参数名固定宽度，右列=参数值。
-> - 同一 node 若有多次执行记录（重试），每次重试的入参、出参、输出一一对应，通过执行历史下拉切换。
+> - 同一 node 若有多次执行记录（重试 / 循环回跳），每次执行的入参、出参、输出一一对应，通过执行历史下拉切换。
 
 ### 12.8 重试机制
 
@@ -1938,7 +1941,7 @@ interface StepRecord {
 | 文件格式 | Excel（`.xlsx`），首行为表头 |
 | 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}.xlsx` |
 | 导出弹窗 | 展示文件名、导出条数（运行历史数 + 运行明细数）、导出目录选择 |
-| 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮 |
+| 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；由**后端**生成 `.xlsx` 写入所选目录并返回 `{filePath}`（见 crud-05 3.5.10） |
 
 **Sheet 1：运行历史**（每个 Job Run 一行）
 
@@ -1963,6 +1966,8 @@ interface StepRecord {
 | ResultId | StepRecord ID |
 | jobId | 所属 Job ID |
 | stepId | 步骤 ID |
+| activationSeq | 第几次激活（循环回跳重入 +1） |
+| retrySeq | activation 内第几次尝试（含首次；apply_retry +1） |
 | opId | OP ID |
 | opVersion | OP 版本 |
 | clientId | Client ID（可空） |
@@ -2143,13 +2148,13 @@ Workflow deploy_workflow
 
 ### 15.2 循环终止条件
 
-> **单节点在一次 Run 中的执行次数上限 = max × 3。达到上限时，整个 Run 失败。**
+> **单节点在一次 Run 中的执行次数上限 = min(max × 3, max_loop_multiplier)。达到上限时，整个 Run 失败。**
 
 | 字段 | 说明 |
 |-|-|
 | max | 每轮重试次数（来自 NodeRetry） |
-| 3 | 硬编码的最大循环轮数 |
-| 执行上限 | max × 3 |
+| max_loop_multiplier | 执行总次数绝对上限（settings 可配，见 crud-06；`0`=不限制，否则与 max×3 取较小值） |
+| 执行上限 | min(max × 3, max_loop_multiplier) |
 
 **不再依赖**：Job timeout、Workflow 执行上限。
 
@@ -2470,7 +2475,8 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | GET | `/api/workspaces` | 获取工作区列表 |
 | POST | `/api/workspaces/browse` | 浏览文件系统选择工作区 |
 
-> **说明**：导出对话框的目录选择由前端浏览器 File System Access API（`showDirectoryPicker`）完成，选完目录后文件直接写入该目录（`getFileHandle` + `createWritable`），不经过后端接口，不触发浏览器下载。未选目录时导出按钮置灰，不回退到下载方式。
+> **说明**：OP 导出（YAML）与 Workflow / Job 导出（ZIP）的目录选择由前端浏览器 File System Access API（`showDirectoryPicker`）完成，选完目录后文件直接写入该目录（`getFileHandle` + `createWritable`），不经过后端接口，不触发浏览器下载；未选目录时导出按钮置灰，不回退到下载方式。
+> **运行历史「全部导出」Excel 例外**：由**后端**生成 `.xlsx` 并写入前端传入的目录，接口返回 `{filePath}`（见 crud-05 3.5.10）。
 
 **说明**：**不涉及**事件与流式相关接口（无 SSE，无 WebSocket）。
 
@@ -2531,8 +2537,8 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 前端将搜索关键词和筛选条件作为 query 参数传给后端，后端返回过滤+分页后的结果：
 
 ```
-GET /api/clients?keyword=claude&type=prompt&page=1&pageSize=10
-GET /api/runs?keyword=deploy&status=failed&triggeredBy=schedule&timeRange=2d&page=1&pageSize=10
+GET /api/clients?keyword=claude&type=prompt&page=1&page_size=10
+GET /api/runs?keyword=deploy&status=failed&triggeredBy=schedule&timeRange=last_2d&page=1&page_size=10
 ```
 
 > 原型阶段使用前端 mock 过滤模拟；真实后端实现时替换为后端查询。
@@ -2713,9 +2719,9 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | **Start / End 节点** | **固定存在，不绑定 OP** | **明确标识 Workflow 起点和终点** |
 | **Start 锚点** | **仅右侧 🟢 出边锚点** | **Start 必然成功** |
 | **End 锚点** | **仅左侧入边锚点** | **End 是终点** |
-| **End 完成语义** | **任意入边触发即完成** | **简化逻辑** |
+| **End 完成语义** | **所有入边均已决定（并行多边需全部结束）且至少一条 activated；互斥条件（on_success/on_failure）达到任一即完成** | **汇聚正确、互斥不互等** |
 | 循环实现 | 重试 + 条件边 + 回跳 | 指向原节点 |
-| 循环终止 | max × 3 | 不依赖 Job / Workflow 时间 |
+| 循环终止 | min(max × 3, max_loop_multiplier) | 不依赖 Job / Workflow 时间 |
 | 超时归属 | 只在 OP 上 | OP 是原子执行单元 |
 | 超时语义 | 终止信号，不是失败 | 不走边、不回跳、不重试 |
 | 超时不可重试 | ✅ | 版本已不一致 |
@@ -2806,7 +2812,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 - Start / End 不绑定 OP，不可删除。
 - Start 只有右侧 🟢 出边锚点。
 - End 只有左侧入边锚点。
-- End 任意入边触发即完成，Workflow 成功。
+- End 完成：所有入边均已决定（并行多边需全部结束）且至少一条入边 activated（互斥条件下达到任一即可），Workflow 成功。
 - Start / End 不产生 StepRecord，不进入步骤列表，不涉及版本。
 
 **新建默认值规范**：

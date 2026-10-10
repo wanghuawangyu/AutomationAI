@@ -84,7 +84,7 @@
   "items": {
     "poll_interval_ms": "2000",
     "log_level": "info",
-    "max_loop_multiplier": "3",
+    "max_loop_multiplier": "0",
     "db_version": "1"
   }
 }
@@ -155,6 +155,6 @@
 |-|-|-|
 | poll_interval_ms | 2000 | 前端轮询建议间隔 |
 | log_level | info | 日志级别 |
-| max_loop_multiplier | 3 | 循环终止倍数 |
+| max_loop_multiplier | 0 | 循环执行总次数绝对上限；`0`=不限制（按 `max×3`），否则与 `max×3` 取较小值（见 crud-03 4.3.0） |
 | db_path | ~/.ai-automation/data.db | SQLite 文件路径 |
 | workspace_root | ~/.ai-automation/workspaces | 默认工作区根目录 |

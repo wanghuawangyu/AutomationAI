@@ -14,7 +14,7 @@
 | GET | `/api/runs/{runId}` | — | JobRun | 完整详情 (含 steps) |
 | GET | `/api/runs/{runId}/status` | — | `{status, updatedAtMs}` | 轻量轮询 |
 | GET | `/api/runs/{runId}/steps` | — | StepRecord[] | 步骤列表 |
-| GET | `/api/runs/{runId}/steps/{stepId}` | — | StepRecord[] | 单步骤多次执行记录 (按时间降序) |
+| GET | `/api/runs/{runId}/steps/{stepId}` | — | StepRecord[] | 单步骤多次执行记录 (按 activation/attempt 降序) |
 | POST | `/api/runs/{runId}/terminate` | — | `{ok:true}` | 终止运行中 Run |
 | POST | `/api/runs/{runId}/rerun` | — | `{runId}` | 重跑 (用最新版本) |
 | POST | `/api/runs/{runId}/retry` | — | `{runId}` | 从失败 step 重试 |
@@ -50,6 +50,8 @@
 {
   "recordId": "a1b2c3d4e5f67890abcdef1234567890",
   "stepId": "1b2c3d4e5f60718293a4b5c6d7e8f9a1",  // workflow_node.node_id (32 位 UUID)
+  "activationSeq": 1,   // 第几次激活（首次=1；循环回跳重入 +1）
+  "retrySeq": 1,   // activation 内第几次尝试（含首次；首次=1，apply_retry +1）
   "opId": "...",
   "opVersion": 2,
   "opName": "check_tests",
@@ -73,7 +75,7 @@
 
 **导出 Excel**：
 - Sheet1 "运行历史"：id, jobId, jobKind, jobVersion, triggeredBy, workspace, status, terminatedBy, startedAtMs, finishedAtMs, duration
-- Sheet2 "运行明细"：recordId, jobId, stepId, opId, opVersion, clientId, status, exitCode, inputs(JSON), outputs(JSON), rawOutput, timedOut, startedAtMs, finishedAtMs, duration
+- Sheet2 "运行明细"：recordId, jobId, stepId, activationSeq, retrySeq, opId, opVersion, clientId, status, exitCode, inputs(JSON), outputs(JSON), rawOutput, timedOut, startedAtMs, finishedAtMs, duration
 - 文件名：`job_result-{yyyyMMddHHmmssSSS}.xlsx`
 - 由后端生成文件写入用户指定目录（前端传目录路径）。
 
@@ -117,6 +119,8 @@
 | `StepRecord.recordId` | `step_records.record_id` | 主键，32 位 UUID |
 | `StepRecord.stepId` | `step_records.step_id` | 等于 workflow_nodes.node_id |
 | `StepRecord.runId` | `step_records.run_id` | 引用 job_runs.run_id |
+| `StepRecord.activationSeq` | `step_records.activation_seq` | 第几次激活（循环回跳重入 +1；重试不递增） |
+| `StepRecord.retrySeq` | `step_records.retry_seq` | activation 内第几次尝试（含首次；apply_retry +1） |
 
 ---
 
@@ -195,13 +199,13 @@
 
 ### 3.5.4 GET /api/runs/{runId}/steps —— 步骤列表
 
-**功能说明**：查询 Run 的全部步骤记录（含因重试产生的多条），按 startedAtMs 排序，用于详情页逐步展示。
+**功能说明**：查询 Run 的全部步骤记录（含因重试 / 循环回跳产生的多条），按执行先后排序（`(activation_seq, retry_seq)` 升序），用于详情页逐步展示。
 
 **路径参数**：`runId`（32 位 UUID，必填）
 
 **查询参数**：无　**请求体**：无
 
-**成功响应 `200 OK`**：`StepRecord[]`（含重试产生的多条记录，按 startedAtMs 排序）。
+**成功响应 `200 OK`**：`StepRecord[]`（含重试 / 循环回跳产生的多条记录，按 `(activation_seq, retry_seq)` 升序）。
 
 **错误响应**：404 `RUN_NOT_FOUND`。
 
@@ -209,7 +213,7 @@
 
 ### 3.5.5 GET /api/runs/{runId}/steps/{stepId} —— 单步骤多次执行记录
 
-**功能说明**：查询某 step 因重试产生的全部执行记录（按时间降序，最新在上），用于对比每次尝试的结果。
+**功能说明**：查询某 step 因**重试 / 循环回跳**产生的全部执行记录，按执行降序（最新在上，即 `(activation_seq, retry_seq)` 降序），用于对比每次尝试的结果。
 
 **路径参数**：
 
@@ -220,7 +224,7 @@
 
 **查询参数**：无　**请求体**：无
 
-**成功响应 `200 OK`**：`StepRecord[]`，该 step 因重试产生的全部记录，按时间降序（最新的在最上面）。
+**成功响应 `200 OK`**：`StepRecord[]`，该 step 因重试 / 循环回跳产生的全部记录，按 `(activation_seq, retry_seq)` 降序（最新的在最上面）。
 
 **错误响应**：400 `VALIDATION_ERROR`；404 `RUN_NOT_FOUND` / `STEP_NOT_FOUND`。
 
@@ -360,7 +364,7 @@
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
 | **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（waiting / running / 终态）、并发控制、按序调度分派 | — |
 | **Engine** | crud-03 第 4.3 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即事件：EngineStart / Terminate 先写 engine_events 落库，**写后立即 `process_event` 同步处理**（无事件循环 / 无信号）**，按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 WorkerPool 并行（互不嵌套） |
-| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插入 waiting 记录即返回；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（池大小 = 1.5 × 并发上限）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
+| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）只在 step_records 插入 waiting 记录（含 activation_seq / retry_seq）即返回；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（池大小 = 1.5 × 并发上限）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
 
 > Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
@@ -426,7 +430,7 @@ pub struct WorkflowRunRequest {
 
 /// 任务状态机
 pub enum TaskStatus {
-    Queued,    // 等待中
+    Waiting,   // 等待中
     Running,   // 运行中
     Success,   // 成功
     Failed,    // 失败
@@ -459,7 +463,7 @@ add_op / add_job / add_workflow(req)
   │       │     │     → worker.run_job(req)    // 只插 step_records(waiting) 即返回；调度线程指派 Worker 执行，完成后调 job_complete
   │       │     └─ Job / Workflow（add_job / add_workflow）:
   │       │           engine.notify(EngineStart{run_id, workflow_id})  // 实例方法 &self，异步入口，不阻塞
-  │       │           → Engine 消费 step_completed 事件链式推进：按 DAG 找后继就绪节点 → 写 dispatch_step → worker.run_step(req)    // 只插 step_records(waiting)；Worker 执行完调 step_complete
+  │       │           → Engine 消费 step_completed 事件链式推进：按 DAG 找后继就绪节点 → 写 dispatch_step → worker.run_step(req, inst)    // 只插 step_records(waiting)；Worker 执行完调 step_complete
   │       │           （Engine / WorkerPool 入口定义见 crud-03 4.3 / 4.4；WorkerPool 任务在 step_records 排队，Worker 执行完同步调 on_complete）
   │       └─ ② WorkerPool 完成同步调全局实现（JobComplete 落库 / StepComplete 写事件后调全局 ENGINE）→ Engine 整体完成（处理 workflow_done / terminate 事件）调全局 JobComplete 落库：
   │             Runner 常驻轮询线程按固定间隔扫描 DB（不依赖回调）：

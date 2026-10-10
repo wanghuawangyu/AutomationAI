@@ -330,7 +330,7 @@ POST /api/ops/{opId}/execute {clientId, inputs, workspace}
   │     - 不存在 → 404 CLIENT_NOT_FOUND
   │     - Client.type 与 OP.type 不匹配 → 400 VALIDATION_ERROR
   ├─ 2. 解析 OP 入参: 校验 required, 缺省项应用 default → 最终入参集
-  ├─ 3. 组装 OpRunRequest (结构见 crud-04 4.6):
+  ├─ 3. 组装 OpRunRequest (结构见 crud-05 4.6 Task Runner):
   │     run_id    = 后端生成的 runId (单次 OP 场景, virtual JobRun)
   │     client    = 步骤1查询到的 Client 实例
   │     op        = 当前 OP 定义
