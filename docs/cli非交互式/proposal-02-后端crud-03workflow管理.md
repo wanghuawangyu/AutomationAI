@@ -459,10 +459,10 @@ outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结
   └─ 组装 WorkflowRunRequest → TaskRunner.add_workflow
         └─ 创建 workflow 类型运行记录(queued)，返回 {runId}，接口即结束
               └─ Task Runner 调度线程: 按入库顺序取 queued → running
-                    ├─ OP 任务: 直接调用 Worker 执行（见 Worker 钩子机制）
+                    ├─ OP 任务: 直接调用 Worker 执行（见 Worker 完成通知）
                     └─ Workflow 任务: 通知 Engine 启动该 workflow
                           └─ Engine 直接调度（顺序调度 workflow 内各 OP）
-                                └─ Engine 派发 op 给 Worker 执行 → Worker 完成后钩子回报
+                                └─ Engine 派发 op 给 Worker 执行 → Worker 完成同步调注入的 OnComplete 实现（StepComplete 回报 Engine）
 ```
 
 **执行流程**（`POST /api/workflows/{workflowId}/execute`，请求体 `{inputs, workspace}`）：
@@ -514,17 +514,22 @@ Engine 不靠轮询、也不仅靠内存推进 workflow，而是参考 Mistral �
 
 | command | 含义 | 产生者 |
 |-|-|-|
+| `engine_start` | Runner 通知 Engine 开始执行某 workflow（= notify(EngineStart) 持久化，payload 含 inputs/workspace） | Runner（调度线程） |
 | `step_completed` | Worker 回报某节点执行完成（含结果） | Worker（执行完成后） |
 | `apply_retry` | 节点失败且配置了 retry，准备重试 | Engine |
 | `walk_edge` | 按结果走 condition 边，推进 DAG | Engine |
 | `dispatch_step` | 决定调度某节点，派发给 Worker | Engine |
 | `workflow_done` | 到达 End，workflow 完成 | Engine |
-| `terminate` | 异常终止（timeout / user terminate） | Engine / 外部 |
+| `terminate` | 异常终止（timeout / user terminate = notify(Terminate) 持久化，payload 含 reason） | Engine / 外部 |
 
 **Engine 事件循环（消费 `engine_commands`，按 run_id 分组、按 created_at 顺序）**：
 
 ```text
 └─ 取出 processed=0 的 command
+      ├─ engine_start{run, workflow_id}                 ← Runner 的 notify(EngineStart) 已持久化为此命令
+      │     → 加载 workflow definition (nodes, edges)
+      │     → 启动该 run 的调度循环（内部执行体，无内存业务状态，见「持久化」）
+      │     → 立即返回，继续消费下一条命令（不阻塞）
       ├─ step_completed{run, step, result}
       │     → 更新 step_records 终态
       │     → 若配置 retry 且未超次数: 写 apply_retry + dispatch_step（节点重入 running）
@@ -536,13 +541,19 @@ Engine 不靠轮询、也不仅靠内存推进 workflow，而是参考 Mistral �
       │           → 未就绪: 挂起, 等其他前置 step_completed 到达后再判（依赖就绪）
       │     → 到达 End 或无可就绪节点: 写 workflow_done
       ├─ dispatch_step
-      │     → 交给 Worker 执行 → 完成后写 step_completed（见 Worker 钩子机制）
+      │     → 交给 Worker 执行 → 完成后写 step_completed（见 Worker 完成通知）
       ├─ workflow_done
-      │     → 更新 job_run 终态 success + duration, 刷新界面
-      │     → 调用 on_complete(success) 回报 Task Runner（释放并发, 触发下一任务）
+      │     → 调用 self.job_complete（Engine 实例属性，Runner 注入的 JobComplete）:
+      │           → 更新 job_run 终态 success + duration（落库），刷新界面
+      │           → Runner 常驻轮询自动感知并调度下一个
       └─ terminate{run, reason}
-            → 终止调度, 更新 job_run 终态 (failed / timeout / cancelled)
-            → 调用 on_complete(终态) 回报 Task Runner（释放并发, 触发下一任务）
+            → 终止调度
+            → 调用 self.job_complete（Engine 实例属性，Runner 注入的 JobComplete）:
+                  → 更新 job_run 终态 (failed / timeout / cancelled)（落库）
+                  → Runner 常驻轮询自动感知并调度下一个
+      ※ workflow_done / terminate 命令本身持久化（engine_commands）：
+        job_complete 是 Engine **实例属性**（App 启动时绑定、重启后重建重新注入），
+        重放 processed=0 命令时属性仍有效——幂等重做终态动作，job_run 不会卡在 running。
 ```
 
 **状态机**：
@@ -561,72 +572,247 @@ Engine 只管理 workflow 从**开始执行到结束执行**这一段：已完�
 
 - 软删除保留一段窗口便于诊断 / 恢复；物理删除彻底清理，避免 `engine_commands` 无限膨胀。
 
-**Runner → Engine 通知机制**：
+**Runner → Engine 通知机制（消息即命令，持久化）**：
 
-Runner 与 Engine 是并行的后台任务，之间用一条**异步消息通道（channel / inbox）**通信——Task Runner 调度线程是唯一生产者，Engine 事件循环是消费者：
+Runner 与 Engine 是并行的后台任务。**notify 不投内存 inbox**——`EngineStart` / `Terminate` 作为命令**先写 `engine_commands` 表**（写库成功即返回，投递不丢），Engine 事件循环从表里消费：
 
 ```text
 Task Runner 调度线程（生产者）:
-  └─ 取出 workflow 任务 → 置 running
-        └─ 向 Engine.inbox 发送 EngineStart{run_id, workflow_id}，并注入 on_complete 钩子（非阻塞，发完即调度下一个任务）
+  └─ 取出 workflow 任务 → job_run 置 running
+        └─ engine.notify(EngineStart{run_id, workflow_id, inputs, workspace})   # 实例方法 &self
+              ├─ INSERT engine_commands(command=engine_start, run_id, payload={inputs, workspace}, processed=0)
+              ├─ 写库成功即返回（Result::Ok）→ Runner 继续调度下一个任务
+              └─ 写库失败（Result::Err）→ Runner 将该 job_run 置 failed（或回滚 queued），不静默丢失
+      ※ Terminate 同理: 终止接口 → engine.notify(Terminate{run_id, reason})
+           → INSERT engine_commands(command=terminate, payload={reason})
 
 Engine 事件循环（常驻消费者）:
-  └─ loop: 接收 Engine.inbox
-        ├─ EngineStart{run_id, workflow_id}
-        │     → 为该 workflow(run_id) 启动独立调度循环（Engine 内部，独立执行体）
-        │     → Engine 立即返回，继续接收下一条消息（不阻塞）
-        └─ 其他控制消息（如 user terminate → 终止对应 workflow 的调度）
+  └─ loop:
+        ├─ 扫描 engine_commands 中 processed=0 的命令（按 run_id 分组、按 created_at 顺序）
+        │     └─ engine_start{run_id, workflow_id} → 为该 workflow(run_id) 启动独立调度循环
+        │          → 消费完置 processed=1 → 继续处理下一条（不阻塞）
+        └─ 无新命令时休眠（内存唤醒信号仅提示"有新命令"，见「持久化」）
 ```
 
 **Engine 收到通知后怎么跑起来**：
-- Engine 是常驻后台任务，维护事件循环持续接收消息，**不主动扫描**。
-- 收到 `EngineStart` 后，Engine **直接**为该 workflow 启动一条独立的调度循环（引擎内部的调度执行体）；Engine 自身不阻塞、继续处理后续消息。真正的 DAG 调度就在这条 Engine 调度循环内部（见上方）。
+- Engine 是常驻后台任务，维护事件循环**从 `engine_commands` 表消费命令**（不依赖内存 inbox、不靠消息内容在内存传递）。
+- 事件循环读到 `engine_start` 后，为该 workflow **启动一条独立的调度循环**（引擎内部的调度执行体）；Engine 自身不阻塞、继续消费下一条命令。真正的 DAG 调度就在这条 Engine 调度循环内部（见上方）。
+
+**Engine 的 notify 与后台线程持久化**：
+
+| 对象 | 形态 | 持久化方式 | 重启后如何恢复 |
+|-|-|-|-|
+| **notify 投递的消息**（EngineStart / Terminate） | 命令写库 | `notify(msg)` = **INSERT engine_commands**（engine_start / terminate，payload 承载 inputs / workspace / reason），**写库成功即返回**；内存不存消息本体 | 命令在 `engine_commands` 中（processed=0），重启后照常被消费——**投递不丢** |
+| **内存唤醒信号** | 仅提示 | notify 写库后发一个**内存信号**（oneshot / condvar）唤醒事件循环立即处理；**信号不承载任何消息内容**，仅避免纯轮询 | 丢失无影响：事件循环自身兜底轮询扫描 processed=0，重启后必然重新扫到 |
+| **事件循环（常驻主线程）** | 程序实例固定线程 | 无状态消费者：只做「扫 processed=0 → 分发到对应 run 的调度循环 → 置 processed=1」 | App 启动 `Engine::new` 即重建，**线程本身无需持久化** |
+| **调度循环（per-run 内部执行体）** | 内存执行体 | **不持有业务状态**：当前推进到哪 = `engine_commands` 未消费命令 + `step_records` 已完成节点，可完全重建 | App 启动 **recover**：扫 `job_runs` 中 status=running 的 workflow 记录 → 为每个重建调度循环 → 从未消费命令继续推进 |
+
+- **恢复闭环（workflow 执行中 App 重启）**：
+  1. Runner（常驻轮询）重启后扫 DB：该 job_run 仍 running，且 `engine_commands` 中该 run 的命令（engine_start / step_completed 等）一条未丢；
+  2. Engine 启动 recover 重建该 run 的调度循环，从 processed=0 命令续推（dispatch_step 重派、walk_edge 重走，**幂等**——step_records 已有终态的节点不再重复执行）；
+  3. 终态（workflow_done / terminate）命令同样在库里：消费时调 `self.job_complete` 属性（重启重绑）落库终态。**job_run 不会卡在 running**。
+- **与 Worker 排队的区别**：Worker 侧任务本体在 `step_records`（waiting 队列）；Engine 侧推进信号在 `engine_commands`。两边都是**落库排队 + 常驻线程消费**，App 重启后由各自 recover 重建，无需内存队列。
 
 **Engine / Worker 入口函数**：
 
 ```rust
-/// Engine 入口（异步，非阻塞）：
-/// Runner 调度线程（或终止接口）投递控制消息到 Engine.inbox，立即返回；
-/// Engine 事件循环消费消息后直接调度，调用方不被阻塞。
-/// on_complete 由 Runner 注入：workflow 到达终态（success / failed / timeout / cancelled）
-/// 时回调 Task Runner，更新运行历史、释放并发名额、触发下一个 queued 任务。
+/// Engine 实例：`job_complete` 属性（Runner 注入的 JobComplete），
+/// workflow 到达终态（success / failed / timeout / cancelled）时，Engine 在
+/// 消费 `workflow_done` / `terminate` 命令时**调用该属性**→ 更新 job_runs 终态（落库）。
+/// 属性是程序实例的一部分（App 启动时绑定，重启后重建重新注入），
+/// 配合命令持久化（engine_commands）重放，终态动作幂等重做——job_run 不会卡在 running。
+pub struct Engine {
+    job_complete: Box<dyn OnComplete>,   // 绑定 Runner 注入的 JobComplete：更新 job_runs 终态（落库）
+    wake: WakeSignal,                    // 内存唤醒信号（oneshot/condvar）：仅提示"engine_commands 有新命令"，不承载消息内容
+    /// 存储句柄（DB 连接/仓库）：notify 写命令、事件循环扫命令、recover 扫 running 记录共用
+    store: Arc<dyn EngineStore>,
+}
+
 impl Engine {
-    /// 异步通知入口：投递 EngineStart / Terminate 等消息，立即返回
-    pub fn notify(msg: EngineMessage, on_complete: OnCompleteFn) -> Result<(), EngineError>;
+    /// 构造：绑定 job_complete 属性、创建唤醒信号与存储句柄（由主程序在 App 启动时注入）；
+    /// 随后启动事件循环线程 + 执行 recover（扫 job_runs 中 running 的 workflow 记录，重建调度循环）
+    pub fn new(job_complete: Box<dyn OnComplete>, store: Arc<dyn EngineStore>) -> Self;
+
+    /// 异步通知入口（**实例方法 &self**）：
+    /// **消息即命令，持久化**——EngineStart / Terminate 先 **INSERT engine_commands**
+    /// （engine_start / terminate，payload 承载 inputs / workspace / reason，processed=0），
+    /// **写库成功即返回**；随后发内存唤醒信号提示事件循环立即处理（信号不承载消息内容）。
+    /// 写库失败返回 Err，由调用方（Runner / 终止接口）决定置 failed / 回滚，不静默丢失。
+    /// 事件循环线程与实例共享属性（内部 Arc<Self> 或属性 Arc 化），消费命令时经共享引用调 self.job_complete
+    pub fn notify(&self, msg: EngineMessage) -> Result<(), EngineError>;
+
+    /// 事件循环（常驻线程，App 启动后一直运行）：
+    /// 扫描 engine_commands 中 processed=0 的命令（按 run_id 分组、按 created_at 顺序）→
+    /// 分发到对应 run 的调度循环 → 置 processed=1；无新命令时休眠等待唤醒信号 / 兜底轮询。
+    fn event_loop(&self);
+
+    /// 启动恢复：扫 job_runs 中 status=running 的 workflow 记录，为每个重建调度循环
+    /// （调度循环不持有业务状态，从未消费命令继续推进，幂等）
+    fn recover(&self);
 }
 
 /// Engine 控制消息（Runner → Engine / 外部 → Engine）
+/// **消息即命令**：notify 时作为 engine_start / terminate 命令持久化到 engine_commands
 pub enum EngineMessage {
     EngineStart { run_id: String, workflow_id: String,
-                  inputs: HashMap<String, String>, workspace: PathBuf },  // Runner 调度线程投递
-    Terminate    { run_id: String, reason: String },                      // 终止接口投递
+                  inputs: HashMap<String, String>, workspace: PathBuf },  // Runner 调度线程投递（payload 落库）
+    Terminate    { run_id: String, reason: String },                      // 终止接口投递（payload 落库）
 }
 
-/// Worker 入口（异步，非阻塞）：
-/// 内部独立线程调用 Executor::execute；调用方不被阻塞；
-/// 执行完成后在线程内调用 on_complete(result) 处理后续。
+/// Worker 入口（两个入口，均异步、非阻塞）：
+/// 调用方（Runner / Engine）不被阻塞；run_job / run_step 只在 step_records 插入 waiting 记录即返回，
+/// 由 Worker 调度线程指派空闲 InnerWorker（常驻池）执行 Executor；
+/// 执行完任务后 InnerWorker **同步调用实例属性上的钩子**（钩子定义不同，由绑定方决定完成后的处理）。
+/// Worker 不感知业务：Op / Step 运行完之后该做什么，由运行历史（Runner）与 Engine 决定。
+/// 完成回调 trait：入参统一为 ExecuteResult（含 run_id；stepId 由实现方从 run_id 拆出）。
+/// 由调用方注入实现（作为 Worker / Engine **实例属性**，App 启动时绑定）：Runner 注入 JobComplete，Engine 注入 StepComplete。
+pub trait OnComplete: Send {
+    fn on_complete(&self, result: ExecuteResult);
+}
+
+/// Runner 注入的实现（绑定为 Worker.job_complete / Engine.job_complete）：
+/// 单次 OP / Job 完成（含 workflow 整体完成）→ 更新 job_runs 终态（落库），
+/// 供运行历史界面展示结果；Runner 常驻轮询自动感知并调度下一个。
+pub struct JobComplete;
+impl OnComplete for JobComplete {
+    fn on_complete(&self, result: ExecuteResult) {
+        // 更新 job_runs 终态（落库）+ 展示结果（run_id 取自 result.run_id）
+    }
+}
+
+/// Engine 注入的实现：workflow 步骤完成 → 从 result.run_id 拆出 stepId，
+/// 写 engine_commands: step_completed{run_id, step_id, result}，推进 DAG。
+pub struct StepComplete;
+impl OnComplete for StepComplete {
+    fn on_complete(&self, result: ExecuteResult) {
+        let step_id = split_step_id(&result.run_id);   // run_id = <jobRunId>_<stepId>
+        // 写 step_completed 命令
+    }
+}
+
+/// Worker 实例：完成钩子作为**实例属性**（App 启动时一次性绑定、运行期固定使用；
+/// 重启后由实例重建重新注入，配合 engine_commands 重放自愈），不再随调用传参。
+///
+/// **执行机制 = 数据库排队 + Inner Worker 池**：任务先落库（step_records waiting），
+/// 再由固定数量的常驻 InnerWorker 消费——不依赖内存队列 / 每次 spawn，
+/// **App 重启不丢任务、长期运行内存有上界**。
+pub struct Worker {
+    job_complete: Arc<dyn OnComplete>,   // 绑定 Runner 注入的 JobComplete：单次 OP / Job 完成 → 更新 job_runs 终态
+    step_complete: Arc<dyn OnComplete>,  // 绑定 Engine 注入的 StepComplete：workflow 步骤完成 → 回报 Engine
+    executor: Arc<Executor>,             // 共享执行器（无状态，可并发调用）
+    inner_workers: Vec<InnerWorker>,     // 常驻执行体池：数量 = ceil(运行历史并发上限 × 1.5)
+}
+
 impl Worker {
-    /// 异步执行一个 OP：内部起独立线程调 Executor，立即返回句柄
-    pub fn run_async(req: ExecuteRequest, on_complete: OnCompleteFn) -> WorkerHandle;
+    /// 构造：绑定两个完成钩子属性，并按并发上限创建 Inner Worker 池
+    /// （inner_worker_count = ceil(运行历史"运行中任务并发数" × 1.5)），由主程序在 App 启动时调用
+    pub fn new(job_complete: Box<dyn OnComplete>, step_complete: Box<dyn OnComplete>,
+               concurrency_limit: usize, executor: Arc<Executor>) -> Self;
+
+    /// 单次 OP / Job 执行（Runner 调用，**实例方法 &self**）：
+    /// **只在 step_records 插入一条 status=waiting 记录（任务入 DB 排队，重启不丢）**，
+    /// 立即返回句柄；由调度线程指派 InnerWorker 执行，完成后同步调 self.job_complete
+    pub fn run_job(&self, req: ExecuteRequest) -> WorkerHandle;
+
+    /// workflow 步骤执行（Engine 调用，**实例方法 &self**）：同上，source=step；
+    /// 完成后由 InnerWorker 同步调 self.step_complete（从 result.run_id 拆出 stepId 回报 Engine）
+    pub fn run_step(&self, req: ExecuteRequest) -> WorkerHandle;
+
+    /// Worker 调度线程（常驻）：定期扫描 step_records 中 waiting 任务（按 created_at 顺序），
+    /// 有空闲 InnerWorker 即指派（push 到其小队列）并将任务 waiting → running（落库）
+    fn dispatch_loop(&self);
+
+    /// 启动恢复：App 启动时扫描 step_records 中 status=running 的任务（上次中断残留），
+    /// 重新指派给空闲 InnerWorker 重新执行（复用 record_id，完成后覆盖终态与结果）
+    fn recover_running(&self);
+}
+
+/// Inner Worker：Worker 池内的一个常驻执行体（数量固定，不随任务数增长）。
+/// 每个 InnerWorker = 一个小队列（Worker 指派触发）+ 一个常驻执行循环。
+pub struct InnerWorker {
+    queue: SmallQueue<AssignedTask>,   // 小队列：Worker 指派 → 触发执行（任务本体已在 step_records，仅传 record_id / req）
+    busy: AtomicBool,                  // 忙闲标志，Worker 调度线程据此指派
+}
+
+impl InnerWorker {
+    /// 常驻执行循环（App 启动时创建，运行期不新增）：
+    /// 收任务 → Executor::execute(req).await → 更新 step_records 终态+结果 → 同步调属性钩子
+    fn spawn_loop(&self, worker: &Worker) {
+        loop {
+            let task = self.queue.recv().await;            // 阻塞等 Worker 指派
+            self.busy.store(true);
+            // 1. 确认 step_records 为 running（指派时已置位）
+            // 2. 注册 task_id → 进程组（AbortRegistry）→ Executor::execute(req).await
+            // 3. 更新 step_records 终态 + 结果（outputs/raw_output/exit_code/error/duration_ms）
+            // 4. 按 source 同步调钩子（job → worker.job_complete / step → worker.step_complete）
+            // 5. 注销进程组注册, self.busy.store(false)
+        }
+    }
+}
+
+/// Worker 执行句柄：对应 step_records 中一条等待/执行中的记录。
+/// **完成通知不依赖句柄**——执行完成后由实例属性钩子（job_complete / step_complete）
+/// 同步回调；句柄仅用于调用方（Runner / Engine）**主动控制本次执行**。
+pub struct WorkerHandle {
+    step_record_id: String,                  // step_records.record_id（定位任务）
+    run_id: String,                          // 执行实例标识（日志 / 追踪）
+    abort_registry: Arc<AbortRegistry>,      // record_id → 子进程进程组
+}
+
+impl WorkerHandle {
+    /// 终止本次执行：按执行时启动的**进程组**查杀子进程（进程组机制见 crud-01 5.1），
+    /// 用于超时取消 / 用户终止等**外部主动终止**场景；
+    /// 单次执行的超时（op.timeoutMs）由 Executor 内部处理，无需句柄介入。
+    /// 终止后，InnerWorker 仍会更新 step_records 终态并同步调用属性钩子一次（携带被终止的 ExecuteResult）。
+    pub fn abort(&self);
+
+    /// 本次执行是否已结束：查 step_records 该记录状态（success / failed / timeout / 被终止）
+    pub fn is_finished(&self) -> bool;
 }
 ```
 
-**Worker 钩子机制（执行完成后的回调）**：
+**Worker 执行机制（数据库排队 + Inner Worker 池）**：
 
-Worker 是真正的执行者，但**入口是异步的**：`Worker::run_async` 内部**起一条独立线程**调用 `Executor::execute`，调用方（Runner 调度线程 / Engine 调度循环）**不被阻塞**；执行完一次 OP 后，由该线程调用注入的钩子 `on_complete(result)` 处理后续操作。钩子由触发方注入，**OP 触发的 worker 与 workflow 触发的 worker 回调方式不同**：
+Worker 是真正的执行者，**入口只入队、调度在 Worker 线程、执行在 InnerWorker 池、钩子同步**：
 
-```text
-Worker::run_async(req, on_complete)   # 异步入口，内部独立线程执行
-  ├─ 线程内: Executor::execute(req)   # 同步跑完整个 OP（最小原子执行，见 crud-01 5.1）
-  └─ 线程内: 调用 this.on_complete(ExecuteResult)
-        ├─ OP 场景（钩子注入: 终结单次运行）:
-        │     → 写单次 JobRun 终态 success/failed/timeout + 刷新界面（运行历史）
-        └─ Workflow 场景（钩子注入: 回报 Engine 继续推进 DAG）:
-              → report(step_result) 回报 Engine（该 workflow 的调度循环）
-              → Engine 应用 retry / 走 condition 边 / 累积出参 / 找下一批就绪节点 / 直至 End
-```
+- **入口入队（不执行）**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在
+  **step_records 插入一条 status=waiting 记录**（run_id / step_id / op 快照 / client_id / inputs /
+  workspace / timeout_ms / source=job|step）后立即返回——**任务本体入 DB，App 重启不丢失**；
+  调用方（Runner 调度线程 / Engine 调度循环）不被阻塞；
+- **调度（Worker 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序），
+  查询 InnerWorker 忙闲（busy 标志），发现空闲即**指派**（push 到该 InnerWorker 的小队列）并将任务
+  **waiting → running（落库）**；
+- **执行（InnerWorker 池）**：池大小 = **ceil(运行历史"运行中任务并发数" × 1.5)**；
+  每个 InnerWorker 一个**常驻执行循环 + 小队列**（Worker 经小队列触发执行），**数量固定、运行期不新增**，
+  内存有上界；收任务 → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
+  （outputs / raw_output / exit_code / error / duration_ms）→ 按 source 同步调属性钩子：
+        ├─ source=job  → self.job_complete（JobComplete，Runner 绑定）:
+        │     → 更新 job_runs 终态（落库）并供运行历史界面展示结果（run_id 取自 result）
+        │     → Runner 常驻轮询自动感知并调度下一个 queued 任务
+        └─ source=step → self.step_complete（StepComplete，Engine 绑定）:
+              → 从 result.run_id 拆出 stepId（<jobRunId>_<stepId>）
+              → 写 engine_commands: step_completed{run_id, step_id, result}
+              → Engine 事件循环消费: 标记步骤结束 → walk_edge → 派发下一节点 → 直至 End
+- **崩溃恢复（启动时）**：Worker 初始化时扫描 step_records 中 **status=running** 的任务（上次中断残留），
+  重新指派给空闲 InnerWorker **重新执行**（复用 record_id，完成后覆盖终态与结果）；
+- **并发边界**：同时执行任务数 ≤ InnerWorker 池大小（1.5 × 并发上限）；Runner 的并发配额（job_runs
+  running 计数 ≤ 上限）保证"Job 级并发"，Worker 池保证"执行体并发"，DB 排队天然有界（不占内存）。
 
-- **钩子差异的本质**：OP 钩子终结运行记录（一次执行到此结束）；Workflow 钩子只回报 Engine（仅 DAG 中一个节点完成，由 Engine 决定下一步）。这就是回调方式不一样的原因，也是 worker 需要钩子机制的意义。
+- **为何数据库排队而非内存队列**：内存有界队列在 **App 重启时队列内容丢失**；step_records 排队把任务
+  持久化在 DB，重启后可恢复（waiting 任务继续调度、running 任务重跑），不丢任务；
+- **钩子同步调用**：InnerWorker 执行完成后**同步调用**实例属性钩子（source=job → `job_complete` /
+  source=step → `step_complete`）——不转异步投递、不产生事件；钩子内操作（更新状态 / 写命令）同步完成；
+- **Worker 不感知**：Op / Step 运行完之后该做什么处理，由绑定方决定——`job_complete` 属性绑定 Runner
+  注入的 `JobComplete`（更新 job_runs 终态）、`step_complete` 属性绑定 Engine 注入的 `StepComplete`
+  （回报 Engine）。Worker 只执行 + 调实例属性上的 `on_complete`，不区分 JobComplete / StepComplete、
+  不产生任何事件；
+- **为何 trait 即可、不需要事件**：完成后处理（更新终态 / 回报 Engine）是绑定方自己的业务，天然用
+  `OnComplete` trait 表达（入参统一为 ExecuteResult）；Worker / Engine 无需知道发给谁、什么类型。
+  run_id 已在结果内（回填自请求）；workflow 场景 stepId 由 StepComplete 从 run_id 拆出
+  （`<jobRunId>_<stepId>`）。**钩子作为程序实例属性**（App 启动时绑定、重启后重建重新注入）。
+  持久化保障：JobComplete 同步写终态（落库）；StepComplete 写持久化命令（`engine_commands`，崩溃可重放）；
+  Engine 的 `job_complete` 属性 + `workflow_done` / `terminate` 命令持久化双保险——重放 processed=0
+  命令时属性仍有效，幂等重做终态动作。
 - **Engine 事件循环同样不被阻塞**：收到 `EngineStart` 后为该 workflow 启动**独立的调度循环（内部执行体）**，主循环继续接收下一条消息（见上「Runner → Engine 通知机制」）。
 
 ### 4.3 边路由逻辑
@@ -689,24 +875,24 @@ Engine (调度器)                              Worker (执行器)
      │  7. 写 walk_edge, 根据 result +           │
      │     edge.condition 决定下一批就绪节点      │
      │  8. 全部完成 → 写 workflow_done,          │
-     │     更新 job_run 终态                     │
+     │     调 job_complete 属性更新 job_run 终态  │
 ```
 
 **Engine 职责**：
-- 事件驱动：消费 `engine_commands` 中的命令推进 workflow（dispatch_step / walk_edge / workflow_done / terminate，机制见 4.2）
+- 事件驱动：消费 `engine_commands` 中的命令推进 workflow（engine_start / dispatch_step / walk_edge / workflow_done / terminate，机制见 4.2）
 - 维护当前 Run 的执行上下文（节点状态表、出参累积表）
 - 根据边的 condition（on_success / on_failure / always）决定下一批可调度节点
 - 处理 Start → End 的汇聚（任意入边到达 End 即完成）
 - 处理循环回跳（计数 max × 3）
 - 超时检测：step 超时 → 立即终止整个 Run（不走边、不重试）
 - 写入 job_run 的状态流转
-- 完成后经注入的 on_complete 钩子回报 Task Runner（终态入运行历史、释放并发、触发下一任务）
+- 消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete`（实例属性）更新 job_runs 终态（落库；命令持久化 + 属性重启重绑，重放幂等），Runner 常驻轮询自动感知并调度下一个
 
 **Worker 职责**：
-- 接收 dispatch_step 的节点，绑定 Client
-- 生成包装脚本（bash/python/powershell）
+- 接收 Engine 派发的节点（`worker.run_step(req)` 插 step_records waiting，由 InnerWorker 池执行；机制见 4.2）
+- 绑定 Client，生成包装脚本（bash/python/powershell）
 - 以指定 workspace 启动子进程
 - 捕获 stdout / stderr / exit_code
 - 超时 kill 进程
 - 把结果写回 step_records，写 `step_completed` 命令回报 Engine
-- **入口异步**：`Worker::run_async(req, on_complete)` 内部独立线程调 Executor，调用方（Runner / Engine 调度循环）不被阻塞
+- **入口异步（实例方法）**：`worker.run_job(req)` / `worker.run_step(req)` 通过 `&self` 调用，只在 step_records 插 waiting 记录即返回，调用方不被阻塞；Worker 调度线程指派空闲 InnerWorker 执行 Executor；完成后同步调用实例属性上的 OnComplete 实现（job_complete 更新终态 / step_complete 回报 Engine），Worker 不感知业务

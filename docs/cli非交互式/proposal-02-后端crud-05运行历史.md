@@ -351,7 +351,7 @@
 
 ### 4.6 统一任务执行器（Task Runner）
 
-**职责**：所有异步执行（单次 OP、Job 运行、Workflow 运行）统一投递到后端**任务执行器（Task Runner）**。它负责**运行历史（JobRun）的创建与状态机管理、并发控制、按序调度分派**——本章归属运行历史领域：Task Runner 的一切动作都以 `job_runs` / `step_records` 为落点，运行历史界面的状态（等待中 / 运行中 / 终态）完全由它驱动。**Task Runner 不亲自执行 OP**：单次 OP 任务直接调用 Worker 执行；Job / Workflow 任务先通知 Engine 启动，由 Engine 顺序调度各 OP、再交给 Worker 执行。**任务控制不在 Job 业务层，而在本执行器**；Job 管理与单次 OP 只是「创建 JobRun 并提交任务」的入口。
+**职责**：所有异步执行（单次 OP、Job 运行、Workflow 运行）统一投递到后端**任务执行器（Task Runner）**。它负责**运行历史（JobRun）的创建与状态机管理、并发控制、按序调度分派**（**常驻轮询后台线程**，按固定间隔扫描 DB，间隔可经 settings 配置）——本章归属运行历史领域：Task Runner 的一切动作都以 `job_runs` / `step_records` 为落点，运行历史界面的状态（等待中 / 运行中 / 终态）完全由它驱动。**Task Runner 不亲自执行 OP**：单次 OP 任务直接调用 Worker 执行；Job / Workflow 任务先通知 Engine 启动，由 Engine 顺序调度各 OP、再交给 Worker 执行。**任务控制不在 Job 业务层，而在本执行器**；Job 管理与单次 OP 只是「创建 JobRun 并提交任务」的入口。
 
 **与 Executor / Engine / Worker 的分工**：
 
@@ -359,12 +359,12 @@
 | - | - | - | - |
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
 | **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（queued / running / 终态）、并发控制、按序调度分派 | — |
-| **Engine** | crud-03 第 4.2 节 | workflow DAG 调度（并行后台任务）：**异步入口 `Engine::notify(EngineStart, on_complete)`**，事件循环消费后按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker | 与 Worker 并行（互不嵌套） |
-| **Worker** | crud-03 第 4.2 节 | 单个 OP 的实际执行（**异步入口 `Worker::run_async`**：内部独立线程调 Executor，调用方不被阻塞）；完成后经 **on_complete 钩子**回报 | 与 Engine 并行（互不嵌套） |
+| **Engine** | crud-03 第 4.2 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即命令：EngineStart / Terminate 先写 engine_commands 落库**，事件循环从表消费后按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker；整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等） | 与 Worker 并行（互不嵌套） |
+| **Worker** | crud-03 第 4.2 节 | 单个 OP 的实际执行（**数据库排队 + Inner Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插入 waiting 记录即返回；Worker 调度线程常驻轮询 waiting → 指派空闲 InnerWorker（池大小 = 1.5 × 并发上限）→ 执行 Executor → 更新 step_records 终态+结果）；完成钩子是**实例属性**（`job_complete` 绑定 Runner 的 JobComplete、`step_complete` 绑定 Engine 的 StepComplete），InnerWorker 执行完**同步调用**；Worker 不感知业务 | 与 Engine 并行（互不嵌套） |
 
 > Engine 与 Worker 是两个**互相并行**的后台组件（均在 crud-03 4.2 描述），不是「Engine 套 Worker」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
-**并发控制**：Task Runner 控制**同时运行的任务数量**（最大并发数，可通过 settings 配置）。运行中的任务数从**运行历史表**实时统计：`job_runs` 中 `status=running` 的记录数——**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**。调度规则：每调度一个任务前先检查运行中数量，达到上限则暂停调度，后续任务保持 `queued(等待中)`；当某任务经 on_complete 钩子完成（终态）后释放一个并发名额，再调度下一个。
+**并发控制**：Task Runner 控制**同时运行的任务数量**（最大并发数，可通过 settings 配置）。运行中的任务数从**运行历史表**实时统计：`job_runs` 中 `status=running` 的记录数——**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**。调度规则：Runner 每次轮询时检查运行中数量，达到上限则暂停调度，后续任务保持 `queued(等待中)`；任务完成（终态落库）后 running 计数自然下降，无需显式释放名额，轮询即获得调度机会。
 
 **入口接口（Task Runner API）**：
 
@@ -430,7 +430,7 @@ queued(等待中) ──[① 调度开始]──> running(运行中) ──[② 
 ```
 
 - **① queued → running**：由 **Task Runner 的后台调度线程**完成——任务开始由当前实例的后台线程控制，调度取出任务时即时改写运行历史状态（并在并发配额内启动执行）。此迁移无需外部参与。
-- **② running → 终态**：**只能由外部告知**——任务是否完成，Task Runner 自身无法感知，必须由实际执行方回调：**Worker 与 Engine 都提供 `on_complete` 钩子**，在执行完成（成功 / 失败 / 超时）后回调 Task Runner，由 Task Runner 将运行历史状态更新为对应终态，并**释放并发名额、触发下一个 queued 任务调度**。
+- **② running → 终态**：Worker 完成时**同步调用实例属性上的 OnComplete 实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——`job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（落库）并供运行历史界面展示；`step_complete` 属性（Engine 绑定的 StepComplete）回报 Engine 推进 DAG，Engine 整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等）。**不依赖内存回调传递业务**：Task Runner 是**常驻轮询后台线程**，按固定间隔（settings 可配）扫描 DB，发现 running 计数下降、存在 queued 任务即调度下一个。
 
 **执行流程**：
 
@@ -445,19 +445,19 @@ add_op / add_job / add_workflow(req)
   │       ├─ 按任务类型分派（Task Runner 不亲自执行 OP，直接以入口函数调用）:
   │       │     ├─ 单次 OP（add_op）:
   │       │     │     内部按 client_id/op_id 查询实例 → 组装 ExecuteRequest
-  │       │     │     → Worker::run_async(req, on_complete)      // 异步入口，不阻塞
+  │       │     │     → worker.run_job(req)    // 只插 step_records(waiting) 即返回；调度线程指派 InnerWorker 执行，完成后调 job_complete
   │       │     └─ Job / Workflow（add_job / add_workflow）:
-  │       │           Engine::notify(EngineStart{run_id, workflow_id}, on_complete)  // 异步入口，不阻塞（Runner 注入完成钩子）
-  │       │           → Engine 调度循环按 DAG 派发 op → Worker::run_async(...)
-  │       │           （Engine / Worker 入口定义见 crud-03 4.2；Worker 内部线程跑完）
-  │       └─ ② 等待 Worker / Engine 的 on_complete 钩子回调：
-  │             更新运行历史为终态（success/failed/timeout），释放并发名额，
-  │             触发下一个 queued 任务调度，刷新界面状态
+  │       │           engine.notify(EngineStart{run_id, workflow_id})  // 实例方法 &self，异步入口，不阻塞
+  │       │           → Engine 调度循环按 DAG 派发 op → worker.run_step(req)    // 只插 step_records(waiting)；InnerWorker 执行完调 step_complete
+  │       │           （Engine / Worker 入口定义见 crud-03 4.2；Worker 任务在 step_records 排队，InnerWorker 执行完同步调 on_complete）
+  │       └─ ② Worker 完成同步调实例属性（job_complete 落库 / step_complete 回报 Engine）→ Engine 整体完成（消费 workflow_done / terminate 命令）调 self.job_complete 落库：
+  │             Runner 常驻轮询线程按固定间隔扫描 DB（不依赖回调）：
+  │             统计 status=running 计数 < 最大并发数 且存在 queued → 调度下一个，刷新界面
   └─ 3. 接口返回 {runId}
 ```
 
 **同步 vs 异步**：
-- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `queued(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `Worker::run_async` / Job·Workflow 调 `Engine::notify`，均为异步入口、不阻塞**），由 on_complete 钩子回调驱动终态更新、自动刷新界面状态。
+- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `queued(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `worker.run_job(req)` / Job·Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})`（均为实例方法 &self、异步入口、不阻塞；EngineStart 作为 engine_start 命令写入 engine_commands 落库，重启不丢）**；`run_job` / `run_step` 只插 step_records(waiting) 即返回（任务入 DB 排队，重启不丢），返回 `WorkerHandle` 由 Runner / Engine 持有，用于超时取消、用户终止等场景主动 `abort`（按进程组查杀，定义见 crud-03 4.2）），由 Runner 常驻轮询扫描 DB 驱动调度、自动刷新界面状态。
 - **client test**：**同步例外**——不投递 Task Runner、不入队，直接同步调 `Executor::execute` 实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
 
 ---

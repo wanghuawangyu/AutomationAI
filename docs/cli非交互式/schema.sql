@@ -191,24 +191,31 @@ CREATE INDEX IF NOT EXISTS idx_runs_started ON job_runs(started_at_ms);
 CREATE INDEX IF NOT EXISTS idx_runs_triggered ON job_runs(triggered_by);
 
 -- ============================================================
--- 7. step_records —— 步骤执行记录 (StepRecord)
+-- 7. step_records —— 步骤执行记录 (StepRecord) / Worker 任务排队表
 --    同一 step 因重试产生多条记录, 通过 started_at_ms 区分;
 --    主键 record_id 为 32 位 UUID (应用层生成)
+--    ★ Worker 的 run_job / run_step 在此插入 status=waiting 记录（任务入 DB 排队，
+--      App 重启不丢失），由 Worker 调度线程指派 InnerWorker 执行并推进 waiting → running → 终态；
+--      启动时 status=running 的残留记录由 Worker 重新指派重跑。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS step_records (
     record_id       TEXT PRIMARY KEY,                    -- 32 位 UUID (原自增 id 已移除)
     run_id          TEXT NOT NULL,                       -- 所属运行 (job_runs.run_id)
-    step_id         TEXT NOT NULL,                       -- 等于 workflow_node.node_id
+    step_id         TEXT NOT NULL,                       -- 等于 workflow_node.node_id; 单次 OP/Job 执行时为 run_id
     op_id           TEXT NOT NULL,
     op_version      INTEGER NOT NULL,
     op_name         TEXT NOT NULL,                       -- 快照: OP 名称
-    client_id       TEXT,
+    client_id       TEXT,                                -- 执行时按 client_id 加载 Client（或存配置快照）
+    source          TEXT NOT NULL DEFAULT 'job'
+                    CHECK (source IN ('job','step')),    -- 任务来源: job=单次 OP/Job (Runner 触发, 完成调 job_complete 钩子)
+                                                         --            step=workflow 步骤 (Engine 触发, 完成调 step_complete 钩子)
 
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','running','success','failed','timeout','skipped')),
+    status          TEXT NOT NULL DEFAULT 'waiting'
+                    CHECK (status IN ('waiting','running','success','failed','timeout','skipped')),
 
     inputs          TEXT NOT NULL DEFAULT '{}',         -- JSON object
     body_snapshot   TEXT,                                -- OP 正文快照
+    workspace       TEXT,                                -- 执行工作目录 (ExecuteRequest.workspace)
     outputs         TEXT,                                -- JSON object
     raw_output      TEXT,
     exit_code       INTEGER,
@@ -216,6 +223,7 @@ CREATE TABLE IF NOT EXISTS step_records (
     timeout_ms      INTEGER,
     timed_out       INTEGER NOT NULL DEFAULT 0,
 
+    created_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000'),  -- 入队时间（waiting 队列按此顺序调度）
     started_at_ms   TEXT,
     finished_at_ms  TEXT,
     duration_ms     INTEGER,
@@ -226,6 +234,7 @@ CREATE TABLE IF NOT EXISTS step_records (
 CREATE INDEX IF NOT EXISTS idx_steps_run ON step_records(run_id);
 CREATE INDEX IF NOT EXISTS idx_steps_op ON step_records(op_id);
 CREATE INDEX IF NOT EXISTS idx_steps_status ON step_records(status);
+CREATE INDEX IF NOT EXISTS idx_steps_waiting ON step_records(status, created_at_ms) WHERE status = 'waiting'; -- Worker 调度线程轮询 waiting 队列
 
 -- ============================================================
 -- 8. settings —— 系统配置 (KV)
@@ -253,18 +262,23 @@ INSERT OR IGNORE INTO settings(key, value, updated_at_ms) VALUES
 --      失败的 workflow(可重试) → 保留; 最终不重试: 1 天后软删除
 --        (置 soft_deleted_at_ms), 2 天后物理删除
 -- ============================================================
+-- ★ Engine 的 notify 与后台线程持久化：
+--   Runner / 终止接口调 engine.notify(msg) 时，EngineStart / Terminate **不投内存 inbox**，
+--   而是作为命令直接 INSERT 到本表（engine_start / terminate，payload 承载 inputs/workspace/reason），
+--   写库成功即返回（写库失败视为投递失败）；Engine 事件循环从本表消费 processed=0 的命令推进 DAG。
+--   App 重启后：未消费命令仍在（notify 不丢），Engine 事件循环/调度循环由 recover 重建后继续消费。
 CREATE TABLE IF NOT EXISTS engine_commands (
     command_id      TEXT PRIMARY KEY,                    -- 32 位 UUID
     run_id          TEXT NOT NULL,                       -- 所属 job_run (job_runs.run_id)
 
     command         TEXT NOT NULL CHECK (command IN
-                    ('dispatch_step','step_completed','apply_retry','walk_edge','workflow_done','terminate')),
+                    ('engine_start','dispatch_step','step_completed','apply_retry','walk_edge','workflow_done','terminate')),
 
     step_id         TEXT,                                -- 相关节点 (workflow_node.node_id)
     step_status     TEXT CHECK (step_status IN ('success','failed','timeout','skipped')),
     edge_result     TEXT CHECK (edge_result IN ('success','failed','timeout','always')),
 
-    payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照
+    payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照 / EngineStart 的 inputs+workspace / Terminate 的 reason
     processed       INTEGER NOT NULL DEFAULT 0,          -- 0=未消费 1=已消费 (崩溃恢复重放依据)
     created_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000'),
     processed_at_ms TEXT,

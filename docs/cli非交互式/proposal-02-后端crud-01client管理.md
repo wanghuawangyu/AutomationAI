@@ -408,6 +408,8 @@ pub struct ExecuteRequest {
 
 /// 执行结果结构体 (最小原子执行的结果; 步骤归属由上层拿到结果后自行关联, ExecuteResult 本身不感知 step)
 pub struct ExecuteResult {
+    pub run_id:      String,                  // 回填自 ExecuteRequest.run_id: 本次执行实例唯一标识
+                                              //   (workflow/Job 场景 = <jobRunId>_<stepId>, 上层可从中拆出 stepId; 单次 OP / test = 调用方生成的 runId)
     pub status:      ExecuteStatus,           // success | failed | timeout
     pub outputs:     HashMap<String, String>, // 出参 (脚本类: 读 OUTPUT_ARGS 回传; prompt 类: 主函数解析 stdout_file/outputs_file)
     pub raw_output:  String,                  // main/CLI 原始输出 (读 stdout_file)
@@ -418,7 +420,7 @@ pub struct ExecuteResult {
 }
 ```
 
-> **Executor 是最小原子执行单元**：只输入"执行什么（op）、用什么执行（client）、本次入参（inputs）、在哪里执行（workspace）、执行实例标识（run_id）"，返回一次执行的结果 `ExecuteResult`。**`run_id` 只是执行实例的全局唯一标识**（用于 main 文件/临时目录/日志命名），不是步骤编排信息：workflow/Job 场景由 `<jobRunId>_<stepId>` 组合（同一 Job 内不同步骤并发执行时标识仍唯一、文件不冲突），单次 OP / test 由调用方生成。**Executor 不感知 step / 步骤**——步骤归属、与 Workflow/Job 的关系由上层（编排层）在拿到 `ExecuteResult` 后自行关联。`test` 接口（3.1.6）、Job 执行、单次 OP 执行均封装这一入口。**临时文件的创建归属 `execute` 内部**：调用方只保证 `run_id` 全局唯一即可——`.ai_auto_result-<runId>/` 临时目录、`<workspace>/.main-<runId>-<opId>.*` main 文件均由 `execute` 内部创建，运行结束由 `execute` 清理，调用方不参与创建与清理。
+> **Executor 是最小原子执行单元**：只输入"执行什么（op）、用什么执行（client）、本次入参（inputs）、在哪里执行（workspace）、执行实例标识（run_id）"，返回一次执行的结果 `ExecuteResult`。**`run_id` 只是执行实例的全局唯一标识**（用于 main 文件/临时目录/日志命名），不是步骤编排信息：workflow/Job 场景由 `<jobRunId>_<stepId>` 组合（同一 Job 内不同步骤并发执行时标识仍唯一、文件不冲突），单次 OP / test 由调用方生成。**Executor 不感知 step / 步骤**——步骤归属、与 Workflow/Job 的关系由上层（编排层）在拿到 `ExecuteResult` 后自行关联。`test` 接口（3.1.6）、Job 执行、单次 OP 执行均封装这一入口。**`ExecuteResult` 回填 `run_id`**（= `ExecuteRequest.run_id`）：结果自带执行实例标识，上层无需另行携带定位信息；workflow 场景可从中拆出 stepId。**临时文件的创建归属 `execute` 内部**：调用方只保证 `run_id` 全局唯一即可——`.ai_auto_result-<runId>/` 临时目录、`<workspace>/.main-<runId>-<opId>.*` main 文件均由 `execute` 内部创建，运行结束由 `execute` 清理，调用方不参与创建与清理。
 
 **运行目录约定**：Executor 运行所需文件统一放在 **APP 统一运行时目录**下，与前端生成的中间文件同处一个根目录：
 
