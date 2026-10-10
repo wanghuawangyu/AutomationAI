@@ -49,7 +49,7 @@
 ```json
 {
   "recordId": "a1b2c3d4e5f67890abcdef1234567890",
-  "stepId": "node_check",
+  "stepId": "1b2c3d4e5f60718293a4b5c6d7e8f9a1",  // workflow_node.node_id (32 位 UUID)
   "opId": "...",
   "opVersion": 2,
   "opName": "check_tests",
@@ -89,7 +89,7 @@
 | target | object | 目标快照：`{kind, opId, opVersion, workflowId, workflowVersion, name}` |
 | inputs | object | 本次执行入参 |
 | workspace | string | 工作区 |
-| status | enum | `pending` / `running` / `success` / `failed` / `cancelled` / `timeout` / `interrupted` |
+| status | enum | `waiting` / `running` / `success` / `failed` / `cancelled` / `timeout` |
 | terminatedBy | enum \| null | `timeout` / `cancelled` / `error` |
 | timeoutStepId | string \| null | 超时节点 stepId |
 | timeoutOpName | string \| null | 超时节点引用 OP 名称 |
@@ -135,7 +135,7 @@
 | keyword | query | string | 否 | — | 模糊匹配 name / target 名称 / 状态 / 版本号 |
 | targetKind | query | string | 否 | — | 类型：`op` / `workflow` |
 | triggeredBy | query | string | 否 | — | 触发来源：manual/schedule/single_op/single_workflow/retry |
-| status | query | string | 否 | — | 状态：pending/running/success/failed/cancelled/timeout/interrupted |
+| status | query | string | 否 | — | 状态：waiting/running/success/failed/cancelled/timeout |
 | workspace | query | string | 否 | — | 工作区 |
 | jobKind | query | string | 否 | — | 来源：persistent/virtual |
 | version | query | string | 否 | — | 版本号 |
@@ -351,35 +351,46 @@
 
 ### 4.6 统一任务执行器（Task Runner）
 
-**职责**：所有异步执行（单次 OP、Job 运行、Workflow 运行）统一投递到后端**任务执行器（Task Runner）**。它负责**运行历史（JobRun）的创建与状态机管理、并发控制、按序调度分派**（**常驻轮询后台线程**，按固定间隔扫描 DB，间隔可经 settings 配置）——本章归属运行历史领域：Task Runner 的一切动作都以 `job_runs` / `step_records` 为落点，运行历史界面的状态（等待中 / 运行中 / 终态）完全由它驱动。**Task Runner 不亲自执行 OP**：单次 OP 任务直接调用 Worker 执行；Job / Workflow 任务先通知 Engine 启动，由 Engine 顺序调度各 OP、再交给 Worker 执行。**任务控制不在 Job 业务层，而在本执行器**；Job 管理与单次 OP 只是「创建 JobRun 并提交任务」的入口。
+**职责**：所有异步执行（单次 OP、Job 运行、Workflow 运行）统一投递到后端**任务执行器（Task Runner）**。它负责**运行历史（JobRun）的创建与状态机管理、并发控制、按序调度分派**（**常驻轮询后台线程**，按固定间隔扫描 DB，间隔可经 settings 配置）——本章归属运行历史领域：Task Runner 的一切动作都以 `job_runs` / `step_records` 为落点，运行历史界面的状态（等待中 / 运行中 / 终态）完全由它驱动。**Task Runner 不亲自执行 OP**：单次 OP 任务直接调用 WorkerPool 执行；Job / Workflow 任务先通知 Engine 启动，由 Engine 顺序调度各 OP、再交给 WorkerPool 执行。**任务控制不在 Job 业务层，而在本执行器**；Job 管理与单次 OP 只是「创建 JobRun 并提交任务」的入口。
 
-**与 Executor / Engine / Worker 的分工**：
+**与 Executor / Engine / WorkerPool 的分工**：
 
 | 层 | 归属文档 | 职责 | 并行关系 |
 | - | - | - | - |
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
-| **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（queued / running / 终态）、并发控制、按序调度分派 | — |
-| **Engine** | crud-03 第 4.2 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即命令：EngineStart / Terminate 先写 engine_commands 落库**，事件循环从表消费后按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker；整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等） | 与 Worker 并行（互不嵌套） |
-| **Worker** | crud-03 第 4.2 节 | 单个 OP 的实际执行（**数据库排队 + Inner Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插入 waiting 记录即返回；Worker 调度线程常驻轮询 waiting → 指派空闲 InnerWorker（池大小 = 1.5 × 并发上限）→ 执行 Executor → 更新 step_records 终态+结果）；完成钩子是**实例属性**（`job_complete` 绑定 Runner 的 JobComplete、`step_complete` 绑定 Engine 的 StepComplete），InnerWorker 执行完**同步调用**；Worker 不感知业务 | 与 Engine 并行（互不嵌套） |
+| **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（waiting / running / 终态）、并发控制、按序调度分派 | — |
+| **Engine** | crud-03 第 4.3 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即事件：EngineStart / Terminate 先写 engine_events 落库，**写后立即 `process_event` 同步处理**（无事件循环 / 无信号）**，按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 WorkerPool 并行（互不嵌套） |
+| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插入 waiting 记录即返回；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（池大小 = 1.5 × 并发上限）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
 
-> Engine 与 Worker 是两个**互相并行**的后台组件（均在 crud-03 4.2 描述），不是「Engine 套 Worker」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
+> Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
-**并发控制**：Task Runner 控制**同时运行的任务数量**（最大并发数，可通过 settings 配置）。运行中的任务数从**运行历史表**实时统计：`job_runs` 中 `status=running` 的记录数——**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**。调度规则：Runner 每次轮询时检查运行中数量，达到上限则暂停调度，后续任务保持 `queued(等待中)`；任务完成（终态落库）后 running 计数自然下降，无需显式释放名额，轮询即获得调度机会。
+**并发控制**：Task Runner 控制**同时运行的任务数量**（最大并发数，可通过 settings 配置）。运行中的任务数从**运行历史表**实时统计：`job_runs` 中 `status=running` 的记录数——**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**。调度规则：Runner 每次轮询时检查运行中数量，达到上限则暂停调度，后续任务保持 `waiting(等待中)`；任务完成（终态落库）后 running 计数自然下降，无需显式释放名额，轮询即获得调度机会。
 
 **入口接口（Task Runner API）**：
 
 ```rust
-/// 任务执行器（后端调度层）
-pub struct TaskRunner;
+static RUNNER: OnceLock<Arc<TaskRunner>> = OnceLock::new();
+
+/// 任务执行器（后端调度层，**全局静态单例**，与 Engine / WorkerPool 互经全局访问：
+/// add_workflow → 全局 ENGINE.notify；单次 OP → 全局 WORKER_POOL.run_job）
+pub struct TaskRunner {
+    store: Arc<dyn RunStore>,   // 运行历史（job_runs / step_records）存取句柄
+}
+
 impl TaskRunner {
-    /// 单次 OP 执行：创建 virtual JobRun（kind=single_op，status=queued），投递后台执行，返回 runId
+    /// 构造：绑定运行历史存储句柄（App 启动 init() 时创建并 set 进全局 RUNNER）
+    pub fn new(store: Arc<dyn RunStore>) -> Self;
+
+    /// 单次 OP 执行：创建 virtual JobRun（kind=single_op，status=waiting），投递后台执行，返回 runId
     pub fn add_op(req: OpRunRequest) -> Result<String, TaskError>;
-    /// Job 运行：创建 JobRun（kind=job，status=queued），投递后台执行，返回 runId
+    /// Job 运行：创建 JobRun（kind=job，status=waiting），投递后台执行，返回 runId
     pub fn add_job(req: JobRunRequest) -> Result<String, TaskError>;
-    /// Workflow 运行：创建 JobRun（kind=workflow，status=queued），投递后台执行，返回 runId
+    /// Workflow 运行：创建 JobRun（kind=workflow，status=waiting），投递后台执行，返回 runId
     pub fn add_workflow(req: WorkflowRunRequest) -> Result<String, TaskError>;
     /// 查询任务状态（对应内部 JobRun 状态）
     pub fn status(run_id: &str) -> TaskStatus;
+    /// 常驻轮询线程（App 启动 init() 时 start）：扫描 DB → 调度 waiting → running → 刷新界面状态
+    pub fn start(&self);
 }
 ```
 
@@ -426,38 +437,38 @@ pub enum TaskStatus {
 **状态机与两个状态迁移触发点**：
 
 ```text
-queued(等待中) ──[① 调度开始]──> running(运行中) ──[② 执行完成]──> 终态(success / failed / timeout)
+waiting(等待中) ──[① 调度开始]──> running(运行中) ──[② 执行完成]──> 终态(success / failed / timeout)
 ```
 
-- **① queued → running**：由 **Task Runner 的后台调度线程**完成——任务开始由当前实例的后台线程控制，调度取出任务时即时改写运行历史状态（并在并发配额内启动执行）。此迁移无需外部参与。
-- **② running → 终态**：Worker 完成时**同步调用实例属性上的 OnComplete 实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——`job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（落库）并供运行历史界面展示；`step_complete` 属性（Engine 绑定的 StepComplete）回报 Engine 推进 DAG，Engine 整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等）。**不依赖内存回调传递业务**：Task Runner 是**常驻轮询后台线程**，按固定间隔（settings 可配）扫描 DB，发现 running 计数下降、存在 queued 任务即调度下一个。
+- **① waiting → running**：由 **Task Runner 的后台调度线程**完成——任务开始由当前实例的后台线程控制，调度取出任务时即时改写运行历史状态（并在并发配额内启动执行）。此迁移无需外部参与。
+- **② running → 终态**：WorkerPool 完成时**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event），Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等）。**不依赖内存回调传递业务**：Task Runner 是**常驻轮询后台线程**，按固定间隔（settings 可配）扫描 DB，发现 running 计数下降、存在 waiting 任务即调度下一个。
 
 **执行流程**：
 
 ```text
 add_op / add_job / add_workflow(req)
-  ├─ 1. 创建运行历史（JobRun）：kind/triggeredBy 按入口确定，状态 queued(等待中)，
+  ├─ 1. 创建运行历史（JobRun）：kind/triggeredBy 按入口确定，状态 waiting(等待中)，
   │      写入 job_runs（crud-05 立即可见）；每调用一次入口即插入一条记录
   ├─ 2. 投递后台调度线程，接口即结束，返回 {runId}
   │     后台调度线程（按入库顺序）:
-  │       ├─ 检查并发：job_runs 中 status=running 数量 < 最大并发数？否则保持 queued 等待
-  │       ├─ ① 取出任务：运行历史状态 queued → running（本线程完成）
+  │       ├─ 检查并发：job_runs 中 status=running 数量 < 最大并发数？否则保持 waiting 等待
+  │       ├─ ① 取出任务：运行历史状态 waiting → running（本线程完成）
   │       ├─ 按任务类型分派（Task Runner 不亲自执行 OP，直接以入口函数调用）:
   │       │     ├─ 单次 OP（add_op）:
   │       │     │     内部按 client_id/op_id 查询实例 → 组装 ExecuteRequest
-  │       │     │     → worker.run_job(req)    // 只插 step_records(waiting) 即返回；调度线程指派 InnerWorker 执行，完成后调 job_complete
+  │       │     │     → worker.run_job(req)    // 只插 step_records(waiting) 即返回；调度线程指派 Worker 执行，完成后调 job_complete
   │       │     └─ Job / Workflow（add_job / add_workflow）:
   │       │           engine.notify(EngineStart{run_id, workflow_id})  // 实例方法 &self，异步入口，不阻塞
-  │       │           → Engine 调度循环按 DAG 派发 op → worker.run_step(req)    // 只插 step_records(waiting)；InnerWorker 执行完调 step_complete
-  │       │           （Engine / Worker 入口定义见 crud-03 4.2；Worker 任务在 step_records 排队，InnerWorker 执行完同步调 on_complete）
-  │       └─ ② Worker 完成同步调实例属性（job_complete 落库 / step_complete 回报 Engine）→ Engine 整体完成（消费 workflow_done / terminate 命令）调 self.job_complete 落库：
+  │       │           → Engine 消费 step_completed 事件链式推进：按 DAG 找后继就绪节点 → 写 dispatch_step → worker.run_step(req)    // 只插 step_records(waiting)；Worker 执行完调 step_complete
+  │       │           （Engine / WorkerPool 入口定义见 crud-03 4.3 / 4.4；WorkerPool 任务在 step_records 排队，Worker 执行完同步调 on_complete）
+  │       └─ ② WorkerPool 完成同步调全局实现（JobComplete 落库 / StepComplete 写事件后调全局 ENGINE）→ Engine 整体完成（处理 workflow_done / terminate 事件）调全局 JobComplete 落库：
   │             Runner 常驻轮询线程按固定间隔扫描 DB（不依赖回调）：
-  │             统计 status=running 计数 < 最大并发数 且存在 queued → 调度下一个，刷新界面
+  │             统计 status=running 计数 < 最大并发数 且存在 waiting → 调度下一个，刷新界面
   └─ 3. 接口返回 {runId}
 ```
 
 **同步 vs 异步**：
-- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `queued(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `worker.run_job(req)` / Job·Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})`（均为实例方法 &self、异步入口、不阻塞；EngineStart 作为 engine_start 命令写入 engine_commands 落库，重启不丢）**；`run_job` / `run_step` 只插 step_records(waiting) 即返回（任务入 DB 排队，重启不丢），返回 `WorkerHandle` 由 Runner / Engine 持有，用于超时取消、用户终止等场景主动 `abort`（按进程组查杀，定义见 crud-03 4.2）），由 Runner 常驻轮询扫描 DB 驱动调度、自动刷新界面状态。
+- **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `waiting(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `worker.run_job(req)` / Job·Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})`（均为实例方法 &self、异步入口、不阻塞；EngineStart 作为 engine_start 事件写入 engine_events 落库，重启不丢）**；`run_job` / `run_step` 只插 step_records(waiting) 即返回（任务入 DB 排队，重启不丢），返回 `WorkerHandle` 由 Runner / Engine 持有，用于超时取消、用户终止等场景主动 `abort`（按进程组查杀，定义见 crud-03 4.4）），由 Runner 常驻轮询扫描 DB 驱动调度、自动刷新界面状态。
 - **client test**：**同步例外**——不投递 Task Runner、不入队，直接同步调 `Executor::execute` 实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
 
 ---

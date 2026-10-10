@@ -341,7 +341,7 @@ POST /api/ops/{opId}/execute {clientId, inputs, workspace}
 
 **要点**：
 - **投递即结束**：本接口在调 `TaskRunner.add_op` 后即返回 `{runId}` 结束，**不等待执行、不返回执行结果**。后续的排队调度、调 `Executor::execute`、写 step_record、更新 job_run 终态、刷新界面状态，**全部由 Task Runner 自动完成**，OP 层不再参与。
-- **默认状态等待中**：`add_op` 创建 JobRun 后即置为 `queued(等待中)`；后台线程调度取出后转 `running(运行中)`，执行完到终态 `success/failed/timeout`。
-- **界面状态刷新**：Task Runner 在状态变化时更新 JobRun 记录，前端通过运行历史（crud-05）轮询/刷新即可看到 queued→running→终态 的实时状态，无需 OP 接口参与。
+- **默认状态等待中**：`add_op` 创建 JobRun 后即置为 `waiting(等待中)`；后台线程调度取出后转 `running(运行中)`，执行完到终态 `success/failed/timeout`。
+- **界面状态刷新**：Task Runner 在状态变化时更新 JobRun 记录，前端通过运行历史（crud-05）轮询/刷新即可看到 waiting→running→终态 的实时状态，无需 OP 接口参与。
 - **Executor 接收 Client 实例**：步骤 1 先把 `clientId` 解析为完整 Client 实例，随 `OpRunRequest` 传入 Task Runner（最终喂给 Executor）；Executor 据此选 run.xxx、组装命令、解析出参（若只传 id 无从得知 command/binaryPath/inputMode 等配置）。
 - **client test 例外（同步、不入历史）**：`POST /api/clients/{clientId}/test` 不走 Task Runner，直接同步调 `Executor::execute` 实时返回，不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。

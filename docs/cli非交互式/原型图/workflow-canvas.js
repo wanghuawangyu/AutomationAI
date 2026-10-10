@@ -6,7 +6,7 @@
  * 用法：
  *   WFCanvas.render(canvasEl, nodes, edges, opts)
  *
- *   nodes: { nodeId: { kind:'start'|'op'|'end', x, y, op?, opVersion?, timeout?, outdated?, ... } }
+ *   nodes: { nodeId: { label, kind:'start'|'op'|'end', x, y, op?, opVersion?, timeout?, outdated?, ... } }
  *   edges: [{from,to,condition}] 或 [[from,to,condition]] 均可
  *   opts: {
  *     width, height,                 // 画布尺寸，默认 1100 x 400
@@ -27,7 +27,6 @@ var WFCanvas = (function () {
   'use strict';
 
   var NODE_W = 130, NODE_H = 46;
-  var START_ID = '__start__', END_ID = '__end__';
   var ANCHOR_Y = { on_failure: 11.5, on_success: 21.5, always: 31.5 };
   var EDGE_COLOR = { on_success: '#16a34a', on_failure: '#dc2626', always: '#3b6ef6' };
   var EDGE_MARKER = { on_success: 'wf-arr-g', on_failure: 'wf-arr-r', always: 'wf-arr-b' };
@@ -163,7 +162,7 @@ var WFCanvas = (function () {
       html += '<div class="dn-title">End ◉</div><div class="dn-meta">结束节点</div>';
       if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
     } else {
-      html += '<div class="dn-title">' + (n.op || id) + '</div>';
+      html += '<div class="dn-title">' + (n.label || n.op || id) + '</div>';
       var meta = opts.nodeMeta ? opts.nodeMeta(id, n) : ('v' + (n.opVersion || ''));
       html += '<div class="dn-meta">' + (meta || '') + '</div>';
       if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
@@ -327,8 +326,6 @@ var WFCanvas = (function () {
   return {
     NODE_W: NODE_W,
     NODE_H: NODE_H,
-    START_ID: START_ID,
-    END_ID: END_ID,
     ANCHOR_Y: ANCHOR_Y,
     EDGE_COLOR: EDGE_COLOR,
     EDGE_MARKER: EDGE_MARKER,

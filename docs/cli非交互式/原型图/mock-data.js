@@ -220,42 +220,42 @@ var WORKFLOWS = {
       { name: 'status', type: 'string', description: '最终状态' }
     ],
     nodes: {
-      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
-      'node_check': {
-        kind: 'op', op: 'check_tests', opVersion: 2, position: { x: 180, y: 50 },
+      '0a1b2c3d4e5f60718293a4b5c6d7e8f9': { label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      '1b2c3d4e5f60718293a4b5c6d7e8f9a1': {
+        label: 'node_check', kind: 'op', op: 'check_tests', opVersion: 2, position: { x: 180, y: 50 },
         params: { test_cmd: '${workspace}/run-tests.sh' },
         retry: null
       },
-      'node_review': {
-        kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
-        params: { test_result: '${node_check.outputs.passed}' },
+      '3d4e5f60718293a4b5c6d7e8f9a1b2c3': {
+        label: 'node_review', kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
+        params: { test_result: '${1b2c3d4e5f60718293a4b5c6d7e8f9a1.outputs.passed}' },
         retry: { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 }
       },
-      'node_deploy': {
-        kind: 'op', op: 'deploy', opVersion: 2, position: { x: 540, y: 50 },
+      '4e5f60718293a4b5c6d7e8f9a1b2c3d4': {
+        label: 'node_deploy', kind: 'op', op: 'deploy', opVersion: 2, position: { x: 540, y: 50 },
         params: { target_env: '${workflow.target_env}' },
         retry: { on: 'failure', max: 2, backoff: 'linear', interval: 2000 }
       },
-      'node_notify': {
-        kind: 'op', op: 'notify', opVersion: 1, position: { x: 720, y: 50 },
+      '5f60718293a4b5c6d7e8f9a1b2c3d4e5': {
+        label: 'node_notify', kind: 'op', op: 'notify', opVersion: 1, position: { x: 720, y: 50 },
         params: { message: '部署成功' },
         retry: null
       },
-      'node_notify_fail': {
-        kind: 'op', op: 'notify_fail', opVersion: 1, position: { x: 360, y: 230 },
-        params: { error: '${node_check.error}' },
+      '60718293a4b5c6d7e8f9a1b2c3d4e5f6': {
+        label: 'node_notify_fail', kind: 'op', op: 'notify_fail', opVersion: 1, position: { x: 360, y: 230 },
+        params: { error: '${1b2c3d4e5f60718293a4b5c6d7e8f9a1.error}' },
         retry: null
       },
-      '__end__': { kind: 'end', position: { x: 940, y: 155 } }
+      '2c3d4e5f60718293a4b5c6d7e8f9a1b2': { label: 'node_end', kind: 'end', position: { x: 940, y: 155 } }
     },
     edges: [
-      ['__start__', 'node_check', 'on_success'],
-      ['node_check', 'node_review', 'on_success'],
-      ['node_check', 'node_notify_fail', 'on_failure'],
-      ['node_review', 'node_deploy', 'on_success'],
-      ['node_deploy', 'node_notify', 'on_success'],
-      ['node_notify', '__end__', 'on_success'],
-      ['node_notify_fail', '__end__', 'on_success']
+      ['0a1b2c3d4e5f60718293a4b5c6d7e8f9', '1b2c3d4e5f60718293a4b5c6d7e8f9a1', 'on_success'],
+      ['1b2c3d4e5f60718293a4b5c6d7e8f9a1', '3d4e5f60718293a4b5c6d7e8f9a1b2c3', 'on_success'],
+      ['1b2c3d4e5f60718293a4b5c6d7e8f9a1', '60718293a4b5c6d7e8f9a1b2c3d4e5f6', 'on_failure'],
+      ['3d4e5f60718293a4b5c6d7e8f9a1b2c3', '4e5f60718293a4b5c6d7e8f9a1b2c3d4', 'on_success'],
+      ['4e5f60718293a4b5c6d7e8f9a1b2c3d4', '5f60718293a4b5c6d7e8f9a1b2c3d4e5', 'on_success'],
+      ['5f60718293a4b5c6d7e8f9a1b2c3d4e5', '2c3d4e5f60718293a4b5c6d7e8f9a1b2', 'on_success'],
+      ['60718293a4b5c6d7e8f9a1b2c3d4e5f6', '2c3d4e5f60718293a4b5c6d7e8f9a1b2', 'on_success']
     ]
   },
   'log_analysis': {
@@ -271,23 +271,23 @@ var WORKFLOWS = {
       { name: 'report', type: 'string', description: '分析报告' }
     ],
     nodes: {
-      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
-      'node_collect': {
-        kind: 'op', op: 'collect_metrics', opVersion: 1, position: { x: 180, y: 50 },
+      '718293a4b5c6d7e8f9a1b2c3d4e5f607': { label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      '8293a4b5c6d7e8f9a1b2c3d4e5f60718': {
+        label: 'node_collect', kind: 'op', op: 'collect_metrics', opVersion: 1, position: { x: 180, y: 50 },
         params: { endpoint: '${workflow.log_source}' },
         retry: null
       },
-      'node_process': {
-        kind: 'op', op: 'process_data', opVersion: 3, position: { x: 360, y: 50 },
-        params: { source: '${node_collect.outputs.metrics}' },
+      '93a4b5c6d7e8f9a1b2c3d4e5f6071829': {
+        label: 'node_process', kind: 'op', op: 'process_data', opVersion: 3, position: { x: 360, y: 50 },
+        params: { source: '${8293a4b5c6d7e8f9a1b2c3d4e5f60718.outputs.metrics}' },
         retry: null
       },
-      '__end__': { kind: 'end', position: { x: 540, y: 155 } }
+      'a4b5c6d7e8f9a1b2c3d4e5f60718293a': { label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
     },
     edges: [
-      ['__start__', 'node_collect', 'always'],
-      ['node_collect', 'node_process', 'on_success'],
-      ['node_process', '__end__', 'always']
+      ['718293a4b5c6d7e8f9a1b2c3d4e5f607', '8293a4b5c6d7e8f9a1b2c3d4e5f60718', 'always'],
+      ['8293a4b5c6d7e8f9a1b2c3d4e5f60718', '93a4b5c6d7e8f9a1b2c3d4e5f6071829', 'on_success'],
+      ['93a4b5c6d7e8f9a1b2c3d4e5f6071829', 'a4b5c6d7e8f9a1b2c3d4e5f60718293a', 'always']
     ]
   },
   'code_review': {
@@ -302,23 +302,23 @@ var WORKFLOWS = {
       { name: 'result', type: 'string', description: '审查结果' }
     ],
     nodes: {
-      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
-      'node_lint': {
-        kind: 'op', op: 'run_lint', opVersion: 2, position: { x: 180, y: 50 },
+      'b5c6d7e8f9a1b2c3d4e5f60718293a4b': { label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      'c6d7e8f9a1b2c3d4e5f60718293a4b5c': {
+        label: 'node_lint', kind: 'op', op: 'run_lint', opVersion: 2, position: { x: 180, y: 50 },
         params: { target: '${workflow.repo}' },
         retry: null
       },
-      'node_review': {
-        kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
-        params: { test_result: '${node_lint.outputs.issues}' },
+      'd7e8f9a1b2c3d4e5f60718293a4b5c6d': {
+        label: 'node_review', kind: 'op', op: 'review', opVersion: 2, position: { x: 360, y: 50 },
+        params: { test_result: '${c6d7e8f9a1b2c3d4e5f60718293a4b5c.outputs.issues}' },
         retry: null
       },
-      '__end__': { kind: 'end', position: { x: 540, y: 155 } }
+      'e8f9a1b2c3d4e5f60718293a4b5c6d7e': { label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
     },
     edges: [
-      ['__start__', 'node_lint', 'always'],
-      ['node_lint', 'node_review', 'on_success'],
-      ['node_review', '__end__', 'always']
+      ['b5c6d7e8f9a1b2c3d4e5f60718293a4b', 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', 'always'],
+      ['c6d7e8f9a1b2c3d4e5f60718293a4b5c', 'd7e8f9a1b2c3d4e5f60718293a4b5c6d', 'on_success'],
+      ['d7e8f9a1b2c3d4e5f60718293a4b5c6d', 'e8f9a1b2c3d4e5f60718293a4b5c6d7e', 'always']
     ]
   },
   'hourly_check': {
@@ -333,17 +333,17 @@ var WORKFLOWS = {
       { name: 'healthy', type: 'string', description: '是否健康' }
     ],
     nodes: {
-      '__start__': { kind: 'start', position: { x: 20, y: 155 } },
-      'node_health': {
-        kind: 'op', op: 'health_check', opVersion: 1, position: { x: 180, y: 155 },
+      'f9a1b2c3d4e5f60718293a4b5c6d7e8f': { label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      '0a1b2c3d4e5f60718293a4b5c6d7e8fa': {
+        label: 'node_health', kind: 'op', op: 'health_check', opVersion: 1, position: { x: 180, y: 155 },
         params: { endpoint: '${workflow.endpoint}' },
         retry: null
       },
-      '__end__': { kind: 'end', position: { x: 380, y: 155 } }
+      '1a2b3c4d5e6f708192a3b4c5d6e7f809': { label: 'node_end', kind: 'end', position: { x: 380, y: 155 } }
     },
     edges: [
-      ['__start__', 'node_health', 'on_success'],
-      ['node_health', '__end__', 'on_success']
+      ['f9a1b2c3d4e5f60718293a4b5c6d7e8f', '0a1b2c3d4e5f60718293a4b5c6d7e8fa', 'on_success'],
+      ['0a1b2c3d4e5f60718293a4b5c6d7e8fa', '1a2b3c4d5e6f708192a3b4c5d6e7f809', 'on_success']
     ]
   }
 };
@@ -441,7 +441,7 @@ var RUN_HISTORY = [
     steps: [
       {
         recordId: 'step-001',
-        stepId: 'step-1',
+        stepId: '102030405060708090a0b0c0d0e0f001',
         opId: 'check_tests',
         opVersion: 2,
         clientId: 'client-claude',
@@ -477,12 +477,12 @@ var RUN_HISTORY = [
     jobName: 'deploy_workflow',
     jobType: 'Workflow',
     workflowId: 'wf-deploy',
-    failedNode: 'node_deploy',
+    failedNode: '4e5f60718293a4b5c6d7e8f9a1b2c3d4',
     steps: [
-      { recordId: 'step-002', stepId: 'step-1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON', outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2, attempts: [] },
-      { recordId: 'step-003', stepId: 'step-2', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728104720200, finishedAtMs: 1728104728700, duration: 8.5, attempts: [] },
-      { recordId: 'step-004', stepId: 'step-3', opId: 'deploy', opVersion: 2, clientId: 'client-bash', status: 'failed', exitCode: 1, inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL', outputs: {}, rawOutput: 'Deploy failed: connection refused', timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104730800, duration: 2.1, attempts: [] },
-      { recordId: 'step-005', stepId: 'step-4', opId: 'notify_fail', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { error: 'Deploy failed' }, bodySnapshot: '发送失败告警通知', outputs: {}, rawOutput: 'Notification sent', timedOut: false, startedAtMs: 1728104730800, finishedAtMs: 1728104732600, duration: 1.8, attempts: [] }
+      { recordId: 'step-002', stepId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', opId: 'check_tests', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON', outputs: { passed: 'true' }, rawOutput: '10 tests passed', timedOut: false, startedAtMs: 1728104710000, finishedAtMs: 1728104720200, duration: 10.2, attempts: [] },
+      { recordId: 'step-003', stepId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728104720200, finishedAtMs: 1728104728700, duration: 8.5, attempts: [] },
+      { recordId: 'step-004', stepId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', opId: 'deploy', opVersion: 2, clientId: 'client-bash', status: 'failed', exitCode: 1, inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL', outputs: {}, rawOutput: 'Deploy failed: connection refused', timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104730800, duration: 2.1, attempts: [] },
+      { recordId: 'step-005', stepId: '60718293a4b5c6d7e8f9a1b2c3d4e5f6', opId: 'notify_fail', opVersion: 1, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { error: 'Deploy failed' }, bodySnapshot: '发送失败告警通知', outputs: {}, rawOutput: 'Notification sent', timedOut: false, startedAtMs: 1728104730800, finishedAtMs: 1728104732600, duration: 1.8, attempts: [] }
     ]
   },
   {
@@ -500,9 +500,9 @@ var RUN_HISTORY = [
     jobName: 'hourly_check',
     jobType: 'Workflow',
     workflowId: 'wf-hourly-check',
-    failedNode: 'node_health',
+    failedNode: '0a1b2c3d4e5f60718293a4b5c6d7e8fa',
     steps: [
-      { recordId: 'step-006', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2, attempts: [] }
+      { recordId: 'step-006', stepId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'failed', exitCode: 1, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2, attempts: [] }
     ]
   },
   {
@@ -520,7 +520,7 @@ var RUN_HISTORY = [
     jobName: 'review',
     jobType: 'OP',
     steps: [
-      { recordId: 'step-007', stepId: 'step-1', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1, attempts: [] }
+      { recordId: 'step-007', stepId: '102030405060708090a0b0c0d0e0f005', opId: 'review', opVersion: 2, clientId: 'client-claude', status: 'success', exitCode: 0, inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论', outputs: { approved: 'true' }, rawOutput: 'Approved', timedOut: false, startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1, attempts: [] }
     ]
   },
   {
@@ -538,7 +538,7 @@ var RUN_HISTORY = [
     jobName: 'notify',
     jobType: 'OP',
     steps: [
-      { recordId: 'step-008', stepId: 'step-1', opId: 'notify', opVersion: 1, clientId: 'client-claude', status: 'timeout', exitCode: null, inputs: { message: '告警' }, outputs: {}, rawOutput: 'Timeout after 300s', timedOut: true, startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0, attempts: [] }
+      { recordId: 'step-008', stepId: '102030405060708090a0b0c0d0e0f006', opId: 'notify', opVersion: 1, clientId: 'client-claude', status: 'timeout', exitCode: null, inputs: { message: '告警' }, outputs: {}, rawOutput: 'Timeout after 300s', timedOut: true, startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0, attempts: [] }
     ]
   },
   {
@@ -556,7 +556,7 @@ var RUN_HISTORY = [
     jobName: 'daily_cleanup',
     jobType: 'OP',
     steps: [
-      { recordId: 'step-009', stepId: 'step-1', opId: 'clean_logs', opVersion: 3, clientId: 'client-powershell', status: 'success', exitCode: 0, inputs: { endpoint: 'localhost:8080' }, outputs: {}, rawOutput: 'Logs cleaned', timedOut: false, startedAtMs: 1728019200000, finishedAtMs: 1728019203200, duration: 3.2, attempts: [] }
+      { recordId: 'step-009', stepId: '102030405060708090a0b0c0d0e0f007', opId: 'clean_logs', opVersion: 3, clientId: 'client-powershell', status: 'success', exitCode: 0, inputs: { endpoint: 'localhost:8080' }, outputs: {}, rawOutput: 'Logs cleaned', timedOut: false, startedAtMs: 1728019200000, finishedAtMs: 1728019203200, duration: 3.2, attempts: [] }
     ]
   },
   {
@@ -574,7 +574,7 @@ var RUN_HISTORY = [
     jobName: 'data_sync',
     jobType: 'OP',
     steps: [
-      { recordId: 'step-010', stepId: 'step-1', opId: 'process_data', opVersion: 3, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { source: 's3://bucket/data' }, outputs: { count: '1024' }, rawOutput: '1024 records processed', timedOut: false, startedAtMs: 1728106800000, finishedAtMs: 1728106812400, duration: 12.4, attempts: [] }
+      { recordId: 'step-010', stepId: '102030405060708090a0b0c0d0e0f008', opId: 'process_data', opVersion: 3, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { source: 's3://bucket/data' }, outputs: { count: '1024' }, rawOutput: '1024 records processed', timedOut: false, startedAtMs: 1728106800000, finishedAtMs: 1728106812400, duration: 12.4, attempts: [] }
     ]
   },
   {
@@ -593,7 +593,7 @@ var RUN_HISTORY = [
     jobType: 'Workflow',
     workflowId: 'wf-hourly-check',
     steps: [
-      { recordId: 'step-011', stepId: 'step-1', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, duration: 5.3, attempts: [] }
+      { recordId: 'step-011', stepId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', opId: 'health_check', opVersion: 1, clientId: 'client-python', status: 'success', exitCode: 0, inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"', outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, duration: 5.3, attempts: [] }
     ]
   }
 ];

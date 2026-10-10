@@ -588,8 +588,6 @@
 
 <script>
   /* ==================== 常量 ==================== */
-  var START_ID = '__start__';
-  var END_ID   = '__end__';
   var NODE_W = 130, NODE_H = 46;
 
   /* ==================== OP 库数据 ==================== */
@@ -631,15 +629,15 @@
 
   /* ==================== Workflow 数据 ==================== */
 
-  function makeStartNode() { return { kind: 'start', position: { x: 20, y: 175 } }; }
-  function makeEndNode()   { return { kind: 'end',   position: { x: 850, y: 175 } }; }
+  function makeStartNode() { return { label: 'node_start', kind: 'start', position: { x: 20, y: 175 } }; }
+  function makeEndNode()   { return { label: 'node_end',   kind: 'end',   position: { x: 850, y: 175 } }; }
 
-  /* 空 Workflow：仅 Start + End */
+  /* 空 Workflow：仅 Start + End（nodeId 为 32 位 UUID，与后端一致） */
   function makeEmptyNodes() {
-    return {
-      __start__: makeStartNode(),
-      __end__: makeEndNode()
-    };
+    var nodes = {};
+    nodes[genNodeId()] = makeStartNode();
+    nodes[genNodeId()] = makeEndNode();
+    return nodes;
   }
   function makeEmptyEdges() { return []; }
 
@@ -659,6 +657,7 @@
       } else {
         // OP 节点：从 mock-data 读取基础字段，补充编辑所需字段
         nodes[id] = {
+          label: n.label,
           kind: 'op',
           op: n.op,
           opVersion: n.opVersion || 1,
@@ -699,7 +698,14 @@
     };
   });
 
-  var nodeSeq = 100;
+  /* 新节点 nodeId 生成：32 位 UUID（前端 mock 生成，与后端一致） */
+  function genNodeId() {
+    var chars = '0123456789abcdef';
+    var s = '';
+    for (var i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * 16)];
+    return s;
+  }
+  var nodeSeq = 100;   // label 展示名递增序号（node_101...）
   var currentWf = 'deploy_workflow';
   var currentVersion = 'v2';
   var selectedNodeId = null;
@@ -711,7 +717,7 @@
 
   function curNodes() { return WORKFLOW_DATA[currentWf].nodes; }
   function curEdges() { return WORKFLOW_DATA[currentWf].edges; }
-  function isSystemNode(id) { return id === START_ID || id === END_ID; }
+  function isSystemNode(id) { var n = curNodes()[id]; return !!n && (n.kind === 'start' || n.kind === 'end'); }
 
   /* ==================== 视图切换 ==================== */
   var views = {
@@ -917,7 +923,7 @@
     var wf = WORKFLOWS[name];
     var n = wf && wf.nodes ? wf.nodes[id] : null;
     if (!n) return;
-    var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.op || id);
+    var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.label || n.op || id);
     var html = '<div style="font-weight:600;margin-bottom:12px">' + label + '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">节点配置</div>';
     html += '<div style="font-size:13px;line-height:2">';
@@ -1012,7 +1018,7 @@
       outputTable.innerHTML = outputHead +
         '<div class="pt-row pt-out">' +
           '<input type="text" value="deploy_url" />' +
-          '<input type="text" value="node_deploy.url" />' +
+          '<input type="text" value="4e5f60718293a4b5c6d7e8f9a1b2c3d4.url" />' +
           '<input type="text" value="部署后的 URL" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
@@ -1095,7 +1101,8 @@
       },
       onNodeClick: function (id) { selectNode(id); },
       beforeAddEdge: function (from, to, condition) {
-        if (to === START_ID) { showToast('Start 节点不能有入边'); return false; }
+        var toNode = curNodes()[to];
+        if (toNode && toNode.kind === 'start') { showToast('Start 节点不能有入边'); return false; }
         if (to === from) { showToast('不能连接到自身'); return false; }
         var exists = curEdges().some(function (ed) {
           return ed.from === from && ed.to === to && ed.condition === condition;
@@ -1182,12 +1189,13 @@
   })();
 
   function createNode(op, x, y) {
-    var id = 'node_' + (++nodeSeq);
+    var id = genNodeId();
     var bindings = (op.inputs || []).map(function (inp) {
       return { name: inp.name, kind: '', from: '' };
     });
 
     curNodes()[id] = {
+      label: 'node_' + (++nodeSeq),
       kind: 'op',
       op: op.name,
       opVersion: op.version,

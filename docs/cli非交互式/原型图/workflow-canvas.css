@@ -49,13 +49,13 @@
 .dag-node.st-failed{border-color:#dc2626;background:#fdf6f6}
 .dag-node.st-timeout{border-color:#d97706;background:#fdf9f2}
 .dag-node.st-running{border-color:#eab308;background:#fefce8}
-.dag-node.st-skip{border-color:#9ca3af;background:#f9fafb}
-.dag-node.node-system.st-skip{background:#f3f4f6;border-color:#9ca3af}
-.dag-node.node-system.st-skip .dn-title{color:#6b7280}
-.dag-node.node-system.st-skip .dn-meta{color:#9ca3af}
+.dag-node.st-wait{border-color:#9ca3af;background:#f9fafb}
+.dag-node.node-system.st-wait{background:#f3f4f6;border-color:#9ca3af}
+.dag-node.node-system.st-wait .dn-title{color:#6b7280}
+.dag-node.node-system.st-wait .dn-meta{color:#9ca3af}
 .dn-state{font-size:10.5px;font-weight:600;margin-top:1px;line-height:1.4}
 .dag-node.st-success .dn-state{color:#16a34a}
 .dag-node.st-failed .dn-state{color:#dc2626}
 .dag-node.st-timeout .dn-state{color:#d97706}
 .dag-node.st-running .dn-state{color:#ca8a04}
-.dag-node.st-skip .dn-state{color:#9ca3af}
+.dag-node.st-wait .dn-state{color:#9ca3af}

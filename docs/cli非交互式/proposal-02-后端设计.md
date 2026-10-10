@@ -42,13 +42,13 @@
 │      │        └───────────────────────┘│                     │
 │      │            ▼                    ▼                     │
 │      │   ┌──────────────────────────────────────┐           │
-│      │   │  Worker Pool (N 个并发槽)             │           │
+│      │   │  WorkerPool (N 个并发槽)             │           │
 │      │   │  ┌──────┐ ┌──────┐ ┌──────┐          │           │
 │      │   │  │W-1   │ │W-2   │ │W-3   │  ...      │           │
 │      │   │  │执行OP │ │执行OP │ │执行OP │→ Executor│          │
 │      │   │  └──────┘ └──────┘ └──────┘          │           │
 │      │   └──────────────────────────────────────┘           │
-│      │   on_complete 钩子（Worker / Engine → Task Runner）    │
+│      │   on_complete 钩子（WorkerPool / Engine → Task Runner）    │
 │      └───────────────────────┬──────────────────┘           │
 │                              ▼ 更新运行历史终态              │
 │              ┌─────────────────┐                            │
@@ -58,26 +58,28 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**三者均为全局静态单例**：`Task Runner / Engine / WorkerPool` 以 `static RUNNER / ENGINE / WORKER_POOL: OnceLock<Arc<…>>` 挂载为 App 进程级单例（App 启动 `init()` 时按「基础组件 store/executor → WorkerPool → Engine → Runner → 各自 recover → Runner 常驻轮询 start」初始化，重启后重建）。**互引不经构造注入**——Engine 经全局 `WORKER_POOL` 派发 OP、WorkerPool 完成后按 source 经全局 `JOB_COMPLETE` / `STEP_COMPLETE` 回调、Engine 终态经全局 `JOB_COMPLETE` 落库；完成回调（OnComplete 实现）为**全局实现**而非实例属性，无 Weak / 无回填 / 无组装顺序问题（机制见 crud-03 4.3 / 4.4、crud-05 4.6）。
+
 **后台任务关系**（三个后台任务，互不嵌套、相互并行）：
 
 | 后台任务 | 职责 | 与其它任务的关系 |
 |-|-|-|
-| **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（queued → running → 终态）、并发控制、按序调度分派（**常驻轮询**，固定间隔扫描 DB） | 与 Engine 并行；Worker / Engine 完成时同步写终态，轮询自动感知 |
-| **Engine**（编排控制，后台任务②） | 收到 `EngineStart` 通知后（**notify 消息即命令：EngineStart / Terminate 先写 engine_commands 落库**，事件循环从表消费），按 DAG 顺序决定下一步执行哪个 OP 并派发给 Worker；整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等） | 与 Task Runner、Worker 并行（互不嵌套） |
-| **Worker Pool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Inner Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插 waiting 记录即返回；Worker 调度线程轮询 waiting → 指派空闲 InnerWorker（池大小 = 1.5 × 并发上限）执行 Executor → 更新 step_records 终态；完成钩子是**实例属性**，InnerWorker 执行完同步调用，Worker 不感知业务 | 与 Engine 并行；job_complete 写 job_runs 终态 |
+| **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（waiting → running → 终态）、并发控制、按序调度分派（**常驻轮询**，固定间隔扫描 DB） | 与 Engine 并行；WorkerPool / Engine 完成时同步写终态，轮询自动感知 |
+| **Engine**（编排控制，后台任务②） | 收到 `EngineStart` 通知后（**notify 消息即事件：EngineStart / Terminate 先写 engine_events 落库，写后立即 `process_event` 同步处理**——无事件循环 / 无信号），按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 Task Runner、WorkerPool 并行（互不嵌套） |
+| **WorkerPool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req)`（实例方法 &self）只在 step_records 插 waiting 记录即返回；WorkerPool 调度线程轮询 waiting → 指派空闲 Worker（池大小 = 1.5 × 并发上限）执行 Executor → 更新 step_records 终态；完成回调为**全局实现**（JobComplete 更新终态 / StepComplete 写事件后调全局 ENGINE 推进），Worker 执行完同步调用，WorkerPool 不感知业务 | 与 Engine 并行；job_complete 写 job_runs 终态 |
 
 **执行数据流**：
 
 1. **触发**：接口触发（HTTP 手动 / Scheduler cron 定时 / 单次 OP / Workflow 执行）统一调用 `TaskRunner.add_op / add_job / add_workflow`；
-2. **创建运行历史**：Task Runner 写入一条 JobRun（status=queued）到 `job_runs` 并返回 runId，接口即结束；
-3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 queued → running；**单次 OP 直接派发 Worker**；**Job / Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})` 通知 Engine——EngineStart 作为 `engine_start` 命令写入 engine_commands（落库，重启不丢）**；
-4. **执行**：Engine 按 DAG 顺序派发各 OP 给 Worker；Worker 同步执行（调 Executor）；
-5. **完成回调**：Worker 完成后**同步调用实例属性上的 OnComplete 实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——`job_complete` 属性（Runner 绑定的 JobComplete）更新 job_runs 终态（落库）并供运行历史界面展示、`step_complete` 属性（Engine 绑定的 StepComplete）回报 Engine 推进 DAG；Engine 整体完成时在消费 `workflow_done` / `terminate` 命令时调用 `self.job_complete` 更新 job_runs 终态（命令持久化 + 属性重启重绑，重放幂等） → **不依赖内存回调传递业务**：Task Runner 常驻轮询线程按固定间隔扫描 DB → 统计并发、调度下一个 queued 任务 → 刷新界面状态。
+2. **创建运行历史**：Task Runner 写入一条 JobRun（status=waiting）到 `job_runs` 并返回 runId，接口即结束；
+3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 waiting → running；**单次 OP 直接派发 WorkerPool**；**Job / Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})` 通知 Engine——EngineStart 作为 `engine_start` 事件写入 engine_events（落库，重启不丢）**；
+4. **执行**：Engine 按 DAG 顺序派发各 OP 给 WorkerPool；WorkerPool 同步执行（调 Executor）；
+5. **完成回调**：WorkerPool 完成后**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event）；Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） → **不依赖内存回调传递业务**：Task Runner 常驻轮询线程按固定间隔扫描 DB → 统计并发、调度下一个 waiting 任务 → 刷新界面状态。
 
-> 注：Task Runner 与 Engine 是两个并行的后台任务（同见 crud-05 4.6、crud-03 4.2）；Worker Pool 是执行资源池，与 Engine 并行接收派发。
+> 注：Task Runner 与 Engine 是两个并行的后台任务（同见 crud-05 4.6、crud-03 4.3 / 4.4）；WorkerPool 是执行资源池，与 Engine 并行接收派发。
 ```
 
-### 1.3 Engine / Worker 模式（参考 mistral）
+### 1.3 Engine / WorkerPool 模式（参考 mistral）
 
 > 已迁移至 `proposal-02-后端crud-03workflow管理.md`。
 
@@ -94,7 +96,7 @@
 | 5 | 运行历史管理 | Run 列表/详情/终止/重跑/重试/导出 Excel | job_runs, step_records |
 | 6 | 单次执行器 (Executor) | 通过 Client 执行单个 OP，封装进程调用 | step_records, ops, clients |
 | 7 | 定时任务管理 (Scheduler) | 加载 cron Job，到点触发 | jobs, job_runs |
-| 8 | 编排控制 (Engine/Worker) | DAG 调度、边路由、重试、循环 | workflows, workflow_nodes, job_runs, step_records |
+| 8 | 编排控制 (Engine/WorkerPool) | DAG 调度、边路由、重试、循环 | workflows, workflow_nodes, job_runs, step_records |
 | 9 | DB 操作层 (Repository) | 所有 SQL 操作，统一连接池 | 全部表 |
 | 10 | 日志管理 | 结构化日志、Run 级日志文件 | （文件系统） |
 | 11 | 配置管理 | settings 表读写、启动参数 | settings |
@@ -138,7 +140,7 @@
 
 > 以下子节已迁移至独立 CRUD 文档，此处不再重复：
 > - 4.1 单次 OP 执行 → `proposal-02-后端crud-02op管理.md`
-> - 4.2 Workflow 执行 / 4.3 边路由逻辑 / 4.4 重试策略 → `proposal-02-后端crud-03workflow管理.md`
+> - 4.2 Workflow 执行接口 / 4.3 Engine 机制（含 walk_edge 边路由、apply_retry 重试判定）/ 4.4 WorkerPool 机制 → `proposal-02-后端crud-03workflow管理.md`
 > - 4.5 定时任务 → `proposal-02-后端crud-04job管理.md`
 > - 4.6 终止 / 4.7 重跑 vs 重试 → `proposal-02-后端crud-05运行历史.md`
 

@@ -811,10 +811,11 @@ interface WorkflowOutput {
 type WorkflowNodeKind = "start" | "op" | "end";
 
 interface WorkflowNode {
-  nodeId: string;                   // 32 位 UUID
+  nodeId: string;                   // 32 位 UUID，系统生成，Workflow 内唯一
+  label: string;                    // 画布展示名（如 node_start / node_check），前端生成，非唯一标识
   kind: WorkflowNodeKind;           // 节点类型
 
-  // 画布坐标（由前端布局后随创建/更新请求传入并持久化；导入/脚本创建无坐标时可空）
+  // 画布坐标：创建 API 必填（缺失 400）；导入/脚本创建无坐标时由后端默认排布并持久化
   position?: { x: number; y: number };
 
   // kind === "op" 时的字段
@@ -1549,8 +1550,8 @@ manual_deploy-v2.zip
 
 ```typescript
 type RunStatus =
-  | "pending" | "running" | "success" | "failed"
-  | "cancelled" | "timeout" | "interrupted";
+  | "waiting" | "running" | "success" | "failed"
+  | "cancelled" | "timeout";
 
 interface JobRun {
   runId: string;
@@ -1578,7 +1579,7 @@ interface JobRun {
 }
 
 type StepStatus =
-  | "pending" | "running" | "success" | "failed" | "timeout" | "skipped";
+  | "waiting" | "running" | "success" | "failed" | "timeout";
 
 interface StepRecord {
   stepId: string;

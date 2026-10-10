@@ -137,7 +137,7 @@
   .lb-failed{background:#fdecec;border-color:#dc2626}
   .lb-timeout{background:#fdf3e3;border-color:#d97706}
   .lb-running{background:#fef9e3;border-color:#eab308}
-  .lb-skip{background:#f3f4f6;border-color:#9ca3af}
+  .lb-wait{background:#f3f4f6;border-color:#9ca3af}
   .lb-system{background:#e8f7ee;border-color:#16a34a;border-radius:50%}
 
   .exec-dag-scroll{overflow:auto;background:var(--bg)}
@@ -527,7 +527,7 @@
             <span class="legend-item"><i class="legend-box lb-failed"></i>失败</span>
             <span class="legend-item"><i class="legend-box lb-timeout"></i>超时</span>
             <span class="legend-item"><i class="legend-box lb-running"></i>运行中</span>
-            <span class="legend-item"><i class="legend-box lb-skip"></i>未执行 / 跳过</span>
+            <span class="legend-item"><i class="legend-box lb-wait"></i>等待中 / 未执行</span>
           </div>
         </div>
 
@@ -617,7 +617,7 @@
         即将终止正在运行的 Run：<strong id="terminateName">deploy_workflow</strong>
       </div>
       <div style="margin-top:12px;font-size:12.5px;color:#96660a;background:#fff8e9;border:1px solid #f3e4bd;border-radius:8px;padding:10px 13px">
-        ⚠ 终止后当前 Run 状态为 cancelled，未执行的节点标记为 skipped，不支持重试，只能重跑。
+        ⚠ 终止后当前 Run 状态为 cancelled，未执行的节点保持 waiting，不支持重试，只能重跑。
       </div>
     </div>
     <div class="modal-foot">
@@ -1009,7 +1009,7 @@
         currentWfNodes[nodeId].status = 'success';
       } else if (n.kind === 'end') {
         if (run.status === 'success') currentWfNodes[nodeId].status = 'success';
-        else currentWfNodes[nodeId].status = 'skipped';
+        else currentWfNodes[nodeId].status = 'waiting';
       } else {
         // op 节点：从 steps 中匹配
         var matched = null;
@@ -1024,7 +1024,7 @@
           currentWfNodes[nodeId].inputs = matched.inputs;
           currentWfNodes[nodeId].outputs = matched.outputs;
         } else {
-          currentWfNodes[nodeId].status = 'skipped';
+          currentWfNodes[nodeId].status = 'waiting';
           currentWfNodes[nodeId].duration = '—';
         }
       }
@@ -1144,24 +1144,24 @@
       failed:   { cls: 'st-failed',   text: '✗ 失败' },
       timeout:  { cls: 'st-timeout',  text: '⏱ 超时' },
       running:  { cls: 'st-running',  text: '● 运行中' },
-      skipped:  { cls: 'st-skip',     text: '⊘ 未执行' }
+      waiting:  { cls: 'st-wait',     text: '◌ 等待中' }
     };
 
     WFCanvas.render(canvas, currentWfNodes, currentWfEdges, {
       nodeStatus: function (id, n) {
         if (n.kind === 'start') {
-          return n.status === 'success' ? { cls: 'st-success', text: '已开始' } : { cls: 'st-skip', text: '未开始' };
+          return n.status === 'success' ? { cls: 'st-success', text: '已开始' } : { cls: 'st-wait', text: '未开始' };
         }
         if (n.kind === 'end') {
-          return n.status === 'success' ? { cls: 'st-success', text: '已到达' } : { cls: 'st-skip', text: '未到达' };
+          return n.status === 'success' ? { cls: 'st-success', text: '已到达' } : { cls: 'st-wait', text: '未到达' };
         }
-        return STATUS_MAP[n.status] || STATUS_MAP.skipped;
+        return STATUS_MAP[n.status] || STATUS_MAP.waiting;
       },
       nodeMeta: function (id, n) {
         return 'v' + (n.opVersion || '1');
       },
       edgeDashed: function (edge, to) {
-        return (to.status === 'skipped' || to.status === 'pending');
+        return (to.status === 'waiting');
       },
       onNodeClick: function (id, n) {
         if (n.kind === 'start' || n.kind === 'end') return;

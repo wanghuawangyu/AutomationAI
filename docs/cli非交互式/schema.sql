@@ -4,7 +4,7 @@
 -- 字符集: UTF-8
 -- 说明:
 --   主键统一命名为业务属性 id (如 client_id / op_id / workflow_id / job_id /
---     run_id / command_id / node_id / record_id), 值均为 32 位无连字符
+--     run_id / event_id / node_id / record_id), 值均为 32 位无连字符
 --     UUID; 子表 (nodes/step_records) 主键亦为 UUID, 由应用层 INSERT 时生成
 --     (不使用 AUTOINCREMENT); edges 随 Workflow 整体存于 workflows.edges JSON 字段
 --    settings 表无 id 列, key 为业务配置键 (非 UUID);
@@ -90,10 +90,12 @@ CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows(name);
 
 -- ============================================================
 -- 4. workflow_nodes —— Workflow 节点 (1:N)
---    主键 node_id 为 32 位 UUID (全局唯一, 应用层生成)
+--    主键 node_id 为 32 位 UUID (全局唯一, 应用层生成); label 为画布展示名
+--    position: 创建 API 必填 (缺失 400), 导入 API 可空 (后端默认排布并持久化)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_nodes (
     node_id         TEXT PRIMARY KEY,                    -- 32 位 UUID, 全局唯一 (原自增 id 已移除)
+    label           TEXT NOT NULL,                       -- 画布展示名 (node_start 等, 前端生成, 非唯一标识)
     workflow_id     TEXT NOT NULL,                       -- 所属 workflow (workflows.workflow_id)
     kind            TEXT NOT NULL CHECK (kind IN ('start','op','end')),
 
@@ -105,7 +107,7 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
     bindings        TEXT,                                -- JSON object
     -- retry: {"on":"failure","max":3,"backoff":"exponential","interval":1000}
     retry           TEXT,                                -- JSON object, 可空
-    -- 画布坐标 (前端布局持久化, 可空)
+    -- 画布坐标 (创建必填; 导入无坐标时后端生成默认排布)
     position_x      REAL,
     position_y      REAL,
 
@@ -166,8 +168,8 @@ CREATE TABLE IF NOT EXISTS job_runs (
     inputs          TEXT NOT NULL DEFAULT '{}',         -- JSON object
     workspace       TEXT NOT NULL,
 
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','running','success','failed','cancelled','timeout','interrupted')),
+    status          TEXT NOT NULL DEFAULT 'waiting'
+                    CHECK (status IN ('waiting','running','success','failed','cancelled','timeout')),
     terminated_by    TEXT CHECK (terminated_by IN ('timeout','cancelled','error')),
     timeout_step_id TEXT,
     timeout_op_name TEXT,
@@ -191,12 +193,12 @@ CREATE INDEX IF NOT EXISTS idx_runs_started ON job_runs(started_at_ms);
 CREATE INDEX IF NOT EXISTS idx_runs_triggered ON job_runs(triggered_by);
 
 -- ============================================================
--- 7. step_records —— 步骤执行记录 (StepRecord) / Worker 任务排队表
+-- 7. step_records —— 步骤执行记录 (StepRecord) / WorkerPool 任务排队表
 --    同一 step 因重试产生多条记录, 通过 started_at_ms 区分;
 --    主键 record_id 为 32 位 UUID (应用层生成)
---    ★ Worker 的 run_job / run_step 在此插入 status=waiting 记录（任务入 DB 排队，
---      App 重启不丢失），由 Worker 调度线程指派 InnerWorker 执行并推进 waiting → running → 终态；
---      启动时 status=running 的残留记录由 Worker 重新指派重跑。
+--    ★ WorkerPool 的 run_job / run_step 在此插入 status=waiting 记录（任务入 DB 排队，
+--      App 重启不丢失），由 WorkerPool 调度线程指派 Worker 执行并推进 waiting → running → 终态；
+--      启动时 status=running 的残留记录由 WorkerPool 重新指派重跑。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS step_records (
     record_id       TEXT PRIMARY KEY,                    -- 32 位 UUID (原自增 id 已移除)
@@ -211,7 +213,7 @@ CREATE TABLE IF NOT EXISTS step_records (
                                                          --            step=workflow 步骤 (Engine 触发, 完成调 step_complete 钩子)
 
     status          TEXT NOT NULL DEFAULT 'waiting'
-                    CHECK (status IN ('waiting','running','success','failed','timeout','skipped')),
+                    CHECK (status IN ('waiting','running','success','failed','timeout')),
 
     inputs          TEXT NOT NULL DEFAULT '{}',         -- JSON object
     body_snapshot   TEXT,                                -- OP 正文快照
@@ -234,7 +236,7 @@ CREATE TABLE IF NOT EXISTS step_records (
 CREATE INDEX IF NOT EXISTS idx_steps_run ON step_records(run_id);
 CREATE INDEX IF NOT EXISTS idx_steps_op ON step_records(op_id);
 CREATE INDEX IF NOT EXISTS idx_steps_status ON step_records(status);
-CREATE INDEX IF NOT EXISTS idx_steps_waiting ON step_records(status, created_at_ms) WHERE status = 'waiting'; -- Worker 调度线程轮询 waiting 队列
+CREATE INDEX IF NOT EXISTS idx_steps_waiting ON step_records(status, created_at_ms) WHERE status = 'waiting'; -- WorkerPool 调度线程轮询 waiting 队列
 
 -- ============================================================
 -- 8. settings —— 系统配置 (KV)
@@ -253,29 +255,32 @@ INSERT OR IGNORE INTO settings(key, value, updated_at_ms) VALUES
     ('db_version',         '1',      '0');
 
 -- ============================================================
--- 9. engine_commands —— Engine 调度命令 (调度过程记录)
---    参考 Mistral workflow_command: Engine 采用事件驱动, 每次
---    "节点完成→决定下一步" 产生一条调度命令并持久化于此, Engine
---    事件循环消费; processed=0 的命令是 Engine 崩溃后恢复重放的依据
+-- 9. engine_events —— Engine 调度事件流 (调度过程记录, 事件溯源)
+--    参考 Mistral engine: Engine 采用事件驱动, 每次
+--    "节点完成→决定下一步" 产生一条调度事件并持久化于此;
+--    **写即处理、无事件循环**: 事件 INSERT 后立即由 process_event 同步处理
+--    (谁产生谁调用), 仅崩溃残留的 processed=0 事件由 recover 一次性重放
 --    数据生命周期:
---      成功完成的 workflow → 完成即物理删除本 run 的命令
+--      成功完成的 workflow → 完成即物理删除本 run 的事件
 --      失败的 workflow(可重试) → 保留; 最终不重试: 1 天后软删除
 --        (置 soft_deleted_at_ms), 2 天后物理删除
 -- ============================================================
 -- ★ Engine 的 notify 与后台线程持久化：
 --   Runner / 终止接口调 engine.notify(msg) 时，EngineStart / Terminate **不投内存 inbox**，
---   而是作为命令直接 INSERT 到本表（engine_start / terminate，payload 承载 inputs/workspace/reason），
---   写库成功即返回（写库失败视为投递失败）；Engine 事件循环从本表消费 processed=0 的命令推进 DAG。
---   App 重启后：未消费命令仍在（notify 不丢），Engine 事件循环/调度循环由 recover 重建后继续消费。
-CREATE TABLE IF NOT EXISTS engine_commands (
-    command_id      TEXT PRIMARY KEY,                    -- 32 位 UUID
+--   而是作为事件直接 INSERT 到本表（engine_start / terminate，payload 承载 inputs/workspace/reason），
+--   写库成功后**立即由 process_event 同步处理**（写即处理，无事件循环 / 无唤醒信号），
+--   处理完成才返回（写库失败视为投递失败）。
+--   App 重启后：未消费事件仍在（notify 不丢），Engine::recover 一次性处理残留
+--   processed=0 事件即恢复推进，之后无常驻循环。
+CREATE TABLE IF NOT EXISTS engine_events (
+    event_id      TEXT PRIMARY KEY,                    -- 32 位 UUID
     run_id          TEXT NOT NULL,                       -- 所属 job_run (job_runs.run_id)
 
-    command         TEXT NOT NULL CHECK (command IN
+    event_type      TEXT NOT NULL CHECK (event_type IN
                     ('engine_start','dispatch_step','step_completed','apply_retry','walk_edge','workflow_done','terminate')),
 
     step_id         TEXT,                                -- 相关节点 (workflow_node.node_id)
-    step_status     TEXT CHECK (step_status IN ('success','failed','timeout','skipped')),
+    step_status     TEXT CHECK (step_status IN ('success','failed','timeout')),
     edge_result     TEXT CHECK (edge_result IN ('success','failed','timeout','always')),
 
     payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照 / EngineStart 的 inputs+workspace / Terminate 的 reason
@@ -287,6 +292,6 @@ CREATE TABLE IF NOT EXISTS engine_commands (
     FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_cmds_run       ON engine_commands(run_id);
-CREATE INDEX IF NOT EXISTS idx_cmds_processed ON engine_commands(processed);
-CREATE INDEX IF NOT EXISTS idx_cmds_created   ON engine_commands(created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_evts_run       ON engine_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_evts_processed ON engine_events(processed);
+CREATE INDEX IF NOT EXISTS idx_evts_created   ON engine_events(created_at_ms);
