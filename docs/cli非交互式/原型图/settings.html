@@ -135,7 +135,7 @@
         <div class="cfg-note" id="cfgNote" style="display:none"></div>
         <div class="foot-actions">
           <button class="btn btn-primary" onclick="save()">保存</button>
-          <span class="save-tip" id="saveTip">✓ 已保存（部分配置需重启生效）</span>
+          <span class="save-tip" id="saveTip">✓ 已保存（配置即时生效；Worker 池大小于重启后生效）</span>
         </div>
         <div class="src-info" id="srcInfo"></div>
       </div>
@@ -148,7 +148,7 @@
 // ============ 配置界面展示元数据 ============
 // 配置值唯一来源 = mockFetch('/api/settings') 返回的 SETTINGS（定义于 mock-data.js，与 crud-06 3.3 结构体一致）；
 // GROUPS 仅承载展示元数据（label / desc / unit / type / mode / max / options），不包含任何配置值（界面不硬编码配置）
-// mode: dyn=即时生效  restart=重启后生效  ro=只读
+// mode: dyn=即时生效  ro=只读（当前无 restart 项；Worker 池大小重启生效仅在 job_queue_running_max 的 desc 注明）
 var SETTINGS = null;   // 由 mockFetch('/api/settings') 填充
 const GROUPS = [
   { id:'general', name:'通用', icon:'🛠', desc:'系统级基础配置，db_path / workspace_root 由 runDir（-c 运行目录）推导，只读展示', note:null,
@@ -156,8 +156,8 @@ const GROUPS = [
       {key:'poll_interval_ms', label:'前端轮询建议间隔', unit:'ms', type:'num', mode:'dyn', desc:'前端轮询后端状态的建议间隔。'},
       {key:'db_path', label:'数据库文件路径', type:'text', mode:'ro', desc:'SQLite 文件，由 runDir（-c）推导，不可修改。'},
       {key:'workspace_root', label:'默认工作区根目录', type:'text', mode:'ro', desc:'由 runDir（-c）推导，不可修改。'},
-      {key:'config_version', label:'配置版本', type:'text', mode:'ro', desc:'当前 ai-automation.json 的结构版本。'},
-      {key:'db_version', label:'数据库结构版本', type:'text', mode:'ro', desc:'当前 data.db 的结构版本。'}
+      {key:'config_version', label:'配置版本', type:'text', mode:'ro', desc:'当前 ai-automation.json 的结构版本。'}
+      // db_version（DB 结构版本）：接口附加返回，但**界面不展示**（D3 拍板）
     ]},
   { id:'client', name:'Client', icon:'🧩', desc:'CLI 客户端适配配置', note:null,
     items:[
@@ -172,22 +172,20 @@ const GROUPS = [
       {key:'workflow_max_nodes', label:'单流程最大节点数', type:'num', mode:'dyn', desc:'单个 Workflow 允许的最大节点数（start/op/end）。'},
       {key:'workflow_auto_layout', label:'导入自动排布', type:'bool', mode:'dyn', desc:'导入 ZIP 缺坐标时，后端自动排布节点。'}
     ]},
-  { id:'job', name:'Job', icon:'⏰', desc:'执行载体配置', note:'Job 不设自动重试：任务失败即失败，需人工重跑或在 Workflow 中配置节点重试。队列深度相关配置见「运行历史」。',
-    items:[]},
-  { id:'history', name:'运行历史', icon:'📜', desc:'运行记录保存策略与队列深度', note:null,
+  { id:'history', name:'运行历史', icon:'📜', desc:'运行记录保存策略与队列深度', note:'Job 不设自动重试：任务失败即失败，需人工重跑或在 Workflow 中配置节点重试。',
     items:[
-      {key:'job_queue_waiting_max', label:'等待中队列深度上限', type:'num', mode:'dyn', max:20, desc:'全局 waiting 状态 Job Run 数量上限（最大 20），达到后拒绝新建。'},
-      {key:'job_queue_running_max', label:'运行中队列深度上限', type:'num', mode:'restart', max:10, desc:'全局 running 状态 Job Run 数量上限（最大 10）；Worker 池大小由此派生，池大小重启后生效。'},
+      {key:'job_queue_waiting_max', label:'等待中队列深度上限', type:'num', mode:'dyn', max:1000, desc:'全局 waiting 状态 Job Run 数量上限（默认 20，可调，上限 1000）；达到后拒绝新建运行任务。'},
+      {key:'job_queue_running_max', label:'运行中队列深度上限', type:'num', mode:'dyn', max:10, desc:'全局 running 状态 Job Run 数量上限（默认 10，最大 10）；限制即时生效，仅派生的 Worker 池大小重启后生效（🔄）。'},
       {key:'history_max_per_job', label:'单 Job 最大保留历史', type:'num', mode:'dyn', desc:'每个 Job 最多保留的历史运行记录条数。'},
       {key:'history_max_total', label:'整体最大保留历史', type:'num', mode:'dyn', desc:'全部 Job 累计最多保留的历史记录总条数。'},
-      {key:'history_max_age_days', label:'单条记录最大保存时长', unit:'天', type:'num', mode:'dyn', desc:'单条运行记录最长保存天数（半年 ≈ 183 天），超期自动清理。'}
+      {key:'history_max_age_days', label:'单条记录最大保存时长', unit:'天', type:'num', mode:'dyn', max:180, desc:'单条运行记录最长保存天数（半年 = 180 天，硬上限 180），超期自动清理。'}
     ]},
   { id:'engine', name:'Engine', icon:'🧠', desc:'编排控制配置（超时只来自 OP，Engine 不设步骤超时）', note:null,
     items:[
       {key:'max_loop_multiplier', label:'循环执行总次数上限', type:'num', mode:'dyn', desc:'循环节点执行总次数上限；0=不限制（按 max×3），否则与 max×3 取较小值。'},
       {key:'engine_event_retention_days', label:'失败事件保留时长', unit:'天', type:'num', mode:'dyn', desc:'失败调度事件保留 1 天后软删除、2 天后物理删除。'}
     ]},
-  { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；与 Task Runner 并发阈值 job_queue_running_max 无关）', note:'Worker 均忙（无空闲 Worker）时派发返回失败，由上游重试派发直到成功；重试期间 JobRun 保持「等待中」，成功派发后才转「运行中」。不做本地滞留队列。',
+  { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；非同一并发限制——一个 JobRun 可并行多 step）', note:'任务排队一律入 DB（step_records waiting）：入队（派发）总是成功，池满（无空闲 Worker）不报错，任务留在 waiting 等调度线程指派；排队中（waiting）的 OP 可直接取消，running 的 OP 不可外部取消（仅等其自然结束或自身超时）。不做本地滞留队列。',
     items:[
       {key:'worker_pool_size', label:'Worker 池大小', type:'text', mode:'ro', desc:'= ceil(job_queue_running_max × 1.5)（示例：running_max=10 → 15），不按 CPU 核数；随 running_max 联动派生。'},
       {key:'worker_max_concurrency', label:'并发执行上限', type:'text', mode:'ro', desc:'= worker_pool_size；单个 Worker 内仅一个工作线程。'}
@@ -212,7 +210,7 @@ let current = 'general';
 
 function badgeHtml(m){
   if(m==='dyn') return '<span class="cfg-badge badge-dyn">即时生效</span>';
-  if(m==='restart') return '<span class="cfg-badge badge-restart">🔄 重启后生效</span>';
+  if(m==='restart') return '<span class="cfg-badge badge-restart">🔄 重启后生效</span>';   // 预留分支：当前无 restart 项
   return '<span class="cfg-badge badge-ro">只读</span>';
 }
 function controlHtml(it, val){
@@ -235,7 +233,7 @@ function renderNav(){
   document.querySelectorAll('.cfg-nav-item').forEach(b=>b.onclick=()=>{current=b.dataset.id;render();});
 }
 function render(){
-  const RD = (SETTINGS && SETTINGS.runDir) ? SETTINGS.runDir : 'C:\\Users\\alice\\.ai-automation';   // 后端返回的已是展开后的绝对路径，前端直接拼接即可
+  const RD = (SETTINGS && SETTINGS.runDir) ? SETTINGS.runDir : 'C:\\Users\\alice\\.ai-automation';   // 后端返回的已是展开后的绝对路径：直接展示；此处拼接仅用于底部信息条的展示用途（前端不自行拼可执行路径）
   document.getElementById('srcInfo').innerHTML =
     '配置文件：<code>' + RD + '/ai-automation.json</code> · DB：<code>' + RD + '/data/data.db</code> · 日志：<code>' + RD + '/logs/</code>';
   const g = GROUPS.find(x=>x.id===current);
@@ -267,7 +265,8 @@ function save(){
   setTimeout(()=>document.getElementById('saveTip').classList.remove('show'), 2400);
 }
 function resetAll(){
-  if(confirm('恢复全部配置为默认值？')) { render(); save(); }
+  // 调用恢复默认接口：POST /api/settings/reset（crud-06 3.4），将 JSON 重置为默认值并写回；返回更新后配置驱动重渲染
+  if(confirm('恢复全部配置为默认值？')) { mockFetch('/api/settings/reset', {method:'POST'}).then(renderSettings); }
 }
 // 调用接口获取配置（与其他页面一致：mockFetch('/api/xxx').then(渲染函数)）
 function renderSettings(s){

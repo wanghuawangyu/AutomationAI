@@ -135,23 +135,22 @@
 
 **入口**：左侧菜单栏左下角「⚙️ 设置」按钮（5 个页面均含），点击进入 `settings.html`。
 
-**配置界面**：左侧为分组导航，右侧为对应分组的配置表单。配置存储于运行目录 `ai-automation.json`（唯一事实来源），界面展示即 JSON 内容，修改保存后后端**实时写回 JSON 文件**。界面上的目录类只读项（`db_path` / `workspace_root` 等）由 `GET /api/settings` 返回的 `runDir`（当前配置目录，`-c` 指定、未指定默认 `~/.ai-automation`）**拼接为具体路径**展示，不显示 `{run}` 占位符（见 crud-06 3.3）。
+**配置界面**：左侧为分组导航，右侧为对应分组的配置表单。可配置项存储于运行目录 `ai-automation.json`（唯一事实来源），界面展示的可配置项即 JSON 内容，修改保存后后端**实时写回 JSON 文件**；派生只读项（`worker_pool_size` / `worker_max_concurrency`）与 `db_version` 由 `GET /api/settings` 附加返回（`db_version` 界面不展示）。界面上的目录类只读项（`db_path` / `workspace_root`）由**后端**按 `runDir`（当前配置目录，`-c` 指定、未指定默认 `~/.ai-automation`）**拼接为具体绝对路径后下发**，前端直接展示、**不自行拼接**（见 crud-06 3.3）。
 
 | 分组 | 配置项要点 |
 |-|-|
-| 通用 | 前端轮询间隔（可改）；db_path / workspace_root / 版本（只读） |
+| 通用 | 前端轮询间隔（可改）；db_path / workspace_root / config_version（只读；**config_version 为 `ai-automation.json` 结构版本；`db_version` 不在界面展示**） |
 | Client | client_import_max_bytes（YAML 导入上限） |
 | OP | op_import_max_bytes（YAML 导入上限） |
 | Workflow | 最大节点数、导入自动排布 |
-| Job | 暂无独立配置项 |
-| 运行历史 | waiting/running 队列深度上限、单 Job/整体/单条保存时长 |
+| 运行历史 | waiting/running 队列深度上限（waiting 默认 20、可调、上限 1000）、单 Job/整体/单条保存时长（单条硬上限 180 天）；**Job 无独立配置项、不设自动重试**（失败即失败，人工重跑或 Workflow 节点 retry） |
 | Engine | 循环次数上限、失败事件保留 |
-| Worker | 池大小 / 并发上限（只读派生） |
+| Worker | 池大小 / 并发执行上限（只读派生，= `ceil(job_queue_running_max × 1.5)`，与 Runner 并发阈值无关） |
 | Task Runner | 轮询间隔、调度批数 |
 | Scheduler | 定时任务上限（时区固定 Local） |
 | 日志 | 日志级别（动态）、最大绕接 zip 文件数 |
 
-**标识规则**：动态配置标「即时生效」；需重启的标「🔄 重启后生效」；只读配置不可编辑。
+**标识规则**：动态配置标「即时生效」（当前**所有可配置项均为动态**）；只读配置不可编辑。「🔄 重启后生效」不作独立徽标，仅用于 `job_queue_running_max` 派生的 **Worker 池大小**（下次启动重新初始化），在该项 desc 注明。
 
 ---
 
@@ -2128,6 +2127,8 @@ Job.needsUpdate（target 为 Workflow）=
 | Job | ❌ |
 
 ### 14.2 超时的执行语义
+
+> **计时起点（D1 拍板）**：`timeout` **自该 OP 的子进程实际启动（spawn）起算**（`waiting → running` 置位仅表示已指派，spawn 前准备期不计入）；**在 `step_records` waiting 排队（等空闲 Worker / 重试退避）的时长不计入**，不会因排队而误判超时（见 crud-01 5.1 / crud-03 4.4）。
 
 ```text
 Workflow deploy_workflow

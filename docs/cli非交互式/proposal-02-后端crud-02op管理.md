@@ -267,7 +267,7 @@
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | clientId/workspace 缺失、inputs 含未定义参数、id 非法 |
 | 404 | `OP_NOT_FOUND` / `CLIENT_NOT_FOUND` | OP 或 Client 不存在 |
-| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、上限 20）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
 
 ---
 

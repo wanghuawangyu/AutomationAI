@@ -303,7 +303,7 @@
 | `queue` | **允许创建 waiting 排队**（同 Job 可多个 waiting）；**全局 waiting 队列深度上限**（下注）达限 → 409 `CONCURRENCY_CONFLICT` | 所有 waiting 均落在 **`job_runs` 全局队列**（非 Job 私有队列），由 Task Runner 按 created_at FIFO 与全局并发配额调度；同 Job 多实例按入库顺序逐个执行 |
 | `parallel` | **允许创建 waiting**，**Job 内无上限** | 并行度仅受 Task Runner **全局并发配额**约束；同 Job 可多实例同时运行 |
 
-> **`job_queue_waiting_max` 的语义（#4）**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ settings `job_queue_waiting_max`（**默认 20，上限 20**）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running')`）。
+> **`job_queue_waiting_max` 的语义（#4）**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ settings `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running')`）。
 >
 > **适用范围（#3，全入口生效）**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
 
@@ -521,7 +521,7 @@ cron 到点 (jobId):
   ├─ 2. 并发占用检查（统计该 Job 的 job_runs 中 status ∈ {waiting, running} 的实例）:
   │        - **只要存在任一 waiting / running 实例 → 本次 cron 不触发（跳过），不 queue、不 parallel**
   │        - 仅当无 waiting / running 实例时，才继续创建 JobRun
-  │        - **全局 waiting 上限（job_queue_waiting_max，#3）**：`count(*) FROM job_runs WHERE status='waiting'`（全局）≥ job_queue_waiting_max（默认 20）→ 本次 cron **跳过不触发**（不报 409、不排队；下个 cron 周期重试）
+  │        - **全局 waiting 上限（job_queue_waiting_max，#3）**：`count(*) FROM job_runs WHERE status='waiting'`（全局）≥ job_queue_waiting_max（默认 20、可调、上限 1000）→ 本次 cron **跳过不触发**（不报 409、不排队；下个 cron 周期重试）
   │        - **步骤 2-3 在同一事务（`BEGIN IMMEDIATE`）内**：先查后插，保证与手动运行 / 并发 cron 的『检查-创建』原子（#1）
   ├─ 3. 创建 JobRun: triggered_by=schedule、status=waiting、快照 target/target_version/inputs/workspace（含名称快照 name/target_name）
   └─ 4. TaskRunner.add_job(req) → 投递即返回（不阻塞调度线程）；执行由后台完成

@@ -624,7 +624,7 @@ var SETTINGS = {
     job_queue_running_max: '10',
     history_max_per_job: '10',
     history_max_total: '1000',
-    history_max_age_days: '183'
+    history_max_age_days: '180'
   },
   engine: { max_loop_multiplier: '0', engine_event_retention_days: '1' },
   worker: { worker_pool_size: '', worker_max_concurrency: '' },   // 派生只读，稍后按 job_queue_running_max 计算（见下）

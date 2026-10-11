@@ -303,7 +303,7 @@
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | runId 格式非法 |
 | 409 | `RERUN_NOT_ALLOWED` | Run **未结束**：处于 waiting / running / **terminating**（三者均非终态，不可重跑） |
-| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、上限 20）上限（新建 JobRun 前统一检查，见 crud-04 3.4.6 #3） |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（新建 JobRun 前统一检查，见 crud-04 3.4.6 #3） |
 | 404 | `RUN_NOT_FOUND` / `TARGET_NOT_FOUND` | runId 不存在 / 目标（op / workflow）已删除 |
 
 > **原子性（#4）**：检查（终态 + 全局 waiting 上限）与创建 JobRun 在**同一事务（`BEGIN IMMEDIATE`）**内先查后插，语义同 crud-04 3.4.6。
@@ -334,7 +334,7 @@
 |-|-|-|
 | 404 | `RUN_NOT_FOUND` | runId 不存在 |
 | 409 | `RETRY_NOT_ALLOWED` | 不满足前提（如版本不一致/needsUpdate/无失败或超时 step） |
-| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、上限 20）上限（统一检查，见 crud-04 3.4.6 #3） |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（统一检查，见 crud-04 3.4.6 #3） |
 
 ---
 
@@ -420,13 +420,13 @@
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
 | **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（waiting / running / terminating / 终态）、并发控制、按序调度分派 | — |
 | **Engine** | crud-03 第 4.3 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即事件：EngineStart / Terminate 先写 engine_events 落库，**写后立即 `process_event` 同步处理**（无事件循环 / 无信号）**，按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 WorkerPool 并行（互不嵌套） |
-| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）只在 step_records 插入 waiting 记录（含 activation_seq / retry_seq）即返回；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，与 Runner 并发阈值无关**）→ 执行 Executor → 更新 step_records 终态+结果）；**无空闲 Worker 时派发返回 Err，由上游（Runner / Engine）重试派发**（crud-06 4）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
+| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在 step_records 插入 waiting 记录（含 activation_seq / retry_seq）即返回（**池满不报错**）；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，与 Runner 并发阈值无关**）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
 
 > Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
 **并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，只读派生）**是两个独立概念**，见 crud-06 一）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：`running_count.load() < job_queue_running_max` 时扫描 DB 中 `waiting` 任务并触发运行、计数自增（`fetch_add(1)`）；达到上限则暂停调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，轮询即获得调度机会。
 
-> **waiting → running 的前提**：需**成功派发**（单次 OP 直派 Worker；Job / Workflow 派发 Engine 并成功派发首个 OP）后才置 running；**派发失败（无空闲 Worker）时保持 waiting，由 Runner / Engine 重试派发**（见 crud-06 4）。
+> **waiting → running 的前提（D1 定稿）**：需**入队成功**（单次 OP 入 step_records waiting；Job / Workflow 完成 engine_start 处理并成功写入首个 dispatch_step）后才置 running；**池满不影响入队**（无空闲 Worker 时任务就留在 step_records waiting，由调度线程稍后指派），**不存在“派发失败由上游重试”**。
 
 **入口接口（Task Runner API）**：
 
@@ -518,7 +518,7 @@ running(运行中) ──[提交终止且无在跑 OP]──> cancelled（直接
 
 ```text
 add_op / add_job / add_workflow(req)
-  ├─ 1. **全局 waiting 上限检查（crud-04 3.4.6 #3）**：`count(*) FROM job_runs WHERE status='waiting'` ≥ settings `job_queue_waiting_max`（默认 20）→ 直接返回 `Err(TaskError::QueueFull)`（不插记录）；API 层映射为 409 `CONCURRENCY_CONFLICT`
+  ├─ 1. **全局 waiting 上限检查（crud-04 3.4.6 #3）**：`count(*) FROM job_runs WHERE status='waiting'` ≥ settings `job_queue_waiting_max`（默认 20、可调、上限 1000）→ 直接返回 `Err(TaskError::QueueFull)`（不插记录）；API 层映射为 409 `CONCURRENCY_CONFLICT`
   ├─ 2. 创建运行历史（JobRun）：kind/triggeredBy 按入口确定，状态 waiting(等待中)，
   │      name 按来源写入（add_op → op.name；add_workflow → workflow.name；add_job → jobs.name），
   │      **检查与插入在同一事务（`BEGIN IMMEDIATE`）内**（先查后插，防与 cron / 手动 / rerun / retry 并发击穿）；
@@ -526,7 +526,7 @@ add_op / add_job / add_workflow(req)
   ├─ 3. 投递后台调度线程，接口即结束，返回 {runId}
   │     后台调度线程（按入库顺序）:
   │       ├─ 检查并发：running_count.load() < job_queue_running_max（阈值）？否则保持 waiting 等待
-  │       ├─ ① 取出任务：**先成功派发**（单次 OP 直派 Worker；Job / Workflow 通知 Engine 并成功派发首个 OP）→ 运行历史状态 waiting → running（本线程完成）→ running_count.fetch_add(1)；**派发失败（无空闲 Worker）→ 保持 waiting，下一轮重试派发（不占并发名额）**
+  │       ├─ ① 取出任务：**先成功入队**（单次 OP 写 step_records waiting；Job / Workflow 写入首个 dispatch_step 并入队首个 OP）→ 运行历史状态 waiting → running（本线程完成）→ running_count.fetch_add(1)；**入队失败（DB 错误）即使任务重试（T26）；池满不算失败**（OP 在 step_records 排队等 Worker）
   │       ├─ 按任务类型分派（Task Runner 不亲自执行 OP，直接以入口函数调用）:
   │       │     ├─ 单次 OP（add_op）:
   │       │     │     内部按 client_id/op_id 查询实例 → 组装 ExecuteRequest
@@ -547,6 +547,7 @@ add_op / add_job / add_workflow(req)
 **同步 vs 异步**：
 - **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `waiting(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP 直接调 `worker.run_job(req)` / Job·Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})`（均为实例方法 &self、异步入口、不阻塞；EngineStart 作为 engine_start 事件写入 engine_events 落库，重启不丢）**；`run_job` / `run_step` 只插 step_records(waiting) 即返回（任务入 DB 排队，重启不丢），返回 `WorkerHandle`（定义见 crud-03 4.4），**仅**用于该 OP 自身 `timeoutMs` 到期时按进程组终止；**用户终止不使用 `WorkerHandle.abort`**（终止 = 停止派发 + 等待在跑 OP 自然收敛，见 4.7 与 crud-03 4.4）），由 Runner 常驻轮询扫描 DB 驱动调度、自动刷新界面状态。
 - **client test**：**同步例外**——不投递 Task Runner、不入队，直接同步调 `Executor::execute` 实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
+- **OP 超时计时起点**：`op.timeoutMs` **自子进程实际启动（spawn）起算**（`waiting → running` 置位仅表示已指派），池满排队时长与 spawn 前准备期**不计入**（详见 crud-01 5.1 步骤 7、crud-03 4.4）。
 
 ---
 ### 4.7 终止
@@ -557,7 +558,7 @@ POST /api/runs/{runId}/terminate
   ├─ 前置校验：target=OP 且该 OP 步骤已 running → 409 RUN_NOT_TERMINABLE（OP 开始后不可终止）
   ├─ engine.notify(Terminate{run_id, reason}) → 写 terminate 事件 → process_event(terminate):
   │     ├─ **不 kill 正在运行的 OP**（OP 最小执行单位，运行中不可外部终止）
-  │     ├─ 置终止意图：停止派发新步骤；仍在 waiting 的步骤置 cancelled（条件更新）
+  │     ├─ 置终止意图：停止派发新步骤；**仍在 waiting（含 DB 排队中待指派）的 step 直接置 cancelled**（条件更新；排队中的 OP 未开始执行，可直接取消）
   │     ├─ **若存在在跑 OP → job_run.status = terminating（等待终止，界面显示"终止中"）**（落库）
   │     └─ **等所有在跑 OP 自然收敛后** → 标记 job_run.status = cancelled + finished_at_ms（落库）
   └─ 之后到达的 step_completed（在跑 OP 完成）→ run 已有终止意图 → 不再派发后继 → 收敛后落终态

@@ -480,7 +480,7 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq
   │     - 创建独立进程组 (process_group=0 / setsid): 子进程成为新进程组 leader
   │       → 该组包含 run.xxx 及其派生的 main.xxx / 外部 CLI 整棵进程树
   │
-  ├─ 7. 超时控制 (op.timeoutMs): 超时则按进程组查杀整棵进程树, timedOut=true
+  ├─ 7. 超时控制 (op.timeoutMs): **计时起点 = 子进程实际启动（spawn）**；`waiting → running` 置位仅表示已指派、仍属准备期（Worker 从队列取出、组装 ExecuteRequest、spawn 子进程），**spawn 前的准备期与等待池空闲的排队时长（step_records=waiting）均不计入** timeoutMs。超时则按进程组查杀整棵进程树, timedOut=true
   │
   ├─ 8. 子进程结束后, 主进程回收结果:
   │     - 脚本类: 读子进程 stdout → 取以 "OUTPUT_ARGS:" 开头的行, 反 base64 → outputs (见 5.4)

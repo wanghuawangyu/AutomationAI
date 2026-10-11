@@ -334,7 +334,7 @@
 | 400 | `VALIDATION_ERROR` | workspace 缺失、inputs 含未定义参数 |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NEEDS_UPDATE` | needsUpdate=true，需更新后才能执行 |
-| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、上限 20）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
 
 ---
 
@@ -623,7 +623,7 @@ edge_state ∈ { pending, activated, dropped }
   1b. **终止 / 失败的停派发约束（Z）**：`run_terminate_requested` / `run_failed` 置位后，in-flight 完成的 `step_completed` **一律跳过 `pending_reentry` 消费与决策链 ②③（不重入、不重试、不 dispatch）**，仅做收敛判定；**并清空 `pending_reentry`（不再回跳重入，BB4）**。
   2. **终态优先级（Z3）**：`run_terminate_requested`（cancelled / timeout）**优先于** `run_failed`（failed）；两者均置时落 cancelled / timeout。
   → 因此「并行分支 A 失败且无失败出边、B 成功到 End」→ 整体 **failed**（等其余在飞跑完再落终态）；若 A 的失败被 `on_failure`/`always` 边接住，则不置 failed、按该边继续。
-  ※ **OP 是最小执行单位：运行中一律不 kill**——无论失败传播、用户终止还是超时（唯一 kill = 该 OP 自身 `timeoutMs` 到期，Executor 内部按进程组处理）。终止 / 超时均只「停止派发 + 取消 waiting + 等在跑 OP 收敛」。
+  ※ **OP 是最小执行单位：运行中一律不 kill**——无论失败传播、用户终止还是超时（唯一 kill = 该 OP 自身 `timeoutMs` 到期，**自子进程实际启动（spawn）起算，排队与准备时长不计入**；Executor 内部按进程组处理）。终止 / 超时均只「停止派发 + 取消 waiting + 等在跑 OP 收敛」。
 
 **③ 回跳边（back edge）**
 
@@ -674,7 +674,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
   │     → **② 到达 / 收敛**：无在飞（**以 `step_records` 实际状态为准：无 running/waiting**；`inflight_count` 仅 O(1) 快速通道）且无挂起候选（**pending_reentry + 正常推进下已评估未就绪节点；终止/失败置位后不再计未决定入边**，AA7）时判终态——**先看终止意图：若已置 `run_terminate_requested` → 落 cancelled / timeout（终止优先，Z3）**；否则 `run_failed=true` → workflow_done(failed)；否则 End 所有入边决定 + ≥1 activated → workflow_done(success)；End 未 activated → workflow_done(failed)。`run_terminate_requested` 置位后不再 dispatch 后继，仅等在跑 OP 收敛
   ├─ dispatch_step{pending?}
   │     → 若 `pending=true`（回跳挂起登记）：**不参与查重、不 run_step**（payload **不含四元组**，登记时 N 下一 activation 未定）；仅登记 `RunContext.pending_reentry[node]`；**重建时恒登记（布尔标记，重复登记无害）**（T13）
-  │     → 否则（pending=false）：**先按 (run_id, step_id, activation_seq, retry_seq) 查重 step_records：已存在任何状态（含 waiting/running）的记录 → 跳过（仅置 processed=1）**——防重放重复入队（S8）；否则 worker.run_step（见 4.4）→ 完成后经 StepComplete 钩子写 step_completed 并立即 process_event；**若 run_step 返回 Err（无空闲 Worker，派发失败）→ 本事件不置 processed=1，保持可重放；Engine 下轮重试派发直到成功（否则 DAG 链断）；重试期间 Run 被 terminate → 该节点直接置 cancelled、不再派发**（P3）
+  │     → 否则（pending=false）：**先按 (run_id, step_id, activation_seq, retry_seq) 查重 step_records：已存在任何状态（含 waiting/running）的记录 → 跳过（仅置 processed=1）**——防重放重复入队（S8）；否则 worker.run_step（见 4.4，**总是入 DB 排队、不因池满报错**）→ 完成后经 StepComplete 钩子写 step_completed 并立即 process_event
   ├─ workflow_done{run, status}
   │     → 调用全局 JobComplete（更新 job_runs 终态，落库）:
   │           → 更新 job_run 终态 (success / failed) + duration_ms（落库），刷新界面
@@ -696,8 +696,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
   ④ 否则 → walk_edge
 异常路径:
   ├─ timeout: status=timeout
-  ├─ user terminate: 置终止意图 + waiting→cancelled + job_run→terminating，等在跑 OP 收敛 → status=cancelled；**重试派发中的节点同步置 cancelled（不再派发）**
-  ├─ 派发失败（无空闲 Worker）: 本事件保持 processed=0，下轮重试派发（不视为终态；重试前先查 terminate 意图，已终止 → 节点置 cancelled）
+  ├─ user terminate: 置终止意图 + **waiting 中（排队中）的 step 直接置 cancelled** + job_run→terminating，等在跑 OP 收敛 → status=cancelled
   └─ 节点失败且无失败边可达 End: failed（**V11-B：任一 op failed 且无任何 activated 出边 → 立即整体 failed，不等其它分支**）
 更新 job_run 终态 + duration_ms, 刷新界面状态
 ※ 处理中产生的后续事件（apply_retry / walk_edge / dispatch_step / workflow_done）在同一调用栈内
@@ -740,7 +739,7 @@ Task Runner 调度线程（生产者）:
         └─ engine.notify(EngineStart{run_id, workflow_id, inputs, workspace})   # 实例方法 &self
               ├─ 1. INSERT engine_events(event_type=engine_start, run_id, payload={inputs, workspace}, processed=0)   # 先落库（基础 payload；定义快照由 process_event 处理时 UPDATE 进 payload，同事务）
               ├─ 2. 立即 process_event(engine_start)（同步，当前线程）
-              │       → 找第一个就绪节点 → 写 dispatch_step → worker.run_step → 触发首个 OP 执行（**run_step 返回 Err（无空闲 Worker）时不置 processed=1、下轮重试派发**）
+              │       → 找第一个就绪节点 → 写 dispatch_step → worker.run_step（**总是入 DB 排队**）→ 首个 OP 进入 step_records waiting，由 WorkerPool 调度线程指派空闲 Worker
               │       （若只落库不处理，engine_start 无人消费、调度不起来——所以必须写后立即处理）
               ├─ 3. 处理完成 → 返回（Result::Ok）→ Runner 继续调度下一个任务
               └─ 写库失败（Result::Err）→ Runner 将该 job_run 置 failed（或回滚 waiting），不静默丢失
@@ -1055,7 +1054,7 @@ for 每条 activated 边的目标节点 N:
 ### 4.4 WorkerPool 机制（执行层：数据库排队 + Worker 池）
 
 **职责**：
-- 接收 Runner / Engine 派发的任务（`worker.run_job(req)` / `worker.run_step(req, inst)` 插 step_records waiting（含 activation_seq / retry_seq），由 Worker 池执行）
+- 接收 Runner / Engine 派发的任务（`worker.run_job(req)` / `worker.run_step(req, inst)` 插 step_records waiting（含 activation_seq / retry_seq），由 Worker 池执行；**总是入队成功，池满不报错**）
 - 绑定 Client，生成包装脚本（bash / python / powershell / prompt），以指定 workspace 启动子进程（Executor，机制见 crud-01 5.1）
 - 捕获 stdout / stderr / exit_code；超时按进程组 kill
 - 把结果写回 step_records（终态 + outputs / raw_output / exit_code / error / duration_ms），按 source 同步调全局完成实现
@@ -1065,15 +1064,16 @@ for 每条 activated 边的目标节点 N:
 
 WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线程、执行在 Worker 池、钩子同步**：
 
-- **入口入队（不执行）**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）只在
+- **入口入队（不执行，总是入队）**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在
   **step_records 插入一条 status=waiting 记录**（run_id / step_id / activation_seq / retry_seq / op 快照 / client_id / inputs /
-  workspace / timeout_ms / source=job|step / not_before_ms）后立即返回——**任务本体入 DB，App 重启不丢失**；
-  调用方（Runner 调度线程 / Engine.process_event 调用方）不被阻塞；
-- **派发失败（无空闲 Worker，P3）**：池内**无空闲 Worker** 时，入口返回 `Err(NoIdleWorker)`（**不落 waiting 记录、不滞留**）；**上游必须重试派发直到成功**——Runner（单次 OP）保持 JobRun = `waiting` 下轮重试；Engine（step）**不置 `dispatch_step.processed=1`**、下轮重试（否则 DAG 链断）。**重试期间 Run 被终止/取消 → 该未派发成功的节点直接置 `cancelled`，不再派发**（见 crud-06 4）。
-- **成功派发的判定**：JobRun 仅在**某个 OP 成功派发之后**才 `waiting → running`（界面「等待中」→「运行中」）。
+  workspace / timeout_ms / source=job|step / not_before_ms）后立即返回——**任务本体入 DB 排队，App 重启不丢失、不占内存**；
+  调用方（Runner 调度线程 / Engine.process_event 调用方）不被阻塞。**池满不需上游重试**：无空闲 Worker 时任务就留在 waiting，由调度线程稍后指派。
+- **术语澄清（U1/D2）**：本章“**派发**”= **入 DB 排队**（同步写 step_records，除 DB 写错误外必成功，不涉及 Worker 忙闲）；与“**执行失败**”（OP 返回非 0 / 超时 → `apply_retry` / 走边）、“**DB 错误**”（返回 Err → T26 重放）是**三件不同的事**。
+- **成功入队的判定**：JobRun 在**入队成功之后**才 `waiting → running`（界面「等待中」→「运行中」）。
 - **调度（WorkerPool 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序；**跳过 `not_before_ms` 未到点者**，即重试退避尚未到期；**并跳过所属 run 已终态的 waiting 任务**），
   查询 Worker 忙闲（busy 标志），发现空闲即**指派**（push 到该 Worker 的小队列）：**置 running 用 CAS —— `UPDATE step_records SET status='running' WHERE record_id=? AND status='waiting'`**；`affected=0` 表示已被 terminate 置 `cancelled`（或已被处理），**跳过不执行**——消除与 terminate 的竞态（P4）；
 - **执行（Worker 池）**：池大小 = **`ceil(job_queue_running_max × 1.5)`**（`worker_pool_size`，只读派生；**与 Task Runner 并发阈值 `job_queue_running_max` 是两个独立概念**，见 crud-06 一）；
+  自子进程 spawn（waiting → running 之后的实际执行起点）始计 `op.timeoutMs`（排队时长与 spawn 前准备期不计入，见 crud-01 5.1）；
   每个 Worker 一个**常驻执行循环 + 小队列**（WorkerPool 经小队列触发执行），**数量固定、运行期不新增**，
   内存有上界；收任务 → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
   （outputs / raw_output / exit_code / error / duration_ms）→ 按 source 同步调全局完成实现：
@@ -1086,8 +1086,17 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
               → 立即调全局 ENGINE.process_event 同步推进（写即处理）: 标记步骤结束 → walk_edge → 派发下一节点 → 直至 End
 - **崩溃恢复（启动时）**：WorkerPool 初始化时扫描 step_records 中 **status=running** 的任务（上次中断残留），
   重新指派给空闲 Worker **重新执行**（复用 record_id，完成后覆盖终态与结果）；
+- **排队中（waiting）的 OP 可直接 cancel（D1 拍板）**：位于 `step_records` 中 status=waiting 的任务，terminate 时**直接置 `cancelled`**（不再指派执行），无需等它跑；**仅 running 的 OP 不可外部 cancel**（OP 为最小原子执行单位，唯一 kill = 其自身 `timeoutMs` 到期，见 4.4）。此规则对 **Job 与 Workflow 执行一致生效**。
 - **并发边界**：同时执行任务数 ≤ Worker 池大小（`ceil(job_queue_running_max × 1.5)`）；Runner 的并发配额（job_runs
   running 计数 ≤ `job_queue_running_max`）保证"Job 级并发"，WorkerPool 保证"执行体并发"，DB 排队天然有界（不占内存）。
+
+**入队 / 调度机制（D1 定稿：DB 排队，无内存滞留）**：
+
+- **池满 = 任务留在 DB 排队**：`run_job` / `run_step` **总是**写 waiting 记录并返回，**不因“无空闲 Worker”而报错**；WorkerPool 调度线程扫到 waiting 且发现空闲 Worker 时才指派（`waiting → running` CAS）。重启后 waiting 任务继续调度、running 任务重跑，**不丢任务**。
+- **为何“执行体并发”（15）> “Job 级并发”（10）（U1）**：两者是**不同维度**的限制——一个 JobRun 内可**多个 step 并行**（如并行分支），故 Worker 池按 JobRun 上界的 1.5 倍预留；否则池太小会让大量 step 长时间停在 waiting，拖慢调度。
+- **超时计时起点（D1 拍板）**：`op.timeoutMs` 自**子进程实际启动（spawn）**起算（`waiting → running` 置位仅表示已指派，spawn 前的准备期**不计入**），**排队时长不计入**——step 在 `step_records` waiting（等池空或重试退避 `not_before_ms`）期间**不会超时**（也正是“唯一 kill = 自身 timeoutMs”指的是**已开始执行**的 OP）。
+- **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"。
+- **可 cancel 范围**：waiting（排队中）的 step **可直接置 cancelled**；running 的 step **不可外部 cancel**（仅等其自然结束或自身超时 kill）。
 
 - **为何数据库排队而非内存队列**：内存有界队列在 **App 重启时队列内容丢失**；step_records 排队把任务
   持久化在 DB，重启后可恢复（waiting 任务继续调度、running 任务重跑），不丢任务；
@@ -1129,16 +1138,14 @@ impl WorkerPool {
     pub fn new(executor: Arc<Executor>, concurrency_limit: usize) -> Self;
 
     /// 单次 OP / Job 执行（Runner 调用，**实例方法 &self**）：activation_seq=1、retry_seq=1；
-    /// **成功时只在 step_records 插入一条 status=waiting 记录（任务入 DB 排队，重启不丢）**并返回句柄；
-    /// **无空闲 Worker 时返回 Err(NoIdleWorker)**（不落记录），由 Runner 保持 JobRun=waiting 下轮重试派发；
-    /// 由调度线程指派 Worker 执行，完成后按 source=job 同步调全局 JobComplete
-    pub fn run_job(&self, req: ExecuteRequest) -> Result<WorkerHandle, DispatchError>;
+    /// **在 step_records 插入一条 status=waiting 记录（任务入 DB 排队，重启不丢；池满不报错）**，
+    /// 立即返回句柄；由调度线程指派 Worker 执行，完成后按 source=job 同步调全局 JobComplete
+    pub fn run_job(&self, req: ExecuteRequest) -> WorkerHandle;
 
     /// workflow 步骤执行（Engine 调用，**实例方法 &self**）：除 req 外携带 `inst`
     /// （activation_seq / retry_seq，由 Engine 的 dispatch_step 决定），据此写入 waiting 记录；source=step；
-    /// **无空闲 Worker 时返回 Err(NoIdleWorker)**，由 Engine 保持 dispatch_step 未处理、下轮重试派发；
     /// 完成后由 Worker 按 source=step 同步调全局 StepComplete（用 result 携带的 step_id / activation_seq / retry_seq 回报 Engine）
-    pub fn run_step(&self, req: ExecuteRequest, inst: StepInstance) -> Result<WorkerHandle, DispatchError>;
+    pub fn run_step(&self, req: ExecuteRequest, inst: StepInstance) -> WorkerHandle;
 
     /// WorkerPool 调度线程（常驻）：定期扫描 step_records 中 waiting 任务（按 created_at 顺序），
     /// 有空闲 Worker 即指派（push 到其小队列）并将任务 waiting → running（落库）
@@ -1189,7 +1196,7 @@ pub struct WorkerHandle {
 
 impl WorkerHandle {
     /// **不再提供外部运行时 kill**：OP 运行中不可被外部终止（避免中途强杀产生不可预期结果）。
-    /// 唯一按进程组 kill 的时机 = 该 OP 自身 `timeoutMs` 到期，由 Executor 内部处理。
+    /// 唯一按进程组 kill 的时机 = 该 OP 自身 `timeoutMs` 到期（**自开始执行起算，排队时长不计入**），由 Executor 内部处理。
     /// 外部「终止 Run」= 置终止意图 + 取消 waiting 步骤 + 等其在跑 OP 自然结束（见 Engine terminate）。
     pub fn abort(&self);
 
