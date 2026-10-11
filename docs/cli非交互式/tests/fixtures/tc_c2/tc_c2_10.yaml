@@ -1,0 +1,5 @@
+name: ps-restart
+type: powershell
+description: 重启服务
+binaryPath: C:\Program Files\PowerShell\7\pwsh.exe
+exitCodeSuccess: [0]

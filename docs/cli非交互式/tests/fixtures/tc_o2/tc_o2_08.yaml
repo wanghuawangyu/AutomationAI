@@ -1,0 +1,11 @@
+name: op_python_report
+version: 1
+type: python
+description: 生成报表
+content: |
+  print("report")
+timeoutMs: 300000
+inputs:
+  - {name: source, type: string, required: true, default: null, description: 数据源}
+outputs:
+  - {name: path, type: string, description: 报表路径}

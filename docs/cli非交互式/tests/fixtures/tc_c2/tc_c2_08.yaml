@@ -1,0 +1,5 @@
+name: py-report
+type: python
+description: 生成报表
+binaryPath: /usr/bin/python3
+exitCodeSuccess: [0]

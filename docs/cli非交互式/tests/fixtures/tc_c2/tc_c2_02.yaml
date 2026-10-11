@@ -1,0 +1,9 @@
+name: claude-deploy
+type: prompt
+description: 部署助手
+command: claude
+argsTemplate: "--print --output-format json"
+inputMode: stdin
+outputMode: json
+outputJsonPath: $.url
+exitCodeSuccess: [0]

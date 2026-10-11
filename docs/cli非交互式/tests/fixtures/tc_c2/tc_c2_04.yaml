@@ -1,0 +1,7 @@
+name: gemini-analyze
+type: prompt
+description: 结果分析
+command: gemini
+inputMode: stdin
+outputMode: text
+exitCodeSuccess: [0]

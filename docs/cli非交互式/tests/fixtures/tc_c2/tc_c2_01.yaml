@@ -1,0 +1,9 @@
+name: claude-review
+type: prompt
+description: 代码审查
+command: claude
+argsTemplate: "--print --output-format json"
+inputMode: stdin
+outputMode: json
+outputJsonPath: $.result
+exitCodeSuccess: [0]

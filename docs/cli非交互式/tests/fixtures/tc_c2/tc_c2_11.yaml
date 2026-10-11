@@ -1,0 +1,5 @@
+name: ps-collect
+type: powershell
+description: 采集指标
+binaryPath: C:\Program Files\PowerShell\7\pwsh.exe
+exitCodeSuccess: [0]

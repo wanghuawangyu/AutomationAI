@@ -1,0 +1,11 @@
+name: op_ps_restart
+version: 1
+type: powershell
+description: 重启服务
+content: |
+  Restart-Service $svc
+timeoutMs: 60000
+inputs:
+  - {name: svc, type: string, required: true, default: null, description: 服务名}
+outputs:
+  - {name: ok, type: string, description: 是否成功}

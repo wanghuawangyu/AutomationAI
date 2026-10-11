@@ -1,0 +1,5 @@
+name: bash-deploy
+type: bash
+description: 部署脚本
+binaryPath: /bin/bash
+exitCodeSuccess: [0]

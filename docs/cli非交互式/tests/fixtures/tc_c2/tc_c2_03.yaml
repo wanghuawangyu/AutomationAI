@@ -1,0 +1,7 @@
+name: codex-lint
+type: prompt
+description: 静态检查
+command: codex
+inputMode: stdin
+outputMode: text
+exitCodeSuccess: [0]

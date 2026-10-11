@@ -1,0 +1,5 @@
+name: py-sync
+type: python
+description: 数据同步
+binaryPath: /usr/bin/python3
+exitCodeSuccess: [0]

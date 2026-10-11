@@ -1,0 +1,10 @@
+name: op_bash_clean
+version: 1
+type: bash
+description: 清理缓存
+content: |
+  #!/usr/bin/env bash
+  rm -rf cache
+timeoutMs: 30000
+inputs: []
+outputs: []

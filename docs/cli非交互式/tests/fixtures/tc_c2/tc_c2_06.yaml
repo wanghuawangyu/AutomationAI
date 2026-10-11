@@ -1,0 +1,5 @@
+name: bash-clean
+type: bash
+description: 清理脚本
+binaryPath: /usr/bin/bash
+exitCodeSuccess: [0]

@@ -1,0 +1,5 @@
+name: bash-build
+type: bash
+description: 构建脚本
+binaryPath: /usr/bin/bash
+exitCodeSuccess: [0]

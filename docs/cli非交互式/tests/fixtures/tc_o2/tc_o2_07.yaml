@@ -1,0 +1,12 @@
+name: op_bash_deploy
+version: 1
+type: bash
+description: 部署脚本
+content: |
+  #!/usr/bin/env bash
+  bash deploy.sh
+timeoutMs: 120000
+inputs:
+  - {name: env, type: string, required: true, default: null, description: 环境}
+outputs:
+  - {name: url, type: string, description: 部署地址}
