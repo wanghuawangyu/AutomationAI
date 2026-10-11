@@ -211,7 +211,7 @@
 
 ### 3.2.5 DELETE /api/ops/{opId} —— 删除 OP
 
-**功能说明**：删除 OP。若该 OP 正被 Workflow 节点引用则返回 409 拒绝删除，避免产生悬挂引用。
+**功能说明**：删除 OP。若该 OP 正被 **Workflow 节点**或 **Job.target（`kind=op`）**引用则返回 409 拒绝删除，避免产生悬挂引用（**与 Workflow 删除对称**，crud-03 3.3.5）。
 
 **路径参数**：`opId`（32 位 UUID，必填）
 
@@ -225,7 +225,7 @@
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | opId 格式非法 |
 | 404 | `OP_NOT_FOUND` | opId 不存在 |
-| 409 | `OP_REFERENCED` | 该 OP 正被 Workflow 节点引用，删除被拒绝 |
+| 409 | `OP_REFERENCED` | 该 OP 正被 **Workflow 节点**或 **Job.target（`kind=op`）**引用，删除被拒绝 |
 
 ---
 
@@ -267,6 +267,7 @@
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | clientId/workspace 缺失、inputs 含未定义参数、id 非法 |
 | 404 | `OP_NOT_FOUND` / `CLIENT_NOT_FOUND` | OP 或 Client 不存在 |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、上限 20）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
 
 ---
 
@@ -341,7 +342,7 @@ POST /api/ops/{opId}/execute {clientId, inputs, workspace}
 
 **要点**：
 - **投递即结束**：本接口在调 `TaskRunner.add_op` 后即返回 `{runId}` 结束，**不等待执行、不返回执行结果**。后续的排队调度、调 `Executor::execute`、写 step_record、更新 job_run 终态、刷新界面状态，**全部由 Task Runner 自动完成**，OP 层不再参与。
-- **默认状态等待中**：`add_op` 创建 JobRun 后即置为 `waiting(等待中)`；后台线程调度取出后转 `running(运行中)`，执行完到终态 `success/failed/timeout`。
+- **默认状态等待中**：`add_op` 创建 JobRun 后即置为 `waiting(等待中)`；后台线程调度取出后转 `running(运行中)`，执行完到终态 `success/failed/timeout`；若在 `waiting` 阶段被终止（单次 OP 且未开始）则直接落 `cancelled`；**已 `running` 时 OP 为原子执行、无法中断——终止请求直接失败（409 `RUN_NOT_TERMINABLE`），界面提示「运行中的 OP 不可终止」，不存在 `terminating` 中间态**（终止语义见 crud-05 3.5.6 / 4.7：`terminating` 仅用于 Workflow Run 等在跑 OP 收敛的场景）。
 - **界面状态刷新**：Task Runner 在状态变化时更新 JobRun 记录，前端通过运行历史（crud-05）轮询/刷新即可看到 waiting→running→终态 的实时状态，无需 OP 接口参与。
 - **Executor 接收 Client 实例**：步骤 1 先把 `clientId` 解析为完整 Client 实例，随 `OpRunRequest` 传入 Task Runner（最终喂给 Executor）；Executor 据此选 run.xxx、组装命令、解析出参（若只传 id 无从得知 command/binaryPath/inputMode 等配置）。
 - **client test 例外（同步、不入历史）**：`POST /api/clients/{clientId}/test` 不走 Task Runner，直接同步调 `Executor::execute` 实时返回，不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。

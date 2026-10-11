@@ -355,8 +355,9 @@ var JOBS = {
     name: 'daily_cleanup',
     version: 2,
     kind: 'persistent',
-    target: { kind: 'op', op: 'clean_logs', opVersion: 3 },
-    trigger: { kind: 'schedule', cron: '0 2 * * *', enabled: true },
+    target: { kind: 'op', op: 'clean_logs', opVersion: 3, clientId: 'client-powershell' },
+    trigger: { kind: 'schedule', cron: '0 2 * * *' },
+    enabled: true,
     workspace: '/path/to/workspace',
     inputs: { endpoint: 'localhost:8080' },
     concurrency: 'skip',
@@ -370,7 +371,8 @@ var JOBS = {
     version: 1,
     kind: 'persistent',
     target: { kind: 'workflow', workflow: 'hourly_check', workflowVersion: 1 },
-    trigger: { kind: 'schedule', cron: '0 * * * *', enabled: true },
+    trigger: { kind: 'schedule', cron: '0 * * * *' },
+    enabled: true,
     workspace: '/path/to/workspace',
     inputs: { endpoint: 'http://svc:8080' },
     concurrency: 'skip',
@@ -385,6 +387,7 @@ var JOBS = {
     kind: 'virtual',
     target: { kind: 'workflow', workflow: 'deploy_workflow', workflowVersion: 2 },
     trigger: { kind: 'manual' },
+    enabled: true,
     workspace: '/path/to/workspace',
     inputs: { target_env: 'prod' },
     concurrency: 'skip',
@@ -397,8 +400,9 @@ var JOBS = {
     name: 'weekly_report',
     version: 1,
     kind: 'persistent',
-    target: { kind: 'op', op: 'process_data', opVersion: 3 },
-    trigger: { kind: 'schedule', cron: '0 18 * * 5', enabled: true },
+    target: { kind: 'op', op: 'process_data', opVersion: 3, clientId: 'client-python' },
+    trigger: { kind: 'schedule', cron: '0 18 * * 5' },
+    enabled: false,
     workspace: '/path/to/workspace',
     inputs: { source: 'weekly_report.csv' },
     concurrency: 'skip',
@@ -411,8 +415,9 @@ var JOBS = {
     name: 'data_sync',
     version: 3,
     kind: 'persistent',
-    target: { kind: 'op', op: 'process_data', opVersion: 3 },
-    trigger: { kind: 'schedule', cron: '0 */6 * * *', enabled: true },
+    target: { kind: 'op', op: 'process_data', opVersion: 3, clientId: 'client-python' },
+    trigger: { kind: 'schedule', cron: '0 */6 * * *' },
+    enabled: true,
     workspace: '/path/to/workspace',
     inputs: { source: 's3://bucket/data' },
     concurrency: 'queue',
@@ -598,6 +603,45 @@ var RUN_HISTORY = [
   }
 ];
 
+// ========== Settings 数据（GET /api/settings，与 crud-06 3.3 结构体一致）==========
+// runDir：当前配置目录（由 CLI 入口 -c 指定；未指定默认 ~/.ai-automation）；
+// ~ 仅为输入简写：后端启动时展开为当前用户家目录的绝对路径（Unix /home/<user>；Windows C:\Users\<user>），
+// 接口返回的 runDir / db_path / workspace_root 一律为已展开的绝对路径（下面用 Windows 形式示例），前端不再做展开/拼接
+var SETTINGS = {
+  runDir: 'C:\\Users\\alice\\.ai-automation',
+  general: {
+    poll_interval_ms: '2000',
+    db_path: 'C:\\Users\\alice\\.ai-automation\\data\\data.db',
+    workspace_root: 'C:\\Users\\alice\\.ai-automation\\workspaces',
+    config_version: '1',
+    db_version: '1'
+  },
+  client: { client_import_max_bytes: '1048576' },
+  op: { op_import_max_bytes: '1048576' },
+  workflow: { workflow_max_nodes: '200', workflow_auto_layout: 'true' },
+  history: {
+    job_queue_waiting_max: '20',
+    job_queue_running_max: '10',
+    history_max_per_job: '10',
+    history_max_total: '1000',
+    history_max_age_days: '183'
+  },
+  engine: { max_loop_multiplier: '0', engine_event_retention_days: '1' },
+  worker: { worker_pool_size: '', worker_max_concurrency: '' },   // 派生只读，稍后按 job_queue_running_max 计算（见下）
+  runner: { runner_poll_interval_ms: '1000', runner_batch_size: '10' },
+  scheduler: { scheduler_max_jobs: '100' },
+  log: { log_level: 'info', log_max_files: '10' }
+};
+
+// Worker 池为派生只读值（与 Task Runner 并发阈值 job_queue_running_max 无关）：
+// worker_pool_size = ceil(job_queue_running_max × 1.5)；worker_max_concurrency = worker_pool_size
+(function deriveWorkerFromRunningMax(){
+  var runMax = parseInt(SETTINGS.history.job_queue_running_max, 10) || 10;
+  var pool = Math.ceil(runMax * 1.5);
+  SETTINGS.worker.worker_pool_size = String(pool);
+  SETTINGS.worker.worker_max_concurrency = String(pool);
+})();
+
 // ========== Mock API 函数 ==========
 function mockFetch(path) {
   // 模拟网络延迟
@@ -608,6 +652,7 @@ function mockFetch(path) {
       else if (path === '/api/workflows') resolve(Object.values(WORKFLOWS));
       else if (path === '/api/jobs') resolve(Object.values(JOBS));
       else if (path === '/api/runs') resolve(RUN_HISTORY);
+      else if (path === '/api/settings') resolve(SETTINGS);
       else if (path.startsWith('/api/ops/')) resolve(OPS[path.split('/')[3]]);
       else if (path.startsWith('/api/workflows/')) {
         var wfId = path.split('/')[3];

@@ -66,7 +66,7 @@
 |-|-|-|
 | **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（waiting → running → 终态）、并发控制、按序调度分派（**常驻轮询**，固定间隔扫描 DB） | 与 Engine 并行；WorkerPool / Engine 完成时同步写终态，轮询自动感知 |
 | **Engine**（编排控制，后台任务②） | 收到 `EngineStart` 通知后（**notify 消息即事件：EngineStart / Terminate 先写 engine_events 落库，写后立即 `process_event` 同步处理**——无事件循环 / 无信号），按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 Task Runner、WorkerPool 并行（互不嵌套） |
-| **WorkerPool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）只在 step_records 插 waiting 记录（含 activation_seq / retry_seq，定位同一 step 的重试 / 循环回跳）即返回；WorkerPool 调度线程轮询 waiting → 指派空闲 Worker（池大小 = 1.5 × 并发上限）执行 Executor → 更新 step_records 终态；完成回调为**全局实现**（JobComplete 更新终态 / StepComplete 写事件后调全局 ENGINE 推进），Worker 执行完同步调用，WorkerPool 不感知业务 | 与 Engine 并行；job_complete 写 job_runs 终态 |
+| **WorkerPool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）只在 step_records 插 waiting 记录（含 activation_seq / retry_seq，定位同一 step 的重试 / 循环回跳）即返回；WorkerPool 调度线程轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，与 Runner 并发阈值无关**）执行 Executor → 更新 step_records 终态；**无空闲 Worker 时派发返回 Err，由上游（Runner / Engine）重试派发**（见 crud-06 4）；完成回调为**全局实现**（JobComplete 更新终态 / StepComplete 写事件后调全局 ENGINE 推进），Worker 执行完同步调用，WorkerPool 不感知业务 | 与 Engine 并行；job_complete 写 job_runs 终态 |
 
 **执行数据流**：
 
@@ -99,7 +99,7 @@
 | 8 | 编排控制 (Engine/WorkerPool) | DAG 调度、边路由、重试、循环 | workflows, workflow_nodes, job_runs, step_records |
 | 9 | DB 操作层 (Repository) | 所有 SQL 操作，统一连接池 | 全部表 |
 | 10 | 日志管理 | 结构化日志、Run 级日志文件 | （文件系统） |
-| 11 | 配置管理 | settings 表读写、启动参数 | settings |
+| 11 | 配置管理 | `ai-automation.json` 读写、实时写回、启动参数（`-c`） | ai-automation.json |
 | 12 | CLI 入口 | 命令行：start / run / export / import / version | — |
 
 ---
@@ -164,7 +164,8 @@ trait ClientRepo {
     async fn update(&self, client: &Client) -> Result<()>;
     async fn delete(&self, id: &str) -> Result<()>;
 }
-// 同理: OpRepo, WorkflowRepo, JobRepo, RunRepo, StepRepo, SettingRepo
+// 同理: OpRepo, WorkflowRepo, JobRepo, RunRepo, StepRepo
+// 配置不再走 Repository：由配置模块直接读写 {run}/ai-automation.json（ConfigRepo，见 crud-06 〇）
 ```
 
 所有 JSON 字段（inputs/outputs/target/trigger/bindings/retry/edges/nodes）在 DB 中存储为 TEXT，读写时 serde 序列化/反序列化。
@@ -175,11 +176,12 @@ trait ClientRepo {
 
 | 日志类型 | 存储位置 | 说明 |
 |-|-|-|
-| 应用日志 | `~/.ai-automation/logs/app-{date}.log` | INFO/WARN/ERROR 结构化 JSON |
-| Run 日志 | `~/.ai-automation/runs/{runId}.log` | 每次执行的完整 stdout/stderr |
+| 应用日志 | `{run}/logs/app-{date}.log` | INFO/WARN/ERROR 结构化 JSON |
+| Run 日志 | `{run}/logs/runs/{runId}.log` | 每次执行的完整 stdout/stderr |
 | 操作审计 | DB 或日志文件 | CRUD 操作记录 |
 
-日志级别通过 settings 表 `log_level` 动态调整。
+日志级别通过 `ai-automation.json` 的 `log_level` **动态调整**（无需重启）。
+应用日志绕接为 zip 后按**最大文件数**（`log_max_files`）保留，不设保留天数；绕接文件名：`{日志名}-{YYYYMMDDHHMMSS}{三位毫秒}.zip`。
 
 ---
 
@@ -192,13 +194,16 @@ trait ClientRepo {
 ## 九、CLI 入口
 
 ```text
-ai-automation start              # 启动 daemon (HTTP server + scheduler)
-ai-automation run <job-name>     # 命令行直接触发一次 Job
+ai-automation start [-c <run-dir>]      # 启动 daemon (HTTP server + scheduler)
+ai-automation run <job-name> [-c <run-dir>]  # 命令行直接触发一次 Job
 ai-automation export <kind> <name> --output <dir>
 ai-automation import <kind> <file>
 ai-automation version
 ai-automation --help
 ```
+
+**运行目录（`-c`）**：`-c` 指定运行目录，未指定默认 `~/.ai-automation`。该目录内存储：
+`ai-automation.json`（配置，唯一事实来源）、`data/data.db`（SQLite DB）、`logs/`（应用日志与 Run 日志）、`workspaces/`（工作区根）。
 
 ---
 
@@ -270,4 +275,4 @@ page_size 可选值：10 / 50 / 100 / 1000。
 | engine_events | Engine (调度事件流/重放, 审计) |
 | run_edge_state | Engine (可选 checkpoint: 边状态快照) |
 | run_node_state | Engine (可选 checkpoint: 节点就绪快照) |
-| settings | 配置管理, 全部模块 (只读) |
+| ~~settings~~（已废弃） | 配置迁移至 `ai-automation.json`（见 crud-06） |

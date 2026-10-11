@@ -167,7 +167,7 @@
 
 ### 3.1.3 POST /api/clients —— 创建 Client
 
-**功能说明**：新建 Client，`name` 全局唯一；`clientId`、`createdAtMs`、`updatedAtMs` 由后端生成。创建成功后即可被 Job 引用，或用于单次执行。
+**功能说明**：新建 Client，`name` 全局唯一；`clientId`、`createdAtMs`、`updatedAtMs` 由后端生成。创建成功后即可被 Job 引用（Job target=op 时存放于 `target.clientId`），或用于单次执行。
 
 **路径参数**：无
 

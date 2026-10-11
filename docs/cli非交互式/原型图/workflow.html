@@ -34,7 +34,11 @@
   .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
   .mi-icon{font-size:15px;width:18px;text-align:center}
   .star{margin-left:auto;color:#ffcb45;font-size:12px}
-  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+  .sidebar-foot{padding:12px 12px 14px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+  .foot-settings{display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;margin-bottom:8px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .foot-settings:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .foot-settings.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .foot-hint{padding:0 4px;color:#5f6779}
 
   /* ---------- 右侧内容区 ---------- */
   .content{flex:1;min-width:0;padding:22px 26px 40px}
@@ -257,7 +261,10 @@
       <a class="menu-item" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
       <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
     </nav>
-    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+    <div class="sidebar-foot">
+      <a class="foot-settings" href="settings.html"><span class="mi-icon">⚙️</span>设置</a>
+      <div class="foot-hint">执行点只有 Job · 后台运行</div>
+    </div>
   </aside>
 
   <!-- ==================== 右侧内容区 ==================== -->
@@ -1536,6 +1543,7 @@
   function doExecute() {
     closeModal('confirmModal');
     closeView();
+    window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
   }
 
   /* ==================== 保存版本确认 ==================== */

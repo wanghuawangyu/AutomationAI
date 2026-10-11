@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设置 · AI 自动化</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
+    --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --accent:#3b6ef6;--accent-soft:#eaf0ff;
+    --sidebar:#171b25;--sidebar-hover:#232838;
+    --failed:#dc2626;--failed-bg:#fdecec;
+    --success:#16a34a;--success-bg:#e8f7ee;
+    --warn:#d97706;--warn-bg:#fdf3e3;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- 左侧固定菜单栏 ---------- */
+  .sidebar{width:224px;flex:0 0 224px;background:var(--sidebar);color:#c8cedb;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid #0f131b}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#4b7dff,#7a4bff);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 34px}
+  .brand-name{color:#fff;font-size:15px;font-weight:600;letter-spacing:.3px}
+  .brand-desc{font-size:11px;color:#7d8598;margin-top:1px}
+  .menu{padding:12px 10px;display:flex;flex-direction:column;gap:2px;flex:1}
+  .menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13.5px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .menu-item:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .mi-icon{font-size:15px;width:18px;text-align:center}
+  .star{margin-left:auto;color:#ffcb45;font-size:12px}
+  .sidebar-foot{padding:12px 12px 14px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+  .foot-settings{display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;margin-bottom:8px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .foot-settings:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .foot-settings.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .foot-hint{padding:0 4px;color:#5f6779}
+
+  /* ---------- 右侧内容区 ---------- */
+  .content{flex:1;min-width:0;padding:22px 26px 40px}
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .page-head h1{font-size:20px;font-weight:650;letter-spacing:.2px}
+  .page-head .sub{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .btn{font-family:inherit;font-size:12.5px;padding:7px 13px;border-radius:7px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+  .btn:hover{background:#f7f8fa;border-color:#d2d7de}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+  .btn-primary:hover{background:#2f5fe0;border-color:#2f5fe0}
+
+  /* ---------- 配置界面 ---------- */
+  .settings-shell{display:flex;gap:18px;align-items:flex-start}
+  .cfg-nav{width:196px;flex:0 0 196px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:8px;position:sticky;top:22px}
+  .cfg-nav-title{font-size:11px;color:var(--text-3);padding:8px 10px 6px;letter-spacing:.4px}
+  .cfg-nav-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--text-2);font-size:13px;font-family:inherit;text-align:left;cursor:pointer;transition:background .13s,color .13s}
+  .cfg-nav-item:hover{background:#f4f6fa;color:var(--text)}
+  .cfg-nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .cfg-panel{flex:1;min-width:0;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .cfg-panel-head{padding:16px 18px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .cfg-panel-title{font-size:15px;font-weight:650}
+  .cfg-panel-desc{font-size:12px;color:var(--text-3);margin-top:3px}
+  .cfg-list{padding:6px 18px 18px}
+  .cfg-item{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 0;border-bottom:1px solid var(--border-soft)}
+  .cfg-item:last-child{border-bottom:0}
+  .cfg-info{flex:1;min-width:0}
+  .cfg-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .cfg-key{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--text-3);font-weight:400}
+  .cfg-desc{font-size:12px;color:var(--text-2);margin-top:4px}
+  .cfg-badge{font-size:10.5px;padding:1px 7px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .badge-dyn{color:var(--success);background:var(--success-bg)}
+  .badge-restart{color:var(--warn);background:var(--warn-bg)}
+  .badge-ro{color:var(--text-3);background:#f1f3f7}
+  .cfg-control{flex:0 0 auto;display:flex;align-items:center;gap:10px}
+  .cfg-input{width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;text-align:right}
+  .cfg-input:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
+  .cfg-input.ro{background:#f3f4f6;color:var(--text-3);cursor:not-allowed}
+  .cfg-select{padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fff;color:var(--text)}
+  .cfg-unit{font-size:11.5px;color:var(--text-3)}
+  .empty-tip{padding:30px;text-align:center;color:var(--text-3);font-size:13px}
+  .cfg-note{margin:0 18px 18px;padding:10px 14px;border-radius:8px;background:#f8f9fb;border:1px dashed var(--border);font-size:12px;color:var(--text-2);line-height:1.7}
+  .cfg-note code{font-family:ui-monospace,Consolas,monospace;background:#eef0f4;padding:1px 5px;border-radius:4px;font-size:11px;color:#c0392b}
+  .foot-actions{display:flex;align-items:center;gap:10px;padding:14px 18px;border-top:1px solid var(--border-soft);background:#fafbfd}
+  .save-tip{font-size:12px;color:var(--success);font-weight:500;opacity:0;transition:opacity .2s}
+  .save-tip.show{opacity:1}
+  .src-info{font-size:11.5px;color:var(--text-3);padding:0 18px 14px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ==================== 左侧固定菜单栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>
+        <div class="brand-name">AI 自动化</div>
+        <div class="brand-desc">CLI 工作流编排器</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item" href="client.html"><span class="mi-icon">🧩</span>Client 管理</a>
+      <a class="menu-item" href="op.html"><span class="mi-icon">📦</span>OP 管理</a>
+      <a class="menu-item" href="workflow.html"><span class="mi-icon">📋</span>Workflow 管理</a>
+      <a class="menu-item" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
+      <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
+    </nav>
+    <div class="sidebar-foot">
+      <a class="foot-settings active" href="settings.html"><span class="mi-icon">⚙️</span>设置</a>
+      <div class="foot-hint">执行点只有 Job · 后台运行</div>
+    </div>
+  </aside>
+
+  <!-- ==================== 右侧内容区 ==================== -->
+  <main class="content">
+    <div class="page-head">
+      <div>
+        <h1>设置</h1>
+        <p class="sub">全局配置 · 存储于运行目录 <code>ai-automation.json</code>（唯一事实来源）· 界面修改即时写回</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn" onclick="resetAll()">恢复默认</button>
+      </div>
+    </div>
+
+    <div class="settings-shell">
+      <!-- 左侧分组导航 -->
+      <nav class="cfg-nav" id="cfgNav"></nav>
+
+      <!-- 右侧配置面板 -->
+      <div class="cfg-panel">
+        <div class="cfg-panel-head">
+          <div>
+            <div class="cfg-panel-title" id="panelTitle"></div>
+            <div class="cfg-panel-desc" id="panelDesc"></div>
+          </div>
+        </div>
+        <div class="cfg-list" id="cfgList"></div>
+        <div class="cfg-note" id="cfgNote" style="display:none"></div>
+        <div class="foot-actions">
+          <button class="btn btn-primary" onclick="save()">保存</button>
+          <span class="save-tip" id="saveTip">✓ 已保存（部分配置需重启生效）</span>
+        </div>
+        <div class="src-info" id="srcInfo"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="mock-data.js"></script>
+<script>
+// ============ 配置界面展示元数据 ============
+// 配置值唯一来源 = mockFetch('/api/settings') 返回的 SETTINGS（定义于 mock-data.js，与 crud-06 3.3 结构体一致）；
+// GROUPS 仅承载展示元数据（label / desc / unit / type / mode / max / options），不包含任何配置值（界面不硬编码配置）
+// mode: dyn=即时生效  restart=重启后生效  ro=只读
+var SETTINGS = null;   // 由 mockFetch('/api/settings') 填充
+const GROUPS = [
+  { id:'general', name:'通用', icon:'🛠', desc:'系统级基础配置，db_path / workspace_root 由 runDir（-c 运行目录）推导，只读展示', note:null,
+    items:[
+      {key:'poll_interval_ms', label:'前端轮询建议间隔', unit:'ms', type:'num', mode:'dyn', desc:'前端轮询后端状态的建议间隔。'},
+      {key:'db_path', label:'数据库文件路径', type:'text', mode:'ro', desc:'SQLite 文件，由 runDir（-c）推导，不可修改。'},
+      {key:'workspace_root', label:'默认工作区根目录', type:'text', mode:'ro', desc:'由 runDir（-c）推导，不可修改。'},
+      {key:'config_version', label:'配置版本', type:'text', mode:'ro', desc:'当前 ai-automation.json 的结构版本。'},
+      {key:'db_version', label:'数据库结构版本', type:'text', mode:'ro', desc:'当前 data.db 的结构版本。'}
+    ]},
+  { id:'client', name:'Client', icon:'🧩', desc:'CLI 客户端适配配置', note:null,
+    items:[
+      {key:'client_import_max_bytes', label:'Client 导入大小上限', unit:'B', type:'num', mode:'dyn', desc:'从 YAML 导入 Client 时的文件大小上限。'}
+    ]},
+  { id:'op', name:'OP', icon:'📦', desc:'最小可执行单元配置', note:null,
+    items:[
+      {key:'op_import_max_bytes', label:'OP 导入大小上限', unit:'B', type:'num', mode:'dyn', desc:'从 YAML 导入 OP 时的文件大小上限。'}
+    ]},
+  { id:'workflow', name:'Workflow', icon:'📋', desc:'DAG 编排配置', note:null,
+    items:[
+      {key:'workflow_max_nodes', label:'单流程最大节点数', type:'num', mode:'dyn', desc:'单个 Workflow 允许的最大节点数（start/op/end）。'},
+      {key:'workflow_auto_layout', label:'导入自动排布', type:'bool', mode:'dyn', desc:'导入 ZIP 缺坐标时，后端自动排布节点。'}
+    ]},
+  { id:'job', name:'Job', icon:'⏰', desc:'执行载体配置', note:'Job 不设自动重试：任务失败即失败，需人工重跑或在 Workflow 中配置节点重试。队列深度相关配置见「运行历史」。',
+    items:[]},
+  { id:'history', name:'运行历史', icon:'📜', desc:'运行记录保存策略与队列深度', note:null,
+    items:[
+      {key:'job_queue_waiting_max', label:'等待中队列深度上限', type:'num', mode:'dyn', max:20, desc:'全局 waiting 状态 Job Run 数量上限（最大 20），达到后拒绝新建。'},
+      {key:'job_queue_running_max', label:'运行中队列深度上限', type:'num', mode:'restart', max:10, desc:'全局 running 状态 Job Run 数量上限（最大 10）；Worker 池大小由此派生，池大小重启后生效。'},
+      {key:'history_max_per_job', label:'单 Job 最大保留历史', type:'num', mode:'dyn', desc:'每个 Job 最多保留的历史运行记录条数。'},
+      {key:'history_max_total', label:'整体最大保留历史', type:'num', mode:'dyn', desc:'全部 Job 累计最多保留的历史记录总条数。'},
+      {key:'history_max_age_days', label:'单条记录最大保存时长', unit:'天', type:'num', mode:'dyn', desc:'单条运行记录最长保存天数（半年 ≈ 183 天），超期自动清理。'}
+    ]},
+  { id:'engine', name:'Engine', icon:'🧠', desc:'编排控制配置（超时只来自 OP，Engine 不设步骤超时）', note:null,
+    items:[
+      {key:'max_loop_multiplier', label:'循环执行总次数上限', type:'num', mode:'dyn', desc:'循环节点执行总次数上限；0=不限制（按 max×3），否则与 max×3 取较小值。'},
+      {key:'engine_event_retention_days', label:'失败事件保留时长', unit:'天', type:'num', mode:'dyn', desc:'失败调度事件保留 1 天后软删除、2 天后物理删除。'}
+    ]},
+  { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；与 Task Runner 并发阈值 job_queue_running_max 无关）', note:'Worker 均忙（无空闲 Worker）时派发返回失败，由上游重试派发直到成功；重试期间 JobRun 保持「等待中」，成功派发后才转「运行中」。不做本地滞留队列。',
+    items:[
+      {key:'worker_pool_size', label:'Worker 池大小', type:'text', mode:'ro', desc:'= ceil(job_queue_running_max × 1.5)（示例：running_max=10 → 15），不按 CPU 核数；随 running_max 联动派生。'},
+      {key:'worker_max_concurrency', label:'并发执行上限', type:'text', mode:'ro', desc:'= worker_pool_size；单个 Worker 内仅一个工作线程。'}
+    ]},
+  { id:'runner', name:'Task Runner', icon:'🚀', desc:'调度层配置（常驻轮询扫描 DB）', note:null,
+    items:[
+      {key:'runner_poll_interval_ms', label:'调度轮询间隔', unit:'ms', type:'num', mode:'dyn', desc:'Task Runner 扫描 DB 调度下一个任务的间隔。'},
+      {key:'runner_batch_size', label:'单轮调度批数', type:'num', mode:'dyn', desc:'单轮轮询最多调度的任务数。'}
+    ]},
+  { id:'scheduler', name:'Scheduler', icon:'🗓', desc:'定时任务配置（时区固定为 Local，非跨区域系统）', note:null,
+    items:[
+      {key:'scheduler_max_jobs', label:'可加载定时任务上限', type:'num', mode:'dyn', desc:'Scheduler 可加载的定时 Job 数量上限。'}
+    ]},
+  { id:'log', name:'日志', icon:'📄', desc:'日志配置（绕接为 zip，无保留天数，按最大文件数）', note:'日志绕接文件名规则：<code>{日志名}-{YYYYMMDDHHMMSS}{三位毫秒}.zip</code>',
+    items:[
+      {key:'log_level', label:'应用日志级别', type:'enum', mode:'dyn', options:['debug','info','warn','error'], desc:'动态调整日志输出级别，无需重启。'},
+      {key:'log_max_files', label:'最大绕接 zip 文件数', type:'num', mode:'dyn', desc:'应用日志绕接为 zip 后保留的最大文件数，超限删最旧。'}
+    ]}
+];
+
+let current = 'general';
+
+function badgeHtml(m){
+  if(m==='dyn') return '<span class="cfg-badge badge-dyn">即时生效</span>';
+  if(m==='restart') return '<span class="cfg-badge badge-restart">🔄 重启后生效</span>';
+  return '<span class="cfg-badge badge-ro">只读</span>';
+}
+function controlHtml(it, val){
+  const ro = it.mode==='ro';
+  if(it.type==='enum' && !ro){
+    const opts = it.options.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('');
+    return `<select class="cfg-select" data-key="${it.key}">${opts}</select>`;
+  }
+  if(it.type==='bool' && !ro){
+    const on = val==='true';
+    return `<select class="cfg-select" data-key="${it.key}"><option value="true" ${on?'selected':''}>true</option><option value="false" ${!on?'selected':''}>false</option></select>`;
+  }
+  return `<input class="cfg-input${ro?' ro':''}" data-key="${it.key}" value="${val}" ${ro?'readonly':''} />${it.unit?`<span class="cfg-unit">${it.unit}</span>`:''}`;
+}
+
+function renderNav(){
+  document.getElementById('cfgNav').innerHTML =
+    '<div class="cfg-nav-title">配置分组</div>' +
+    GROUPS.map(g=>`<button class="cfg-nav-item ${g.id===current?'active':''}" data-id="${g.id}"><span>${g.icon}</span>${g.name}</button>`).join('');
+  document.querySelectorAll('.cfg-nav-item').forEach(b=>b.onclick=()=>{current=b.dataset.id;render();});
+}
+function render(){
+  const RD = (SETTINGS && SETTINGS.runDir) ? SETTINGS.runDir : 'C:\\Users\\alice\\.ai-automation';   // 后端返回的已是展开后的绝对路径，前端直接拼接即可
+  document.getElementById('srcInfo').innerHTML =
+    '配置文件：<code>' + RD + '/ai-automation.json</code> · DB：<code>' + RD + '/data/data.db</code> · 日志：<code>' + RD + '/logs/</code>';
+  const g = GROUPS.find(x=>x.id===current);
+  document.querySelectorAll('.cfg-nav-item').forEach(b=>b.classList.toggle('active', b.dataset.id===current));
+  document.getElementById('panelTitle').textContent = g.icon + ' ' + g.name;
+  document.getElementById('panelDesc').textContent = g.desc;
+  const list = document.getElementById('cfgList');
+  if(!g.items.length){
+    list.innerHTML = '<div class="empty-tip">当前分组暂无独立配置项</div>';
+  } else {
+    list.innerHTML = g.items.map(function(it){
+      // 配置值唯一来源 = SETTINGS（mockFetch('/api/settings') 返回，mock-data.js）；界面不硬编码配置值
+      var val = (SETTINGS && SETTINGS[g.id] && SETTINGS[g.id][it.key] != null) ? SETTINGS[g.id][it.key] : '';
+      return `
+      <div class="cfg-item">
+        <div class="cfg-info">
+          <div class="cfg-name">${it.label} <span class="cfg-key">${it.key}</span> ${badgeHtml(it.mode)}</div>
+          <div class="cfg-desc">${it.desc}</div>
+        </div>
+        <div class="cfg-control">${controlHtml(it, val)}</div>
+      </div>`;
+    }).join('');
+  }
+  const note = document.getElementById('cfgNote');
+  if(g.note){ note.style.display='block'; note.innerHTML = 'ℹ️ ' + g.note; } else { note.style.display='none'; }
+}
+function save(){
+  document.getElementById('saveTip').classList.add('show');
+  setTimeout(()=>document.getElementById('saveTip').classList.remove('show'), 2400);
+}
+function resetAll(){
+  if(confirm('恢复全部配置为默认值？')) { render(); save(); }
+}
+// 调用接口获取配置（与其他页面一致：mockFetch('/api/xxx').then(渲染函数)）
+function renderSettings(s){
+  SETTINGS = s;   // 存全局供分组切换时 render() 持续取值
+  renderNav();
+  render();
+}
+mockFetch('/api/settings').then(renderSettings);
+</script>
+</body>
+</html>

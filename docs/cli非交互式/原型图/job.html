@@ -32,7 +32,11 @@
   .menu-item.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
   .mi-icon{font-size:15px;width:18px;text-align:center}
   .star{margin-left:auto;color:#ffcb45;font-size:12px}
-  .sidebar-foot{padding:14px 18px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+  .sidebar-foot{padding:12px 12px 14px;font-size:11px;color:#5f6779;border-top:1px solid rgba(255,255,255,.06)}
+  .foot-settings{display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;margin-bottom:8px;border:0;border-radius:8px;background:transparent;color:#b9c0ce;font-size:13px;font-family:inherit;text-align:left;cursor:pointer;text-decoration:none;transition:background .15s,color .15s}
+  .foot-settings:hover{background:var(--sidebar-hover);color:#e8ecf4}
+  .foot-settings.active{background:linear-gradient(90deg,rgba(75,125,255,.22),rgba(75,125,255,.08));color:#fff;font-weight:600;box-shadow:inset 2px 0 0 #4b7dff}
+  .foot-hint{padding:0 4px;color:#5f6779}
 
   /* ---------- 右侧内容区 ---------- */
   .content{flex:1;min-width:0;padding:22px 26px 40px}
@@ -202,7 +206,10 @@
       <a class="menu-item active" href="job.html"><span class="mi-icon">⏰</span>Job 管理</a>
       <a class="menu-item" href="index.html"><span class="mi-icon">📜</span>运行历史<span class="star">★</span></a>
     </nav>
-    <div class="sidebar-foot">执行点只有 Job · 后台运行</div>
+    <div class="sidebar-foot">
+      <a class="foot-settings" href="settings.html"><span class="mi-icon">⚙️</span>设置</a>
+      <div class="foot-hint">执行点只有 Job · 后台运行</div>
+    </div>
   </aside>
 
   <!-- ==================== 右侧内容区 ==================== -->
@@ -315,7 +322,7 @@
                 <option>本地 Python</option>
                 <option>本地 PowerShell</option>
               </select>
-              <div class="hint">ℹ target=OP 时创建 Job 必须选择一个 Client</div>
+              <div class="hint">ℹ Client 为 OP 专有，选择后存放在 target 内（target=OP 时必选）</div>
             </div>
           </div>
 
@@ -571,7 +578,7 @@
       '<tbody>';
 
     pageData.forEach(function(j) {
-      var enabledBadge = j.trigger.enabled
+      var enabledBadge = j.enabled
         ? '<span class="badge badge-success">✅ 启用</span>'
         : '<span class="badge badge-off">⏸ 已禁用</span>';
       var warnTag = j.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
@@ -582,13 +589,13 @@
       var lastStatus = j.lastRun.status === 'success'
         ? '<span class="badge badge-success">✓ 成功</span>'
         : '<span class="badge badge-failed">✗ 失败</span>';
-      var runBtn = j.needsUpdate || !j.trigger.enabled
+      var runBtn = j.needsUpdate
         ? '<button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>'
         : '<button class="btn btn-sm btn-ghost-primary" onclick="openRun(\'' + j.name + '\',\'' + targetType + '\',\'' + targetName + '\',\'v' + (j.target.opVersion || j.target.workflowVersion) + '\',\'手动\')">运行</button>';
-      var retryBtn = (j.lastRun.status === 'failed' && !j.needsUpdate && j.trigger.enabled)
+      var retryBtn = (j.lastRun.status === 'failed' && !j.needsUpdate)
         ? '<button class="btn btn-sm btn-ghost-primary" disabled title="需要更新后才能重试">重试</button>'
         : '';
-      var toggleBtn = j.trigger.enabled
+      var toggleBtn = j.enabled
         ? '<button class="btn btn-sm">禁用</button>'
         : '<button class="btn btn-sm">启用</button>';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
@@ -657,11 +664,11 @@
 
   function buildDetailTable(name, version, type) {
     var data = {
-      'daily_cleanup': { target: 'OP clean_logs v2', cron: '0 2 * * *', enabled: true, note: '需要更新', params: { endpoint: 'localhost:8080' } },
+      'daily_cleanup': { target: 'OP clean_logs v2', client: '本地 PowerShell', cron: '0 2 * * *', enabled: true, note: '需要更新', params: { endpoint: 'localhost:8080' } },
       'hourly_check': { target: 'Workflow deploy_workflow v1', cron: '0 * * * *', enabled: true, note: '需要更新', params: {} },
       'manual_deploy': { target: 'Workflow deploy_workflow v2', cron: '手动触发', enabled: true, note: '', params: { target_env: 'production' } },
       'weekly_report': { target: 'Workflow log_analysis v1', cron: '0 9 * * 1', enabled: false, note: '需要更新', params: {} },
-      'data_sync': { target: 'OP process_data v2', cron: '0 3 * * *', enabled: true, note: '需要更新', params: { source: 'db://primary' } }
+      'data_sync': { target: 'OP process_data v2', client: '本地 Python', cron: '0 3 * * *', enabled: true, note: '需要更新', params: { source: 'db://primary' } }
     };
     var s = data[name] || { target: type, cron: '-', enabled: true, note: '', params: {} };
 
@@ -672,6 +679,9 @@
       '<td class="dt-k">备注</td><td class="dt-v">' + (s.note || '-') + '</td>' +
       '</tr>';
     html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + s.target + '</td></tr>';
+    if (s.client) {
+      html += '<tr><td class="dt-k">Client</td><td class="dt-v mono" colspan="5">' + s.client + '（OP 专有，存放于 target）</td></tr>';
+    }
     html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + s.cron + '</td></tr>';
 
     if (Object.keys(s.params).length) {
@@ -865,6 +875,7 @@
 
   function doRun() {
     closeView();
+    window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
   }
 
   /* ==================== 保存版本确认 ==================== */

@@ -7,7 +7,7 @@
 --     run_id / event_id / node_id / record_id), 值均为 32 位无连字符
 --     UUID; 子表 (nodes/step_records) 主键亦为 UUID, 由应用层 INSERT 时生成
 --     (不使用 AUTOINCREMENT); edges 随 Workflow 整体存于 workflows.edges JSON 字段
---    settings 表无 id 列, key 为业务配置键 (非 UUID);
+--  配置 (settings) 不再落库: 存于运行目录下 ai-automation.json (见 crud-06 〇);
 --   时间字段为 TEXT 存储毫秒时间戳字符串
 -- ============================================================
 
@@ -127,14 +127,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     kind            TEXT NOT NULL DEFAULT 'persistent' CHECK (kind IN ('persistent','virtual')),
     version         INTEGER NOT NULL DEFAULT 1,
 
-    -- target: {"kind":"op","opId":"...","opVersion":2} 或 {"kind":"workflow","workflowId":"...","workflowVersion":1}
+    -- target: {"kind":"op","opId":"...","opVersion":2,"clientId":"..."} 或 {"kind":"workflow","workflowId":"...","workflowVersion":1}
+    --         kind=op 时 target 内必含 clientId（引用 clients.client_id）；Job 顶层不设 clientId（Client 为 OP 专有）
     target          TEXT NOT NULL,                       -- JSON object
 
-    client_id       TEXT,                                -- target=op 时必填 (clients.client_id)
     workspace       TEXT NOT NULL,
     inputs          TEXT NOT NULL DEFAULT '{}',          -- {"paramName":"value"}
 
-    -- trigger: {"kind":"manual"} 或 {"kind":"schedule","cron":"0 * * * *","enabled":true}
+    -- trigger: {"kind":"manual"} 或 {"kind":"schedule","cron":"0 * * * *"}（不含 enabled；Job 是否启用唯一由 jobs.enabled 控制）
     trigger         TEXT NOT NULL,                       -- JSON object
 
     concurrency     TEXT NOT NULL DEFAULT 'skip' CHECK (concurrency IN ('skip','queue','parallel')),
@@ -165,11 +165,14 @@ CREATE TABLE IF NOT EXISTS job_runs (
     -- target 名称快照 (便于列表展示, 不 join)
     target_name     TEXT NOT NULL,
 
+    -- JobRun 名称快照: persistent = jobs.name; virtual(single_op/single_workflow) = op.name / workflow.name (= target_name)
+    name            TEXT NOT NULL,
+
     inputs          TEXT NOT NULL DEFAULT '{}',         -- JSON object
     workspace       TEXT NOT NULL,
 
     status          TEXT NOT NULL DEFAULT 'waiting'
-                    CHECK (status IN ('waiting','running','success','failed','cancelled','timeout')),
+                    CHECK (status IN ('waiting','running','terminating','success','failed','cancelled','timeout')),  -- terminating=等待终止（已提交终止、等在跑 OP 收敛后落 cancelled）
     terminated_by    TEXT CHECK (terminated_by IN ('timeout','cancelled','error')),
     timeout_step_id TEXT,
     timeout_op_name TEXT,
@@ -184,7 +187,10 @@ CREATE TABLE IF NOT EXISTS job_runs (
 
     created_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000'),
 
-    FOREIGN KEY (job_id) REFERENCES jobs(job_id)
+    -- 状态最后更新时间（每次 job_runs 状态/结果写入刷新；供 3.5.3 status 轮询返回）
+    updated_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000')
+
+    -- job_id 为快照引用（允许 Job 删除后保留历史），不加强外键约束（见 crud-04 3.4.5）
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_status ON job_runs(status);
@@ -250,19 +256,12 @@ CREATE INDEX IF NOT EXISTS idx_steps_activation ON step_records(run_id, step_id,
 
 -- ============================================================
 -- 8. settings —— 系统配置 (KV)
+--    ⚠ 已废弃（见 crud-06 配置管理）：配置改为存储于运行目录下的
+--    ai-automation.json（唯一事实来源），settings 表不再使用。
+--    运行目录由 CLI 入口 -c 指定，默认 ~/.ai-automation。
+--    相关路径：DB {run}/data/data.db；日志 {run}/logs/。
 -- ============================================================
-CREATE TABLE IF NOT EXISTS settings (
-    key             TEXT PRIMARY KEY,                    -- 配置键 (业务键, 非 UUID)
-    value           TEXT NOT NULL,
-    updated_at_ms   TEXT NOT NULL
-);
-
--- 默认配置
-INSERT OR IGNORE INTO settings(key, value, updated_at_ms) VALUES
-    ('poll_interval_ms',   '2000',  '0'),
-    ('log_level',          'info',   '0'),
-    ('max_loop_multiplier','0',      '0'),
-    ('db_version',         '1',      '0');
+-- （原 settings 表定义及默认 INSERT 已移除，配置迁移至 ai-automation.json）
 
 -- ============================================================
 -- 9. engine_events —— Engine 调度事件流 (调度过程记录, 事件溯源)

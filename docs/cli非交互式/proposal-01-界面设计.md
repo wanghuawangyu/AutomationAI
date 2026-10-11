@@ -30,9 +30,10 @@
 16. **循环终止由 min(max × 3, max_loop_multiplier) 控制。**
 17. **所有任务后台运行，前端轮询 DB 获取状态，不使用事件流。**
 18. **Workflow 编辑器布局：左侧 OP 库（可搜索、可拖动）+ 中间画布 + 右侧节点详情面板（常驻）。**
-19. **Job target 为单个 OP 时，创建 Job 时必须选择一个 Client。**
+19. **Job target 为单个 OP 时，创建 Job 时必须选择一个 Client（存放于 `target.clientId`，Job 顶层不设 clientId）。**
 20. **OP.interactive 字段保留占位（默认 false），前端界面不提供人工设置入口。**
 21. **每个 Workflow 有固定的 Start 和 End 节点，不绑定 OP。**
+22. **OP 运行中不可被外部终止**（OP 是最小执行单位）：终止 = 停止后续调度 + 取消未开始的步骤 + 等其在跑 OP 自然结束；单 OP 的 Job 一旦开始运行即不可终止。
 
 ---
 
@@ -106,7 +107,8 @@
 │  📋 Workflow 管理 │                                                  │
 │  ⏰ Job 管理      │                                                  │
 │  📜 运行历史 ★    │  ← 默认选中，作为首页                              │
-│                  │                                                  │
+│  ────────────    │                                                  │
+│  ⚙️ 设置 (左下角) │  ← 打开配置界面 settings.html                     │
 └──────────────────┴──────────────────────────────────────────────────┘
 ```
 
@@ -123,8 +125,33 @@
 **设计原则**：
 
 - 一级菜单固定为五个，不增加。
+- **设置入口**固定在左侧菜单栏**左下角**（foot 区），点击打开配置界面 `settings.html`，不占用一级菜单名额。
 - 无会话管理，无右侧栏。
 - **应用启动后默认进入运行历史界面。**
+
+---
+
+### 4.2 设置入口与配置界面
+
+**入口**：左侧菜单栏左下角「⚙️ 设置」按钮（5 个页面均含），点击进入 `settings.html`。
+
+**配置界面**：左侧为分组导航，右侧为对应分组的配置表单。配置存储于运行目录 `ai-automation.json`（唯一事实来源），界面展示即 JSON 内容，修改保存后后端**实时写回 JSON 文件**。界面上的目录类只读项（`db_path` / `workspace_root` 等）由 `GET /api/settings` 返回的 `runDir`（当前配置目录，`-c` 指定、未指定默认 `~/.ai-automation`）**拼接为具体路径**展示，不显示 `{run}` 占位符（见 crud-06 3.3）。
+
+| 分组 | 配置项要点 |
+|-|-|
+| 通用 | 前端轮询间隔（可改）；db_path / workspace_root / 版本（只读） |
+| Client | client_import_max_bytes（YAML 导入上限） |
+| OP | op_import_max_bytes（YAML 导入上限） |
+| Workflow | 最大节点数、导入自动排布 |
+| Job | 暂无独立配置项 |
+| 运行历史 | waiting/running 队列深度上限、单 Job/整体/单条保存时长 |
+| Engine | 循环次数上限、失败事件保留 |
+| Worker | 池大小 / 并发上限（只读派生） |
+| Task Runner | 轮询间隔、调度批数 |
+| Scheduler | 定时任务上限（时区固定 Local） |
+| 日志 | 日志级别（动态）、最大绕接 zip 文件数 |
+
+**标识规则**：动态配置标「即时生效」；需重启的标「🔄 重启后生效」；只读配置不可编辑。
 
 ---
 
@@ -185,7 +212,7 @@ Client ←（执行时下拉选择）← OP ← Workflow
 | Workflow 管理 | Client 管理 | 节点配置 | 下拉选择 Client |
 | Workflow 管理 | 运行历史 | 单次执行 | 创建虚拟 Job |
 | Job 管理 | OP / Workflow | 引用 | Job target |
-| Job 管理 | Client 管理 | 创建时选择 | target=OP 时创建 Job 需选 Client |
+| Job 管理 | Client 管理 | 创建时选择 | target=OP 时创建 Job 需选 Client（存放于 target.clientId） |
 | Job 管理 | 运行历史 | 手动 / 定时运行 | 使用持久 Job |
 | 运行历史 | OP / Workflow / Job / Client | 回溯 | 查看定义 |
 
@@ -279,7 +306,7 @@ interface NodeRetry {
 | 超时是终止信号 | 不是失败，不参与重试策略 |
 | 超时立即终止 | 不走边、不回跳、不重试 |
 | 全层级 timeout | Step / Workflow / Job 状态均为 timeout |
-| 不可重试 | 超时 Run 不支持 [重试] |
+| 不可重试 | 超时不触发自动重试；Run 结束（timeout）后支持手动 [重试] 超时 step |
 | 可重跑 | 超时 Run 支持 [重跑] |
 
 ### 7.8 后台运行与前端获取
@@ -288,7 +315,7 @@ interface NodeRetry {
 
 | 场景 | 前端策略 |
 |-|-|
-| 运行历史列表（有运行中的 Run） | 每 3~5 秒轮询 |
+| 运行历史列表（有运行中的 Run / 终止中的 Run） | 每 3~5 秒轮询 |
 | 运行历史列表（无运行中的 Run） | 每 30 秒或手动刷新 |
 | Run 详情（有运行中的 Step） | 每 2~3 秒轮询 |
 | Run 详情（已完成） | 不轮询，手动刷新 |
@@ -726,6 +753,7 @@ interface OpOutput {
 └──────────────────────────────────────┘
         ▼
 创建虚拟 Job → 后台执行 → Job Run 进入运行历史
+（[确认执行] 后前端**自动跳转运行历史界面**查看结果）
 ```
 
 ### 9.7 导出 YAML
@@ -1249,7 +1277,7 @@ interface NodeRetry {
 └──────────────────────────────────────┘
         ▼
 创建虚拟 Job → 后台执行 → Job Run 进入运行历史
-（jobKind=virtual, triggeredBy=single_workflow）
+（jobKind=virtual, triggeredBy=single_workflow；[确认执行] 后前端**自动跳转运行历史界面**查看结果）
 ```
 
 ### 10.13 导出 ZIP
@@ -1319,18 +1347,20 @@ deploy_workflow-v2.zip
 interface JobDefinition {
   jobId: string;
   name: string;
-  description?: string;
+  description?: string | null;
   kind: "persistent";
   version: number;
   target:
-    | { kind: "op"; opId: string; opVersion: number }
+    | { kind: "op"; opId: string; opVersion: number; clientId: string }   // kind=op 时 clientId 必填（Client 为 OP 专有，存放于 target 内）
     | { kind: "workflow"; workflowId: string; workflowVersion: number };
-  clientId?: string;          // target 为 OP 时必填（创建时选择）
+  targetName?: string;         // 计算字段（不落库）：target 引用的 OP/Workflow 名称（join ops/workflows 得；原型 mock 用名称仅为示意，真实接口用 id + targetName）
   workspace: string;
   inputs: Record<string, string>;   // 入参来源为 OP/Workflow 的参数列表
-  trigger:                     // 手动 / 定时二选一
+  trigger:                     // 手动 / 定时二选一（不含 enabled：启用状态唯一由顶层 enabled 控制）
     | { kind: "manual" }
-    | { kind: "schedule"; cron: string; enabled: boolean };
+    | { kind: "schedule"; cron: string };
+  enabled: boolean;            // 是否启用（唯一开关）：schedule 决定是否定时触发；禁用不影响手动运行；manual 恒 true
+  nextRunAtMs?: string | null; // 计算字段（不落库）：schedule 已启用且非 needsUpdate 时的下次触发时间；其余为 null（见 crud-04 4.5）
   concurrency: "skip" | "queue" | "parallel";   // 界面展示为中文
   createdAtMs: bigint;
   updatedAtMs: bigint;
@@ -1338,7 +1368,7 @@ interface JobDefinition {
 ```
 
 > 说明：
-> - `clientId` 仅当 `target.kind === "op"` 时需要，创建 Job 时选择。
+> - **Job 顶层不设 `clientId`（Client 为 OP 专有）**：`clientId` 仅当 `target.kind === "op"` 时需要，存放在 `target.clientId`，创建 Job 时选择。
 > - 定时 Job 也可在 Job 管理界面通过 [运行] 按钮手动触发一次。
 > - `inputs` 的 **name 列表来源于 OP / Workflow 的参数定义**，Job 只填 value，不自己定义 name。
 
@@ -1378,7 +1408,7 @@ interface JobDefinition {
 | 工作区 | 工作目录路径 |
 | 触发方式 | 手动 / Cron 表达式 |
 | 是否启用 | ✅ 启用 / ⏸ 已禁用 |
-| 最近运行结果 | 执行结果状态（✓ 成功 / ✗ 失败）+ 执行耗时（如 `✓ 成功 15.3s`） |
+| 最近运行结果 | 状态徽标（**7 态**：⏳ waiting / ● running / ⏹ terminating / ✓ success / ✗ failed / ⏱ timeout / ⊘ cancelled）+ 执行耗时（如 `✓ 成功 15.3s`） |
 | 操作 | 运行、编辑、复制、导出、禁用/启用、删除 |
 
 > 点击名称行展开详情。详情中展示：类型、状态、目标、触发方式、入参等。
@@ -1480,6 +1510,7 @@ interface JobDefinition {
 └──────────────────────────────────────┘
         ▼
 创建 Job Run → 后台执行 → 进入运行历史
+（[确认执行] 后前端**自动跳转运行历史界面**查看结果）
 ```
 
 ### 11.6 定时运行流程
@@ -1550,18 +1581,19 @@ manual_deploy-v2.zip
 
 ```typescript
 type RunStatus =
-  | "waiting" | "running" | "success" | "failed"
-  | "cancelled" | "timeout";
+  | "waiting" | "running" | "terminating" | "success" | "failed"
+  | "cancelled" | "timeout";   // terminating = 等待终止（已提交终止、等在跑 OP 收敛）
 
 interface JobRun {
   runId: string;
+  name: string;              // 运行名称快照：persistent = 时任 jobs.name；virtual = op/workflow 名（Job 删除后仍可展示）
   jobId: string;
   jobKind: "persistent" | "virtual";
   jobVersion?: number;
   triggeredBy: "manual" | "schedule" | "single_op" | "single_workflow" | "retry";
   target:
-    | { kind: "op"; opId: string; opVersion: number }
-    | { kind: "workflow"; workflowId: string; workflowVersion: number };
+    | { kind: "op"; opId: string; opVersion: number; name: string }
+    | { kind: "workflow"; workflowId: string; workflowVersion: number; name: string };  // name = 目标名称快照（落 job_runs.target_name；区别于 JobDefinition.targetName——后者为实时 join 计算字段）
   inputs: Record<string, string>;
   workspace: string;
   status: RunStatus;
@@ -1575,7 +1607,9 @@ interface JobRun {
   retryFromStepId?: string;
   startedAtMs: bigint;
   finishedAtMs?: bigint;
-  duration?: number;
+  durationMs?: number;     // 耗时（毫秒），终态才有值
+  createdAtMs: bigint;
+  updatedAtMs: bigint;     // 最后状态更新时间（每次状态写入刷新；供状态轮询）
 }
 
 type StepStatus =
@@ -1600,7 +1634,7 @@ interface StepRecord {
   processRecord?: ProcessRecord;
   startedAtMs: bigint;
   finishedAtMs?: bigint;
-  duration?: number;
+  durationMs?: number;     // 耗时（毫秒）
 }
 ```
 
@@ -1632,12 +1666,12 @@ interface StepRecord {
 
 | 列 | 说明 |
 |-|-|
-| 名称 | Job 名称，点击进入执行详情（OP 详情 / Workflow 详情） |
+| 名称 | JobRun 名称（persistent = Job 名；临时运行 = OP / Workflow 名），点击进入执行详情（OP 详情 / Workflow 详情） |
 | Target | 目标类型 + 名称 + 版本号 |
 | 失败节点 | 失败时显示失败节点名，否则显示 `-` |
 | 工作区 | 工作目录路径 |
 | 触发方式 | 持久 Job / 定时 / 持久 Job / 手动 / 单次执行 |
-| 结果 | 执行结果状态（✓ 成功 / ✗ 失败 / ⏱ 超时 / ● 运行中）+ 执行耗时（如 `✓ 成功 12.3s`） |
+| 结果 | 状态徽标（**7 态**：`⏳ waiting 等待中` / `● running 运行中` / `⏹ terminating 终止中` / `✓ success 成功` / `✗ failed 失败` / `⏱ timeout 超时` / `⊘ cancelled 已取消`）+ 执行耗时（如 `✓ 成功 12.3s`） |
 | 操作 | 重跑 / 终止 / 重试（按状态显示） |
 
 > 注：名称带 ↓ 表示可点击，点击名称即进入对应执行详情（OP 详情 / Workflow 详情），不再单独提供 [查看] 按钮。
@@ -1646,9 +1680,9 @@ interface StepRecord {
 
 | 按钮 | 说明 | 展示条件 |
 |-|-|-|
-| [重跑] | 从头重新执行（用最新版本），**对 OP target 和 Workflow target 都可用** | 非运行中 |
-| [终止] | 终止正在运行的 Run | 运行中 |
-| [重试] | 从失败 OP 开始重试 | **仅 target=Workflow** + 失败（非超时）+ 版本一致 + Workflow.needsUpdate=false + Job.needsUpdate=false |
+| [重跑] | 从头重新执行（用最新版本），**对 OP target 和 Workflow target 都可用** | 仅终态（success / failed / timeout / cancelled）；waiting（等待中）/ running（运行中）不可重跑 |
+| [终止] | 终止正在运行的 Run（**按 target 分两类**：Workflow run——不 kill 在跑 OP，停止后续调度、取消未开始步骤、等其跑完落 cancelled；OP run——仅未开始（waiting）可终止并直接落 cancelled，**运行中不支持终止**） | 仅 running（运行中）展示；terminating（终止中）无操作（已提交终止，等待收敛）；**target=OP 且已 running → 按钮置灰 / 点击提示「终止失败：OP 正在运行，不可终止」** |
+| [重试] | 从失败 OP 开始重试 | **仅 target=Workflow** + 失败（含超时）+ 版本一致 + Workflow.needsUpdate=false + Job.needsUpdate=false |
 
 ### 12.5 第二层 A：OP 执行详情
 
@@ -1768,6 +1802,9 @@ interface StepRecord {
 | 失败 | [重试] + [重跑] |
 | 运行中 | [终止] |
 | 超时 | [重跑] |
+| 成功 / 取消 | [重跑] |
+| 等待中 | —（等待调度，无操作） |
+| 终止中 | —（已提交终止，等待收敛） |
 
 > 说明：进入 Workflow 执行详情后，只展示执行信息 + 入参/出参 + 画布（只读执行状态），**不展示右侧节点详情面板**。用户点击画布中的某个 node，直接跳转到该 OP 的执行详情页面。
 
@@ -1839,7 +1876,7 @@ interface StepRecord {
 | 条件 | 说明 |
 |-|-|
 | target 为 Workflow | 只有 Workflow 才有"从失败 OP 开始"的概念 |
-| 最近一次执行失败（非超时） | 超时不可重试 |
+| Run 已结束且存在失败/超时 step | failed / timeout / **cancelled（终止前有失败/超时 step）** 均可；waiting / running / terminating 不可（未结束） |
 | 失败 Run 的版本 = 当前最新版本 | 版本一致才允许重试 |
 | Workflow.needsUpdate = false | 无需更新 |
 | Job.needsUpdate = false | 无需更新 |
@@ -1885,10 +1922,11 @@ interface StepRecord {
 |-|-|-|
 | 起始位置 | 从失败 step 开始 | 从头开始 |
 | 版本使用 | 最新版本（= 快照版本） | 最新版本（固定） |
-| 前提条件 | 五条件（见 12.8.2） | 无版本限制 |
+| 前提条件 | 五条件（见 12.8.2） | 仅终态可重跑（waiting / running / **terminating** 不可）；无版本限制 |
 | 触发位置 | Job / 运行历史 / Workflow 详情顶部 | 运行历史 / OP 执行详情 / Workflow 执行详情 |
 | 适用 target | 仅 Workflow | OP / Workflow |
-| 超时 Run | ❌ 不支持 | ✅ 支持 |
+| 超时 Run | ✅ 支持（手动重试超时 step；自动重试不含 timeout） | ✅ 支持 |
+| 用户终止 Run（cancelled） | ✅ 支持（需存在失败/超时 step） | ✅ 支持 |
 
 ### 12.9 超时终止的展示
 
@@ -1922,7 +1960,7 @@ interface StepRecord {
 
 | 场景 | 轮询频率 | 接口 |
 |-|-|-|
-| 运行历史列表（有运行中的 Run） | 每 3~5 秒 | `/api/runs` |
+| 运行历史列表（有运行中的 Run / 终止中的 Run） | 每 3~5 秒 | `/api/runs` |
 | 运行历史列表（无运行中的 Run） | 每 30 秒或手动刷新 | `/api/runs` |
 | Run 详情（有运行中的 Step） | 每 2~3 秒 | `/api/runs/{runId}` |
 | Run 详情（已完成） | 不轮询，手动刷新 | `/api/runs/{runId}` |
@@ -1939,7 +1977,7 @@ interface StepRecord {
 |-|-|
 | 导出范围 | 当前筛选条件下的所有条目 |
 | 文件格式 | Excel（`.xlsx`），首行为表头 |
-| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}.xlsx` |
+| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10） |
 | 导出弹窗 | 展示文件名、导出条数（运行历史数 + 运行明细数）、导出目录选择 |
 | 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；由**后端**生成 `.xlsx` 写入所选目录并返回 `{filePath}`（见 crud-05 3.5.10） |
 
@@ -1948,6 +1986,7 @@ interface StepRecord {
 | 列 | 说明 |
 |-|-|
 | runId | Run ID |
+| name | JobRun 名称（persistent = Job 名；临时运行 = OP / Workflow 名） |
 | jobId | Job ID |
 | jobKind | persistent / virtual |
 | jobVersion | Job 版本 |
@@ -1957,19 +1996,20 @@ interface StepRecord {
 | terminatedBy | timeout / cancelled / error（可空） |
 | startedAtMs | 开始时间（毫秒时间戳） |
 | finishedAtMs | 结束时间（毫秒时间戳，可空） |
-| duration | 耗时（秒） |
+| durationMs | 耗时（毫秒） |
 
 **Sheet 2：运行明细**（每个 step_record 一行）
 
 | 列 | 说明 |
 |-|-|
-| ResultId | StepRecord ID |
+| recordId | StepRecord ID |
 | jobId | 所属 Job ID |
 | stepId | 步骤 ID |
 | activationSeq | 第几次激活（循环回跳重入 +1） |
 | retrySeq | activation 内第几次尝试（含首次；apply_retry +1） |
 | opId | OP ID |
 | opVersion | OP 版本 |
+| opName | OP 名称（快照） |
 | clientId | Client ID（可空） |
 | status | StepStatus |
 | exitCode | 退出码 |
@@ -1980,7 +2020,7 @@ interface StepRecord {
 | timedOut | 是否超时 |
 | startedAtMs | 开始时间（毫秒时间戳） |
 | finishedAtMs | 结束时间（毫秒时间戳） |
-| duration | 耗时（秒） |
+| durationMs | 耗时（毫秒） |
 
 > inputs / outputs 以 JSON 字符串形式存储到 Excel 单元格中。
 
@@ -2106,7 +2146,7 @@ Workflow deploy_workflow
 | 回跳 | ✅ | ❌ |
 | 最终状态 | failed | timeout |
 
-> **失败与走边（V11-B）**：失败时「走 DAG 边 / 回跳」的前提是**存在被激活的 `on_failure` / `always` 出边**；若失败节点的**所有出边均为 `on_success`（未激活）** → 不走边、**整个 Run 立即 failed**（`terminated_by=error`，不等其它分支）。
+> **失败与走边（V11-B）**：失败时「走 DAG 边 / 回跳」的前提是**存在被激活的 `on_failure` / `always` 出边**；若失败节点的**所有出边均为 `on_success`（未激活）** → 不走边、**整个 Run 置 failed**（**不 abort 在飞**，等其余步骤收敛后落终态，`terminated_by=error`，不等其它分支）。
 
 ### 14.4 超时终止流程
 
@@ -2118,17 +2158,17 @@ Workflow deploy_workflow
     2. 不参与重试策略判定
     3. 不走任何 DAG 边
     4. 不回跳
-    5. 整个 Job 立即终止
-    6. Job / Workflow / Step 状态均为 timeout
+    5. 停止后续调度（不派发新步骤）；**不 kill 其它在跑 OP**
+    6. 等所有在跑 OP 收敛后：Job / Workflow 状态 = timeout
 ```
 
 ### 14.5 超时与重试策略的交互
 
-**on=failure 时**：超时**不触发**重试，立即终止。
+**on=failure 时**：超时**不触发**自动重试，立即终止。
 
 **on=success 时**：超时**不视为**失败，不走失败边，立即终止。
 
-**重试策略只对"正常运行完成的结果"有效**：
+**自动重试策略（Workflow 节点的 `retry.on` 配置，见 crud-03）只对"正常运行完成的结果"有效**；超时结束的 Run 仍可**手动重试超时 step**（运行历史 [重试] 接口，见 crud-05 3.5.8）；**用户终止（cancelled）且含失败/超时 step 的 Run 也可手动重试**：
 
 | 结果类型 | 参与重试策略 |
 |-|-|
@@ -2357,7 +2397,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 |-|-|-|-|
 | UC-J1 | 新建持久 Job | Job 管理 → [新建] → 选择 Target（OP 或 Workflow）→ 配置触发方式（定时 cron）→ 填写入参值 → [保存] | 列表新增一行，显示"是否启用"和"最近运行结果" |
 | UC-J2 | 展开/折叠 Job | 列表点击某行 [展开] → 行内展开详情；再次点击折叠；展开另一行时自动折叠上一行 | 行内展示 Target 参数定义，入参参数名和参数值分两列展示 |
-| UC-J3 | 手动运行 Job | Job 管理 → 某行 [运行] | 立即触发一次执行，运行历史新增记录 |
+| UC-J3 | 手动运行 Job | Job 管理 → 某行 [运行] → 二次确认 | 立即触发一次执行（异步投递），自动跳转运行历史界面，新增记录 |
 | UC-J4 | 启用/禁用 Job | Job 管理 → 某行 [禁用]/[启用] | 状态切换，禁用后定时不再触发 |
 | UC-J5 | 导出 Job 为 ZIP | Job 管理 → 某行 [导出] → 选目录 → [导出] | ZIP 文件写入所选目录 |
 | UC-J6 | 导入 Job | Job 管理 → [导入] → 点击 [选择文件] → 选择 ZIP 文件 → [导入] | 导入成功后列表刷新，新增对应 Job（含 Target、触发方式、入参配置） |
@@ -2722,12 +2762,13 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | **Start 锚点** | **仅右侧 🟢 出边锚点** | **Start 必然成功** |
 | **End 锚点** | **仅左侧入边锚点** | **End 是终点** |
 | **End 完成语义** | **所有入边均已决定（并行多边需全部结束）且至少一条 activated** | **汇聚正确、互斥不互等** |
-| **失败传播** | **任一 op failed 且失败无出边路由（无 on_failure / always）→ 整体 failed** | **即使另一分支到 End；被 on_failure / always 边接住则不终结** |
+| **失败传播** | **任一 op failed 且失败无出边路由（无 on_failure / always）→ 置 Run failed（不 abort 在飞，等收敛落终态）** | **即使另一分支到 End；被 on_failure / always 边接住则不终结** |
 | 循环实现 | 重试 + 条件边 + 回跳 | 指向原节点 |
 | 循环终止 | min(max × 3, max_loop_multiplier) | 不依赖 Job / Workflow 时间 |
 | 超时归属 | 只在 OP 上 | OP 是原子执行单元 |
 | 超时语义 | 终止信号，不是失败 | 不走边、不回跳、不重试 |
-| 超时不可重试 | ✅ | 版本已不一致 |
+| **终止语义** | **不 kill 在跑 OP；停止派发 + 取消未开始 + 等其收敛** | **OP 最小执行单位，强杀会产生不可预期结果** |
+| 超时不可自动重试 | ✅ | 结束（timeout）后可手动重试超时 step |
 | 执行点 | 统一收拢到 Job | 执行逻辑单一 |
 | 后台运行 | ✅ | 前端轮询获取状态 |
 | 轮询策略 | 按场景调整频率 | 平衡实时性与资源 |
@@ -2815,7 +2856,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 - Start / End 不绑定 OP，不可删除。
 - Start 只有右侧 🟢 出边锚点。
 - End 只有左侧入边锚点。
-- End 完成：所有入边均已决定（并行多边需全部结束）且至少一条入边 activated（互斥条件下达到任一即可），Workflow 成功；**另：未接住的 failed 节点（无 on_failure / always 出边）→ 整个 Run 立即 failed（失败传播，V11-B）**，即使另一分支已到 End。
+- End 完成：所有入边均已决定（并行多边需全部结束）且至少一条入边 activated（互斥条件下达到任一即可），Workflow 成功；**另：未接住的 failed 节点（无 on_failure / always 出边）→ 置整个 Run failed（失败传播 V11-B：不 abort 在飞，等其余步骤收敛后落终态），即使另一分支已到 End**。
 - Start / End 不产生 StepRecord，不进入步骤列表，不涉及版本。
 
 **新建默认值规范**：
@@ -2854,6 +2895,8 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 | Job 定时运行 | ❌ | ❌ | persistent |
 | 重试 | ❌ | ✅ 展示失败信息 | persistent / virtual |
 
+> **运行后跳转（统一）**：OP / Workflow / Job 任一执行方式，点击 [运行]（或 [确认执行]）并二次确认后，前端**自动跳转到运行历史界面**（默认首页），用户可在其中查看新 Run 的状态流转（waiting → running → 终态）。执行均为**异步投递**：接口返回 `{runId}` 即结束，不等待执行结果。
+
 **版本管理规范**：
 
 - OP / Workflow / Job 都有版本号，默认 v1，列表展示。
@@ -2876,7 +2919,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 
 - 只有 OP 有 timeout。
 - 超时是终止信号，立即终止整个 Job，全层级标记 timeout。
-- 超时不可重试，只能重跑。
+- 超时不触发自动重试；Run 结束（timeout）后可手动重试超时 step，也可重跑。
 - 循环终止由 max × 3 控制。
 - 超时与执行次数上限双重保障，杜绝死循环。
 
