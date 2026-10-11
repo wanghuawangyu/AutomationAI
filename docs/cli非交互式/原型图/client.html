@@ -693,7 +693,10 @@
       clientId: __uid32(), name: src.name + '_copy',
       createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
     });
-    mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(copy) }).then(function () { renderClientList(); });
+    mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(copy) }).then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      renderClientList();
+    });
   }
 
   /* 删除 Client：确认后 DELETE /api/clients/{clientId} */
@@ -832,7 +835,7 @@
     closeModal('importModal');
   }
 
-  // ---------- 导出 ----------
+  // ---------- 导出（Client 无导出接口，前端拼装 YAML 并写入所选目录） ----------
   var exportTargetName = '';
   var exportTargetType = '';
 
@@ -881,13 +884,10 @@
     return yaml;
   }
   function confirmExport() {
-    var fileName = document.getElementById('exportFileName').value;
+    var fileName = document.getElementById('exportFileName').value.trim();
+    if (!exportDirHandle) { alert('请先选择导出目录'); return; }
+    if (!fileName) { alert('请填写导出文件名'); return; }
     var yaml = buildClientYaml(exportTargetName, exportTargetType);
-
-    if (!exportDirHandle) {
-      alert('请先选择导出目录');
-      return;
-    }
     exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
       return fileHandle.createWritable();
     }).then(function (writable) {

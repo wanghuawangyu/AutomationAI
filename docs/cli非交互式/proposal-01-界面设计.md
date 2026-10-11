@@ -314,9 +314,9 @@ interface NodeRetry {
 
 | 场景 | 前端策略 |
 |-|-|
-| 运行历史列表（有运行中的 Run / 终止中的 Run） | 每 3~5 秒轮询 |
-| 运行历史列表（无运行中的 Run） | 每 30 秒或手动刷新 |
-| Run 详情（有运行中的 Step） | 每 2~3 秒轮询 |
+| 运行历史列表（自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms）轮询 |
+| 运行历史列表（自动刷新关） | 不轮询，手动 [刷新] |
+| Run 详情（有运行中的 Step，自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms）轮询 |
 | Run 详情（已完成） | 不轮询，手动刷新 |
 
 **不使用**：SSE 事件流、WebSocket。
@@ -553,6 +553,8 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 | 4 | 未选择目录时 [导出] 按钮置灰，不可点击；不回退到浏览器下载 |
 
 > Client 导出为 YAML 文本文件；导出格式与 OP 导出一致。
+
+> **导出实现口径（Z5）**：程序为非 Tauri 的普通 Rust 服务端 + HTTP + 浏览器前端，**文件落盘一律由前端完成**；后端只负责生成内容。运行历史导出（12.11）为 `.xlsx`：`POST /api/runs/export` **由后端生成 `.xlsx` 并以 base64 返回**（`{xlsx: base64}`），前端解码为字节流后写入所选目录（目录用 `showDirectoryPicker`）。实体导出（OP / Workflow / Job / Client）同为此模式：[选择] 目录使用**浏览器文件系统目录选择器**（`showDirectoryPicker`，写入 FileSystem 目录句柄），[导出] 时 **OP / Workflow / Job 先调 `POST /api/ops|workflows|jobs/{id}/export` 取回内容**（分别 `{yaml}` / `{zip: base64}` / `{zip: base64}`），再由**前端**写入所选目录；Client 未定义导出接口（crud-01），YAML 由前端拼装后写入。运行历史与四类实体的目录选择与写文件逻辑完全一致，区别仅在内容来源（xlsx 由接口生成，客户端只解码落盘）。
 
 ---
 
@@ -1406,10 +1408,12 @@ interface JobDefinition {
 | 工作区 | 工作目录路径 |
 | 触发方式 | 手动 / Cron 表达式 |
 | 是否启用 | ✅ 启用 / ⏸ 已禁用 |
-| 最近运行结果 | 状态徽标（**7 态**：⏳ waiting / ● running / ⏹ terminating / ✓ success / ✗ failed / ⏱ timeout / ⊘ cancelled）+ 执行耗时（如 `✓ 成功 15.3s`） |
-| 操作 | 运行、编辑、复制、导出、禁用/启用、删除 |
+| 最近运行结果 | 状态徽标（**7 态**：⏳ waiting / ● running / ⏹ terminating / ✓ success / ✗ failed / ⏱ timeout / ⊘ cancelled）+ 执行耗时（如 `✓ 成功 15.3s`）。**仅展示、不提供操作**（D4=B：非终态也不给「终止」按钮） |
+| 操作 | 运行、编辑、复制、导出、禁用/启用、删除（**不含「终止」**） |
 
 > 点击名称行展开详情。详情中展示：类型、状态、目标、触发方式、入参等。
+
+> **入口收窄（D4=B 定稿）**：Job 列表的「最近运行结果」是列表加载时**顺带**返回的 `lastRun` 摘要，**不构成运行历史控制入口**——终止 / 重跑 / 重试在途 Run 一律只能在**运行历史界面**操作（见 12.4 操作列、crud-05 3.5.6/3.5.7/3.5.8）。
 │  ⏰ data_sync                                                                 │
 │     OP: process_data  v2  非交互  0 3 * * *  ✅ 启用  ⚠ 需要更新              │
 │     最近执行: ✗ 失败  4.1s  5小时前                                            │
@@ -1587,7 +1591,7 @@ interface JobRun {
   name: string;              // 运行名称快照：persistent = 时任 jobs.name；virtual = op/workflow 名（Job 删除后仍可展示）
   jobId: string;
   jobKind: "persistent" | "virtual";
-  jobVersion?: number;
+  jobVersion?: number | null;   // Job 修订号；virtual Run（单次执行）无此值 → null
   triggeredBy: "manual" | "schedule" | "single_op" | "single_workflow" | "retry";
   target:
     | { kind: "op"; opId: string; opVersion: number; name: string }
@@ -1644,7 +1648,7 @@ interface StepRecord {
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  运行历史              [刷新] [自动刷新: 开] [全部导出]                                       │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│  🔍 搜索 OP / Workflow / Job 名称 / 状态 / 版本...                                             │
+│  🔍 搜索 OP / Workflow / Job 名称...                                                           │
 │  筛选: [全部类型 ▾] [全部来源 ▾] [全部触发 ▾] [全部状态 ▾] [全部工作区 ▾] [全部版本 ▾] [时间 ▾] │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  名称              Target                失败节点      工作区           触发方式        结果        操作  │
@@ -1659,6 +1663,19 @@ interface StepRecord {
 │                                                          每页 [10 ▾] 共 6 条  [上一页] 1/1 [下一页] │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**筛选项说明**：
+
+| 筛选项 | 取值 | 说明 |
+|-|-|-|
+| 搜索（keyword） | 文本 | **仅匹配名称**：Run 名称与 Target 名称（快照）模糊匹配；**状态 / 版本请用下方独立筛选项**（精确等值，keyword 不参与） |
+| 类型 | 全部 / OP / Workflow | `targetKind` |
+| 来源 | 全部 / 持久 Job / 单次执行 | `jobKind`（persistent / virtual） |
+| 触发 | 全部 / 持久 Job·定时 / 持久 Job·手动 / 单次执行 | `triggeredBy` 展示映射 |
+| 状态 | 全部 / 7 态 | `status`（waiting / running / terminating / success / failed / cancelled / timeout） |
+| 工作区 | 全部 + 最近使用工作区 | `workspace`；选项**动态加载**——`GET /api/workspaces`（`job_runs.workspace` 去重、最近使用优先、默认 10 条，见 crud-06 3.6），不使用硬编码列表 |
+| 版本 | 全部 / `1` / `2` / `3` …（**纯数字**） | `version`，按 **`job_version`（Job 修订号）精确等值**；**virtual Run 无修订号（null），任何版本值都不匹配** |
+| 时间 | last_1h / last_24h / last_2d / last_3d / last_5d / last_7d / last_30d | `timeRange` 固定枚举（**无自定义区间**；D2） |
 
 > **操作按钮可用性（C1 定稿：按 can-retry 五条件动态决定，不写死）**：前端调用 `GET /api/runs/{runId}/can-retry`（五条件，见 crud-05 3.5.9 / 4.8）决定 **[重试]** 是否可点；不可点时置灰并以其 `reason` 作 tooltip。要点：
 > - **超时（timeout）结束且在跑 step 存在超时 step 时 [重试] 可点**（用于手动重试超时 step）——不再固定置灰；
@@ -1962,11 +1979,13 @@ interface StepRecord {
 
 ### 12.10 轮询与刷新
 
-| 场景 | 轮询频率 | 接口 |
+> **轮询间隔（D1 定稿）**：前端自动刷新**统一读取配置项 `general.poll_interval_ms`（默认 2000ms）**，不再使用下方场景化的固定秒数。自动刷新开关关闭后不轮询；手动 [刷新] 始终可用。后端自身的工作队列轮询间隔是另一配置项 `runner.runner_poll_interval_ms`，二者互不影响。
+
+| 场景 | 轮询策略 | 接口 |
 |-|-|-|
-| 运行历史列表（有运行中的 Run / 终止中的 Run） | 每 3~5 秒 | `/api/runs` |
-| 运行历史列表（无运行中的 Run） | 每 30 秒或手动刷新 | `/api/runs` |
-| Run 详情（有运行中的 Step） | 每 2~3 秒 | `/api/runs/{runId}` |
+| 运行历史列表（自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms） | `/api/runs` |
+| 运行历史列表（自动刷新关） | 不轮询，手动 [刷新] | `/api/runs` |
+| Run 详情（有运行中的 Step，自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms） | `/api/runs/{runId}` |
 | Run 详情（已完成） | 不轮询，手动刷新 | `/api/runs/{runId}` |
 
 **不使用**：SSE 事件流、WebSocket。
@@ -1981,9 +2000,11 @@ interface StepRecord {
 |-|-|
 | 导出范围 | 当前筛选条件下的所有条目 |
 | 文件格式 | Excel（`.xlsx`），首行为表头 |
-| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10）——**D7：默认名预填且允许用户自定义**，输入框可编辑，自定义值作为 `POST /api/runs/export` 的 `fileName` 提交 |
+| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10）——**默认名预填且允许用户自定义**（D7），输入框可编辑，自定义值由**前端**用于落盘文件名；**前端落盘前仅拒绝含 `/`、`\`、`..` 的取值**（D5，见 crud-05「文件名与落盘规则」） |
 | 导出弹窗 | 展示文件名、导出条数（运行历史数 + 运行明细数）、导出目录选择 |
-| 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；由**后端**生成 `.xlsx` 写入所选目录并返回 `{filePath}`（见 crud-05 3.5.10） |
+| 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；点击 [导出] 调 `POST /api/runs/export` 取回**base64 编码的 `.xlsx` 内容**，由**前端**解码为字节流并写入所选目录（见 crud-05 3.5.10） |
+
+> **P3（原型调用 `POST /api/runs/export`）**：运行历史导出为 `.xlsx`，**由后端生成、以 base64 二进制返回，落盘由前端完成**——点击 [导出] 调 `POST /api/runs/export`（mock 返回 `{xlsx: base64}`），[选择] 使用浏览器文件系统目录选择器（`showDirectoryPicker`），前端将 base64 解码后写入所选目录（与实体导出的前端写文件口径一致；OP/Workflow/Job 导出同样由后端提供内容）。导出条数（运行历史数 + 运行明细数）与文件名 `-{jobResultCount}` 段均取自**当前筛选结果**，与导出范围联动。
 
 **Sheet 1：运行历史**（每个 Job Run 一行）
 
@@ -2421,7 +2442,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | UC-R2 | 查看 Workflow 运行详情 | 运行历史 → 点击 Workflow 类型的名称 | 进入 Workflow 执行详情页，展示只读画布（从 Workflow 定义动态渲染），节点上显示 OP 名称 |
 | UC-R3 | 从 Workflow 画布进入 OP 详情 | Workflow 执行详情 → 点击画布中某节点 | 进入该 OP 的执行详情，触发字段显示"Workflow" |
 | UC-R4 | 搜索与筛选 | 运行历史 → 搜索框输入关键词 + 选择下拉条件（类型/来源/触发/状态/工作区/版本/时间） | 列表按所有条件组合过滤 |
-| UC-R5 | 全部导出 Excel | 运行历史 → [全部导出] → 选目录 → [导出] | 生成 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（默认名，允许自定义），含"运行历史"和"运行明细"两个 sheet，写入所选目录 |
+| UC-R5 | 全部导出 Excel | 运行历史 → [全部导出] → 选目录 → [导出] | 生成 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（默认名，允许自定义），含"运行历史"和"运行明细"两个 sheet，写入所选目录（xlsx 由 `POST /api/runs/export` 生成并以 base64 返回，前端解码落盘） |
 | UC-R6 | 重试失败的 Job | 运行历史 → 失败记录 → [重试] | 从失败节点开始重试（需版本一致） |
 | UC-R7 | 重跑 Job | 运行历史 → 某记录 → [重跑] | 使用最新版本重新执行 |
 | UC-R8 | 终止运行中 Job | 运行历史 → 运行中记录 → [终止] | 终止执行 |
@@ -2524,7 +2545,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | POST | `/api/workspaces/browse` | 浏览文件系统选择工作区 |
 
 > **说明**：OP 导出（YAML）与 Workflow / Job 导出（ZIP）的目录选择由前端浏览器 File System Access API（`showDirectoryPicker`）完成，选完目录后文件直接写入该目录（`getFileHandle` + `createWritable`），不经过后端接口，不触发浏览器下载；未选目录时导出按钮置灰，不回退到下载方式。
-> **运行历史「全部导出」Excel 例外**：由**后端**生成 `.xlsx` 并写入前端传入的目录，接口返回 `{filePath}`（见 crud-05 3.5.10）。
+> **运行历史「全部导出」Excel**：同属「后端供内容、前端落盘」——`POST /api/runs/export` 由后端生成 `.xlsx` 并以 base64 返回（`{xlsx: base64}`），前端解码后写入所选目录（见 crud-05 3.5.10）。
 
 **说明**：**不涉及**事件与流式相关接口（无 SSE，无 WebSocket）。
 

@@ -220,15 +220,17 @@
 
       <div class="card">
         <div class="toolbar">
-          <input class="search" placeholder="🔍 搜索 OP / Workflow / Job 名称 / 状态 / 版本..." />
+          <input class="search" id="searchInput" placeholder="🔍 搜索 OP / Workflow / Job 名称..." oninput="applyFilters()" />
           <div class="filter-row">
-            <select class="select"><option>全部类型</option><option>OP</option><option>Workflow</option><option>Job</option></select>
-            <select class="select"><option>全部来源</option><option>持久 Job</option><option>虚拟 Job</option></select>
-            <select class="select"><option>全部触发</option><option>手动</option><option>定时</option><option>单次执行</option><option>重试</option></select>
-            <select class="select"><option>全部状态</option><option>成功</option><option>失败</option><option>运行中</option><option>超时</option></select>
-            <select class="select"><option>全部工作区</option><option>/path/to/workspace</option></select>
-            <select class="select"><option>全部版本</option><option>v1</option><option>v2</option><option>v3</option></select>
-            <select class="select"><option>时间 ▾</option><option>最近 1 小时</option><option>最近 24 小时</option><option>最近 2 天</option><option>最近 3 天</option><option>最近 5 天</option><option>最近 7 天</option></select>
+            <select class="select" id="typeFilter" onchange="applyFilters()"><option value="">全部类型</option><option value="op">OP</option><option value="workflow">Workflow</option></select>
+            <select class="select" id="sourceFilter" onchange="applyFilters()"><option value="">全部来源</option><option value="persistent">持久 Job</option><option value="virtual">虚拟 Job</option></select>
+            <select class="select" id="triggerFilter" onchange="applyFilters()"><option value="">全部触发</option><option value="manual">手动</option><option value="schedule">定时</option><option value="single_op">单次执行·OP</option><option value="single_workflow">单次执行·Workflow</option><option value="retry">重试</option></select>
+            <select class="select" id="statusFilter" onchange="applyFilters()"><option value="">全部状态</option><option value="waiting">等待中</option><option value="running">运行中</option><option value="terminating">终止中</option><option value="success">成功</option><option value="failed">失败</option><option value="timeout">超时</option><option value="cancelled">已取消</option></select>
+            <!-- 选项由 GET /api/workspaces 填充（crud-06 3.6） -->
+            <select class="select" id="workspaceFilter" onchange="applyFilters()"><option value="">全部工作区</option></select>
+            <!-- version = job_version（Job 修订号），显示与提交均为数字（crud-05 3.5.1） -->
+            <select class="select" id="versionFilter" onchange="applyFilters()"><option value="">全部版本</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+            <select class="select" id="timeFilter" onchange="applyFilters()"><option value="">时间 ▾</option><option value="last_1h">最近 1 小时</option><option value="last_24h">最近 24 小时</option><option value="last_2d">最近 2 天</option><option value="last_3d">最近 3 天</option><option value="last_5d">最近 5 天</option><option value="last_7d">最近 7 天</option><option value="last_30d">最近 30 天</option></select>
           </div>
         </div>
 
@@ -542,11 +544,25 @@
     showView('list');
   }
 
-  /* ==================== 自动刷新开关 ==================== */
+  /* ==================== 自动刷新开关（按 general.poll_interval_ms 轮询，crud-06 一） ==================== */
   var autoRefreshBtn = document.getElementById('autoRefresh');
+  var autoRefreshTimer = null;
+  function pollIntervalMs() {
+    // 前端轮询间隔 = general.poll_interval_ms（默认 2000）；勿与后端 runner.runner_poll_interval_ms 混用
+    return parseInt((SETTINGS.general || {}).poll_interval_ms, 10) || 2000;
+  }
+  function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = setInterval(refreshRuns, pollIntervalMs());
+  }
+  function stopAutoRefresh() {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  }
   autoRefreshBtn.addEventListener('click', function () {
     autoRefreshBtn.classList.toggle('on');
-    autoRefreshBtn.textContent = autoRefreshBtn.classList.contains('on') ? '自动刷新: 开' : '自动刷新: 关';
+    var on = autoRefreshBtn.classList.contains('on');
+    autoRefreshBtn.textContent = on ? '自动刷新: 开' : '自动刷新: 关';
+    if (on) startAutoRefresh(); else stopAutoRefresh();
   });
 
   function manualRefresh() {
@@ -554,98 +570,142 @@
     var now = new Date();
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
     el.textContent = '最后更新 ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    refreshRuns();   // D2：手动刷新也走统一刷新链路（重新拉取 + 按当前筛选重渲染）
   }
 
   /* ==================== 全部导出为 Excel ==================== */
   function exportAll() {
     var now = new Date();
     function pad(n, w) { return String(n).padStart(w || 2, '0'); }
-    // 默认文件名：job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx（D7：默认名允许用户自定义，输入框可编辑）
-    var fileName = 'job_result-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + pad(now.getMilliseconds(), 3) + '-' + RUNS.length + '.xlsx';
+    // D2/R6：导出条数 = 当前筛选结果（allRuns），非全部 RUNS；文件名默认 job_result-{ts}-{count}.xlsx（D7：允许自定义）
+    var count = allRuns.length;
+    var detailCount = allRuns.reduce(function (s, r) { return s + (r.steps ? r.steps.length : 0); }, 0);
+    var fileName = 'job_result-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + pad(now.getMilliseconds(), 3) + '-' + count + '.xlsx';
     document.getElementById('exportFileName').value = fileName;
-    document.getElementById('exportCount').textContent = '6';
+    document.getElementById('exportCount').textContent = count + ' 条运行历史（含 ' + detailCount + ' 条运行明细）';
     document.getElementById('exportDir').value = '';
+    exportDirHandle = null;
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
   }
+  // 运行历史导出：后端生成 xlsx 并以 base64 返回，落盘（选目录 + 写文件）由前端完成
   var exportDirHandle = null;
   function pickExportDirectory() {
-    if (window.showDirectoryPicker) {
-      window.showDirectoryPicker().then(function (dirHandle) {
-        exportDirHandle = dirHandle;
-        document.getElementById('exportDir').value = dirHandle.name;
-        document.getElementById('confirmExportBtn').disabled = false;
-      }).catch(function () {});
-    } else {
-      alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
-    }
+    if (!window.showDirectoryPicker) { alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器'); return; }
+    window.showDirectoryPicker().then(function (handle) {
+      exportDirHandle = handle;
+      document.getElementById('exportDir').value = handle.name;
+      document.getElementById('confirmExportBtn').disabled = false;
+    }).catch(function () { /* 用户取消选择 */ });
+  }
+  /* 当前筛选条件 → POST /api/runs/export 的 filters（与 crud-05 3.5.1 查询参数一致） */
+  function currentFilters() {
+    var f = {};
+    var st = document.getElementById('statusFilter').value;
+    if (st) f.status = st;
+    var ty = document.getElementById('typeFilter').value;
+    if (ty) f.targetKind = ty;
+    var so = document.getElementById('sourceFilter').value;
+    if (so) f.jobKind = so;
+    var tr = document.getElementById('triggerFilter').value;
+    if (tr) f.triggeredBy = tr;
+    var ws = document.getElementById('workspaceFilter').value;
+    if (ws) f.workspace = ws;
+    var vr = document.getElementById('versionFilter').value;
+    if (vr) f.version = vr;
+    var tm = document.getElementById('timeFilter').value;
+    if (tm) f.timeRange = tm;
+    return f;
   }
   function doExport() {
-    if (typeof XLSX === 'undefined') {
-      alert('Excel 库未加载成功，请检查网络连接后刷新页面');
-      return;
-    }
-    // Sheet1「运行历史」列严格对齐 crud-05 3.5.10（runId, name, jobId, jobKind, jobVersion, triggeredBy, workspace, status, terminatedBy, startedAtMs, finishedAtMs, durationMs）
-    var historyHeader = ['runId', 'name', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'durationMs'];
-    var historyRows = [historyHeader];
-    RUNS.forEach(function (r) {
-      historyRows.push([
-        r.runId, r.name, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace,
-        r.status, r.terminatedBy == null ? '' : r.terminatedBy,
-        r.startedAtMs, r.finishedAtMs == null ? '' : r.finishedAtMs,
-        r.durationMs == null ? '' : r.durationMs
-      ]);
-    });
-
-    // Sheet2「运行明细」列严格对齐 crud-05 3.5.10（一条 step_record = 一行）
-    var detailHeader = ['recordId', 'jobId', 'stepId', 'activationSeq', 'retrySeq', 'opId', 'opVersion', 'opName', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'durationMs'];
-    var detailRows = [detailHeader];
-    RUNS.forEach(function (run) {
-      run.steps.forEach(function (s) {
-        detailRows.push([
-          s.recordId, run.jobId, s.stepId, s.activationSeq, s.retrySeq,
-          s.opId, s.opVersion, s.opName || '', s.clientId || '',
-          s.status, s.exitCode == null ? '' : s.exitCode,
-          JSON.stringify(s.inputs || {}),
-          s.bodySnapshot || '',
-          JSON.stringify(s.outputs || {}),
-          s.rawOutput || '',
-          s.timedOut,
-          s.startedAtMs, s.finishedAtMs == null ? '' : s.finishedAtMs,
-          s.durationMs == null ? '' : s.durationMs
-        ]);
+    // crud-05 3.5.10：POST /api/runs/export 由后端生成 .xlsx 并以 base64 返回；前端解码后写入所选目录
+    var fileName = document.getElementById('exportFileName').value.trim();
+    if (!fileName) { alert('请填写导出文件名'); return; }
+    // D5：文件名不可含路径分隔符或 ".."（前端落盘前自校验）
+    if (/[\/\\]/.test(fileName) || fileName.indexOf('..') >= 0) { alert('文件名不可包含路径分隔符或 ".."'); return; }
+    if (!exportDirHandle) { alert('请先选择导出目录'); return; }
+    mockFetch('/api/runs/export', { method: 'POST', body: JSON.stringify({ filters: currentFilters() }) })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        if (!res || !res.xlsx) throw new Error('响应缺少 xlsx 内容');
+        return base64ToBytes(res.xlsx);
+      })
+      .then(function (bytes) {
+        return exportDirHandle.getFileHandle(fileName, { create: true })
+          .then(function (fh) { return fh.createWritable(); })
+          .then(function (w) { return w.write(bytes).then(function () { return w.close(); }); })
+          .then(function () {
+            alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+            closeModal('exportModal');
+          });
+      })
+      .catch(function (err) {
+        alert('导出失败：' + ((err && err.message) || '未知错误'));
       });
-    });
-
-    var fileName = document.getElementById('exportFileName').value;
-    var wb = XLSX.utils.book_new();
-    var ws1 = XLSX.utils.aoa_to_sheet(historyRows);
-    var ws2 = XLSX.utils.aoa_to_sheet(detailRows);
-    XLSX.utils.book_append_sheet(wb, ws1, '运行历史');
-    XLSX.utils.book_append_sheet(wb, ws2, '运行明细');
-
-    if (!exportDirHandle) {
-      alert('请先选择导出目录');
-      return;
-    }
-    var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
-      return fileHandle.createWritable();
-    }).then(function (writable) {
-      writable.write(wbout);
-      return writable.close();
-    }).then(function () {
-      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-      closeModal('exportModal');
-    }).catch(function (err) {
-      alert('导出失败：' + err.message);
-    });
+  }
+  // base64 → Uint8Array（.xlsx 二进制由后端以 base64 提供，前端只负责写入）
+  function base64ToBytes(b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
   }
 
   /* ==================== 分页状态 ==================== */
   var allRuns = [];
   var currentPage = 1;
   var pageSize = 10;
+
+  /* 筛选 / 搜索（与 crud-05 3.5.1 参数对齐：status / targetKind / jobKind / triggeredBy / workspace / version / timeRange / keyword） */
+  var fetchedRuns = RUNS.slice();   // 最近一次接口返回的全部 Run（初始化 = mock 数据）
+  var RANGE_MS = { last_1h: 3600000, last_24h: 86400000, last_2d: 172800000, last_3d: 259200000, last_5d: 432000000, last_7d: 604800000, last_30d: 2592000000 };
+  function applyFilters() {
+    var kw = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+    var st = document.getElementById('statusFilter').value;
+    var ty = document.getElementById('typeFilter').value;
+    var so = document.getElementById('sourceFilter').value;
+    var tr = document.getElementById('triggerFilter').value;
+    var ws = document.getElementById('workspaceFilter').value;
+    var vr = document.getElementById('versionFilter').value;
+    var tm = document.getElementById('timeFilter').value;
+    var now = Date.now();
+    allRuns = fetchedRuns.filter(function (r) {
+      if (st && r.status !== st) return false;
+      if (ty && (!r.target || r.target.kind !== ty)) return false;
+      if (so && r.jobKind !== so) return false;
+      if (tr && r.triggeredBy !== tr) return false;
+      if (ws && r.workspace !== ws) return false;
+      // version 按 job_version 精确等值；virtual Run 的 jobVersion 为 null，不参与匹配
+      if (vr && String(r.jobVersion) !== vr) return false;
+      if (tm) {
+        var t = Number(r.startedAtMs || r.createdAtMs || 0);
+        if (!t) return false;
+        if ((now - t) > RANGE_MS[tm]) return false;
+      }
+      if (kw) {
+        // keyword 仅匹配 name / target 名称（状态、版本走 status / version 参数）
+        var hay = [r.name, (r.target && r.target.name) || ''].join(' ').toLowerCase();
+        if (hay.indexOf(kw) < 0) return false;
+      }
+      return true;
+    });
+    currentPage = 1;
+    renderRunList();
+  }
+  function loadWorkspaces() {
+    mockFetch('/api/workspaces').then(function (res) {
+      var sel = document.getElementById('workspaceFilter');
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">全部工作区</option>' + (res.items || []).map(function (w) {
+        return '<option value="' + w + '"' + (w === cur ? ' selected' : '') + '>' + w + '</option>';
+      }).join('');
+    });
+  }
+  loadWorkspaces();
+  /* 刷新数据源（手动刷新 / 自动刷新共用）：重新拉取后按当前筛选重渲染 */
+  function refreshRuns() {
+    mockFetch('/api/runs').then(function (list) { fetchedRuns = list; applyFilters(); });
+  }
 
   function changePageSize() {
     pageSize = parseInt(document.getElementById('pageSize').value);
@@ -688,8 +748,8 @@
       '<tbody>';
 
     pageData.forEach(function(r) {
-      var badgeClass = r.status === 'success' ? 'badge-success' : r.status === 'failed' ? 'badge-failed' : r.status === 'timeout' ? 'badge-timeout' : 'badge-running';
-      var badgeText = r.status === 'success' ? '✓ 成功' : r.status === 'failed' ? '✗ 失败' : r.status === 'timeout' ? '⏱ 超时' : '● 运行中';
+      var badgeClass = r.status === 'success' ? 'badge-success' : r.status === 'failed' ? 'badge-failed' : r.status === 'timeout' ? 'badge-timeout' : r.status === 'waiting' ? 'badge-waiting' : r.status === 'terminating' ? 'badge-terminating' : r.status === 'cancelled' ? 'badge-off' : 'badge-running';
+      var badgeText = r.status === 'success' ? '✓ 成功' : r.status === 'failed' ? '✗ 失败' : r.status === 'timeout' ? '⏱ 超时' : r.status === 'waiting' ? '⏳ 等待中' : r.status === 'terminating' ? '⏹ 终止中' : r.status === 'cancelled' ? '⊘ 已取消' : '● 运行中';
       var targetKind = r.target && r.target.kind === 'op' ? 'OP' : 'Workflow';
       var tagClass = targetKind === 'OP' ? 'tag-op' : 'tag-wf';
       var targetName = (r.target && r.target.name) || r.name;
@@ -760,7 +820,7 @@
     card.insertAdjacentHTML('beforeend', paginationHtml);
   }
   // 调用接口获取数据
-  mockFetch('/api/runs').then(renderRunList);
+  refreshRuns();
 
   /* ==================== OP 执行详情 ==================== */
   function openOpDetail(name, execVer, curVer, from, nodeData) {
@@ -1088,7 +1148,7 @@
     if (!runId) return;
     mockFetch('/api/runs/' + runId + '/retry', { method: 'POST' }).then(function () {
       closeView();
-      mockFetch('/api/runs').then(renderRunList);
+      refreshRuns();
     });
   }
 
@@ -1108,7 +1168,7 @@
     if (!runId) return;
     mockFetch('/api/runs/' + runId + '/rerun', { method: 'POST' }).then(function () {
       closeView();
-      mockFetch('/api/runs').then(renderRunList);
+      refreshRuns();
     });
   }
 
@@ -1126,7 +1186,7 @@
     if (!runId) return;
     mockFetch('/api/runs/' + runId + '/terminate', { method: 'POST' }).then(function () {
       closeView();
-      mockFetch('/api/runs').then(renderRunList);
+      refreshRuns();
     });
   }
 

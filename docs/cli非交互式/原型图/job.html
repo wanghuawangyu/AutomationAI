@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Job 管理 · AI 自动化</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="mock-data.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -107,6 +106,10 @@
   .badge-success{color:var(--success);background:var(--success-bg)}
   .badge-failed{color:var(--failed);background:var(--failed-bg)}
   .badge-off{color:#6b7280;background:#f0f1f4}
+  .badge-timeout{color:#b45309;background:#fef3c7}
+  .badge-running{color:#1d6df0;background:rgba(29,109,240,.1)}
+  .badge-waiting{color:#6b7280;background:#f0f1f4}
+  .badge-terminating{color:#d97706;background:#fef3c7}
 
   /* ---------- 编辑器 ---------- */
   .editor-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;max-width:720px}
@@ -574,6 +577,8 @@
         : lr.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>'
         : lr.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 超时</span>'
         : lr.status === 'cancelled' ? '<span class="badge badge-off">⊘ 已取消</span>'
+        : lr.status === 'waiting' ? '<span class="badge badge-waiting">⏳ 等待中</span>'
+        : lr.status === 'terminating' ? '<span class="badge badge-terminating">⏹ 终止中</span>'
         : '<span class="badge badge-running">● 运行中</span>';
       var lastDuration = (!lr || lr.durationMs == null) ? '' : ' ' + (lr.durationMs / 1000).toFixed(1) + 's';
       var runBtn = j.needsUpdate
@@ -694,6 +699,7 @@
   /* ==================== 编辑器 ==================== */
   var currentVersion = 'v1';
   var isNewJob = false;
+  var editingJobId = null;   // 非空 = 编辑已有 Job（PUT），空 = 新建 / 复制（POST）
 
   /* 入参名一律取自 mock 数据（OP.inputs / Workflow.inputs），不再硬编码 */
 
@@ -728,6 +734,7 @@
   function openEditor(name, targetKind) {
     var isNew = !name;
     isNewJob = isNew;
+    editingJobId = (name && JOB_BY_NAME[name]) ? JOB_BY_NAME[name].jobId : null;
 
     document.getElementById('editorName').textContent = name || '（未命名）';
     var ver = (name === 'daily_cleanup' || name === 'manual_deploy' || name === 'data_sync') ? 'v2' : 'v1';
@@ -895,11 +902,50 @@
   }
 
   function doSave() {
-    closeModal('versionModal');
-    closeView();
+    var opt = document.querySelector('#versionModal input[name="versionOpt"]:checked');
+    var bump = !!(opt && opt.value === 'update');
+    var job = collectJobForm();
+    // 编辑：PUT /api/jobs/{jobId} {job, bumpVersion}；新建 / 复制：POST /api/jobs
+    var req = editingJobId
+      ? mockFetch('/api/jobs/' + editingJobId, { method: 'PUT', body: JSON.stringify({ job: job, bumpVersion: bump }) })
+      : mockFetch('/api/jobs', { method: 'POST', body: JSON.stringify(job) });
+    req.then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      closeModal('versionModal');
+      closeView();
+      renderJobList();
+    });
   }
 
-  /* ==================== 导出 ==================== */
+  /* 编辑器表单 → JobCreateRequest（crud-04 3.4.3） */
+  function collectJobForm() {
+    var kindEl = document.querySelector('input[name="targetKind"]:checked');
+    var trigEl = document.querySelector('input[name="triggerKind"]:checked');
+    var target = null;
+    if (kindEl && kindEl.value === 'op') {
+      var op = OP_BY_ID[document.getElementById('opSelect').value];
+      target = { kind: 'op', opId: op ? op.opId : '', opVersion: op ? op.version : null, clientId: document.getElementById('clientSelect').value };
+    } else if (kindEl && kindEl.value === 'workflow') {
+      var wf = WORKFLOW_BY_ID[document.getElementById('wfSelect').value];
+      target = { kind: 'workflow', workflowId: wf ? wf.workflowId : '', workflowVersion: wf ? wf.version : null };
+    }
+    var trigger = null;
+    if (trigEl) trigger = trigEl.value === 'schedule' ? { kind: 'schedule', cron: document.getElementById('cronInput').value } : { kind: 'manual' };
+    var inputs = {};
+    document.querySelectorAll('#inputTable input[data-name]').forEach(function (el) { inputs[el.dataset.name] = el.value; });
+    return {
+      name: document.getElementById('jobName').value.trim(),
+      description: document.getElementById('jobDesc').value,
+      kind: 'persistent',
+      target: target,
+      trigger: trigger,
+      workspace: document.getElementById('jobWorkspace').value,
+      inputs: inputs,
+      concurrency: document.getElementById('concurrency').value || 'skip'
+    };
+  }
+
+  /* ==================== 导出（后端生成 ZIP 内容，前端选择目录并写入文件） ==================== */
   var exportTargetName = '';
   var exportTargetVersion = '';
   var exportTargetType = '';
@@ -943,31 +989,29 @@
       alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
-  async function confirmExport() {
-    var fileName = document.getElementById('exportFileName').value;
-    if (!exportDirHandle) {
-      alert('请先选择导出目录');
-      return;
-    }
-    try {
-      var zip = new JSZip();
-      zip.file('manifest.json', JSON.stringify({ name: exportTargetName, version: exportTargetVersion, kind: 'job' }, null, 2));
-      zip.file('job.yaml', 'name: ' + exportTargetName + '\nversion: ' + exportTargetVersion + '\ntarget: ' + exportTargetType + '\ntrigger: schedule\n');
-      if (exportTargetType === 'workflow') {
-        zip.folder('workflows').file('deploy_workflow.yaml', 'name: deploy_workflow\nversion: v2\n');
-      }
-      zip.folder('ops').file('check_tests.yaml', 'name: check_tests\nversion: v2\n');
-      var blob = await zip.generateAsync({ type: 'blob' });
-
-      var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
-      var writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-      closeModal('exportModal');
-    } catch (e) {
-      alert('导出失败：' + e.message);
-    }
+  function base64ToBlob(b64) {
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: 'application/zip' });
+  }
+  function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value.trim();
+    if (!exportDirHandle) { alert('请先选择导出目录'); return; }
+    if (!fileName) { alert('请填写导出文件名'); return; }
+    var job = JOB_BY_NAME[exportTargetName];
+    // crud-04 3.4.9：POST /api/jobs/{jobId}/export 返回 {zip: base64}，由前端写入所选目录
+    mockFetch('/api/jobs/' + (job ? job.jobId : exportTargetName) + '/export', { method: 'POST' })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        return exportDirHandle.getFileHandle(fileName, { create: true })
+          .then(function (fileHandle) { return fileHandle.createWritable(); })
+          .then(function (writable) { writable.write(base64ToBlob(res.zip || '')); return writable.close(); });
+      })
+      .then(function () {
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+        closeModal('exportModal');
+      })
+      .catch(function (err) { alert('导出失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   /* ==================== 弹窗控制 ==================== */

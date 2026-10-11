@@ -156,7 +156,7 @@
 }
 ```
 
-> 列表项额外含 `lastRun`（最近一次执行摘要，可为 null；`status` 取完整 `RunStatus`：waiting/running/terminating/success/failed/cancelled/timeout——**可为非终态**（waiting / running / terminating），前端「最近运行结果」按非终态渲染为「运行中/终止中」样式，终态渲染为对应结果徽标）。
+> 列表项额外含 `lastRun`（最近一次执行摘要，可为 null；`status` 取完整 `RunStatus`：waiting/running/terminating/success/failed/cancelled/timeout——**可为非终态**（waiting / running / terminating），前端「最近运行结果」按非终态渲染为「运行中/终止中」样式，终态渲染为对应结果徽标）。**非终态 lastRun 仅展示状态、不提供操作**（不给「终止」按钮；**D4=B 定稿**：Job 列表的 lastRun 是加载结果顺带展示，不直接控制运行历史——对在途 Run 的终止/重跑/重试一律只能在**运行历史界面**操作，以收窄入口，见 crud-05 3.5.6 / 3.5.7 / 3.5.8）。
 
 **错误响应**：400 `VALIDATION_ERROR`（page_size/needsUpdate/enabled/failed/sort 取值非法）。
 

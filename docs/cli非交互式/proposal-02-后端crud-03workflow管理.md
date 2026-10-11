@@ -716,7 +716,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
 - 节点级（`step_records.status`）：`waiting → running → success/failed/timeout/cancelled`（cancelled = 被终止/取消）。同一节点**重试**重入 running（同 activation，`retry_seq+1`）；**循环回跳**开启新 activation（`activation_seq+1`，`retry_seq` 重置为 1）。
 - workflow 级（`job_runs.status`）：`waiting → running → terminating（已提交终止、等在跑 OP 收敛）→ cancelled`；正常路径 `running → success/failed/timeout`。
 - 节点的「执行到第几次」不靠内存：由 `(run_id, step_id, activation_seq, retry_seq)` 唯一定位（见 `schema.sql` 第 7 节）。
-- `engine_events` 忠实记录每次状态迁移与调度决策（含 activation_seq / retry_seq / 边状态），是 Engine 调度过程的**唯一事实来源**（表结构见 `schema.sql` 第 9 节）；运行态热路径为内存 `RunContext`，可选 checkpoint 表 `run_edge_state` / `run_node_state` 见第 10/11 节、4.3.3。
+- `engine_events` 忠实记录每次状态迁移与调度决策（含 activation_seq / retry_seq / 边状态），是 Engine 调度过程的**唯一事实来源**（表结构见 `schema.sql` 第 8 节）；运行态热路径为内存 `RunContext`，可选 checkpoint 表 `run_edge_state` / `run_node_state` 见第 9/10 节、4.3.3。
 
 **engine_events 数据生命周期**：
 
@@ -884,7 +884,7 @@ impl OnComplete for StepComplete {
 }
 ```**Engine ↔ WorkerPool 协作时序**：
 
-> **核心思想**：Engine 负责"下一步该执行谁"，WorkerPool 负责"把当前这步跑完，然后告诉 Engine 结果"。两者通过**调度事件流（`engine_events` 表，见 schema.sql 第 9 节）**通信，**事件写库后立即同步处理**（写即处理），事件驱动推进 workflow。
+> **核心思想**：Engine 负责"下一步该执行谁"，WorkerPool 负责"把当前这步跑完，然后告诉 Engine 结果"。两者通过**调度事件流（`engine_events` 表，见 schema.sql 第 8 节）**通信，**事件写库后立即同步处理**（写即处理），事件驱动推进 workflow。
 
 ```text
 Runner 调度线程 / Engine                             WorkerPool (执行器)
@@ -1031,7 +1031,7 @@ for 每条 activated 边的目标节点 N:
 - 并发 run 多 / N 大时，用 **LRU 驱逐空闲 run 的 context**（被驱逐者靠重放恢复，无损）；
 - context 只在 run 进行期间存活，终态后释放。
 
-**可选 checkpoint 表（`run_edge_state` / `run_node_state`，schema 第 10/11 节）**
+**可选 checkpoint 表（`run_edge_state` / `run_node_state`，schema 第 9/10 节）**
 
 - 定位：**可选**，**不是热路径**。两类用途：
   1. **恢复加速**：把内存 RunContext 周期性 / 结束时快照到这两张表，重启时优先读快照（缺失再回退重放），减少重放量；

@@ -507,7 +507,7 @@ var RUNS = [
     name: 'check_tests',
     jobId: 'job-check-tests',
     jobKind: 'virtual',
-    jobVersion: 2,
+    jobVersion: null,   // virtual Run 无 Job 修订号
     triggeredBy: 'single_op',
     target: { kind: 'op', opId: '10000000000000000000000000000001', opVersion: 2, name: 'check_tests' },
     inputs: { test_cmd: 'pytest' },
@@ -553,7 +553,7 @@ var RUNS = [
     name: 'deploy_workflow',
     jobId: 'job-deploy',
     jobKind: 'virtual',
-    jobVersion: 2,
+    jobVersion: null,   // virtual Run 无 Job 修订号
     triggeredBy: 'manual',
     target: { kind: 'workflow', workflowId: 'f0000000000000000000000000000001', workflowVersion: 2, name: 'deploy_workflow' },
     inputs: { target_env: 'prod' },
@@ -636,7 +636,7 @@ var RUNS = [
     name: 'review',
     jobId: 'job-review',
     jobKind: 'virtual',
-    jobVersion: 1,
+    jobVersion: null,   // virtual Run 无 Job 修订号
     triggeredBy: 'single_op',
     target: { kind: 'op', opId: '10000000000000000000000000000002', opVersion: 2, name: 'review' },
     inputs: { test_result: 'pass' },
@@ -1001,8 +1001,55 @@ function mockFetch(path, options) {
       if (path === '/api/system/version') return resolve({ version: '0.1.0' });
       if (path === '/api/settings') {
         if (method === 'PUT') {
+          // X4 修复：先校验后写入（对齐 crud-06 3.4「校验通过后更新内存」）——
+          // 校验针对**提交值**（只读项 / 未知 key / 枚举 / 布尔 / 数值上限），任一命中即 400 且**不改内存**；
+          // 全部通过才写入并派生 Worker 池（只读派生项不参与写入）。
+          var READONLY = ['db_path', 'workspace_root', 'config_version', 'db_version'];
+          var LIMITS = {
+            'general.poll_interval_ms': 60000,
+            'client.client_import_max_bytes': 104857600,
+            'op.op_import_max_bytes': 104857600,
+            'workflow.workflow_max_nodes': 1000,
+            'history.job_queue_waiting_max': 1000,
+            'history.job_queue_running_max': 10,
+            'history.history_max_per_job': 1000,
+            'history.history_max_total': 100000,
+            'history.history_max_age_days': 180,
+            'engine.max_loop_multiplier': 10000,
+            'engine.engine_event_retention_days': 30,
+            'runner.runner_poll_interval_ms': 60000,
+            'runner.runner_batch_size': 100,
+            'scheduler.scheduler_max_jobs': 1000,
+            'log.log_max_files': 100
+          };
+          var BOOL_KEYS = ['workflow.workflow_auto_layout'];
+          var ENUM_KEYS = { 'log.log_level': ['debug', 'info', 'warn', 'error'] };
           var upd = body || {};
-          Object.keys(upd).forEach(function (g) { if (SETTINGS[g]) Object.keys(upd[g]).forEach(function (k) { SETTINGS[g][k] = upd[g][k]; }); });
+          var errs = [];
+          Object.keys(upd).forEach(function (g) {
+            if (!SETTINGS[g]) { errs.push('未知配置分组: ' + g); return; }
+            Object.keys(upd[g] || {}).forEach(function (k) {
+              var gk = g + '.' + k;
+              var val = String(upd[g][k]);
+              if (READONLY.indexOf(k) >= 0) { errs.push('只读配置不可修改: ' + gk); return; }
+              if (!(k in SETTINGS[g])) { errs.push('未知配置项: ' + gk); return; }
+              if (ENUM_KEYS[gk] && ENUM_KEYS[gk].indexOf(val) < 0) { errs.push(gk + ' 取值非法: ' + val); return; }
+              if (BOOL_KEYS.indexOf(gk) >= 0 && val !== 'true' && val !== 'false') { errs.push(gk + ' 须为 true/false'); return; }
+              if (LIMITS[gk]) {
+                var v = parseInt(val, 10);
+                if (isNaN(v)) { errs.push(gk + ' 须为整数: ' + val); return; }
+                if (!(gk === 'engine.max_loop_multiplier' && v === 0) && v > LIMITS[gk]) {
+                  errs.push(gk + '=' + v + '（上限 ' + LIMITS[gk] + '）');
+                }
+              }
+            });
+          });
+          if (errs.length) return resolve({ error: 'VALIDATION_ERROR', message: errs.join('；') });
+          Object.keys(upd).forEach(function (g) {
+            Object.keys(upd[g] || {}).forEach(function (k) {
+              if (READONLY.indexOf(k) < 0) SETTINGS[g][k] = String(upd[g][k]);
+            });
+          });
           var runMax = parseInt(SETTINGS.history.job_queue_running_max, 10) || 10;
           SETTINGS.worker.worker_pool_size = String(Math.ceil(runMax * 1.5));
           SETTINGS.worker.worker_max_concurrency = SETTINGS.worker.worker_pool_size;
@@ -1010,12 +1057,24 @@ function mockFetch(path, options) {
         return resolve(SETTINGS);
       }
       if (path === '/api/settings/reset') return resolve(SETTINGS);
-      if (path === '/api/workspaces') return resolve({ items: ['/path/to/workspace', '/path/ws-001', '/path/ws-003'] });
+      if (path === '/api/workspaces') {
+        // crud-06 3.6：job_runs.workspace 去重，按最近使用（max(created_at_ms)）倒序，默认 limit=10
+        var wsLast = {};
+        RUNS.forEach(function (r) {
+          var t = Number(r.createdAtMs || r.startedAtMs || 0);
+          if (r.workspace && !(wsLast[r.workspace] >= t)) wsLast[r.workspace] = t;
+        });
+        var wsItems = Object.keys(wsLast).sort(function (a, b) { return wsLast[b] - wsLast[a]; }).slice(0, 10);
+        return resolve({ items: wsItems });
+      }
 
       /* ---------- 列表 ---------- */
       if (path === '/api/clients') {
         if (method === 'POST') {
-          var nc = Object.assign({ clientId: __uid32(), createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+          // X7：同名 409（crud-01 3.1.3）；id / 时间戳由后端生成（请求携带则忽略）
+          if (body && CLIENT_BY_NAME[body.name]) return resolve({ error: 'CLIENT_NAME_EXISTS', message: 'Client 名称已存在: ' + body.name });
+          var nb = Object.assign({}, body); delete nb.clientId; delete nb.createdAtMs; delete nb.updatedAtMs;
+          var nc = Object.assign({ clientId: __uid32(), createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, nb);
           CLIENTS.push(nc); CLIENT_BY_ID[nc.clientId] = nc; CLIENT_BY_NAME[nc.name] = nc;
           return resolve(nc);
         }
@@ -1023,7 +1082,9 @@ function mockFetch(path, options) {
       }
       if (path === '/api/ops') {
         if (method === 'POST') {
-          var no = Object.assign({ opId: __uid32(), version: 1, timeoutMs: 300000, interactive: false, inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+          if (body && OP_BY_NAME[body.name]) return resolve({ error: 'OP_NAME_EXISTS', message: 'OP 名称已存在: ' + body.name });
+          var nb = Object.assign({}, body); delete nb.opId; delete nb.version; delete nb.createdAtMs; delete nb.updatedAtMs;
+          var no = Object.assign({ opId: __uid32(), version: 1, timeoutMs: 300000, interactive: false, inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, nb);
           OPS.push(no); OP_BY_ID[no.opId] = no; OP_BY_NAME[no.name] = no;
           return resolve(no);
         }
@@ -1031,7 +1092,9 @@ function mockFetch(path, options) {
       }
       if (path === '/api/workflows') {
         if (method === 'POST') {
-          var nw = Object.assign({ workflowId: __uid32(), version: 1, nodes: [], edges: [], inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+          if (body && WORKFLOW_BY_NAME[body.name]) return resolve({ error: 'WORKFLOW_NAME_EXISTS', message: 'Workflow 名称已存在: ' + body.name });
+          var nb = Object.assign({}, body); delete nb.workflowId; delete nb.version; delete nb.createdAtMs; delete nb.updatedAtMs;
+          var nw = Object.assign({ workflowId: __uid32(), version: 1, nodes: [], edges: [], inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, nb);
           WORKFLOWS.push(nw); WORKFLOW_BY_ID[nw.workflowId] = nw; WORKFLOW_BY_NAME[nw.name] = nw;
           return resolve(nw);
         }
@@ -1039,7 +1102,9 @@ function mockFetch(path, options) {
       }
       if (path === '/api/jobs') {
         if (method === 'POST') {
-          var nj = Object.assign({ jobId: __uid32(), version: 1, kind: 'persistent', target: null, trigger: null, enabled: true, inputs: {}, concurrency: 'skip', needsUpdate: false, createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+          if (body && JOB_BY_NAME[body.name]) return resolve({ error: 'JOB_NAME_EXISTS', message: 'Job 名称已存在: ' + body.name });
+          var nb = Object.assign({}, body); delete nb.jobId; delete nb.version; delete nb.createdAtMs; delete nb.updatedAtMs;
+          var nj = Object.assign({ jobId: __uid32(), version: 1, kind: 'persistent', target: null, trigger: null, enabled: true, inputs: {}, concurrency: 'skip', needsUpdate: false, createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, nb);
           JOBS.push(nj); JOB_BY_ID[nj.jobId] = nj; JOB_BY_NAME[nj.name] = nj;
           return resolve(nj);
         }
@@ -1047,21 +1112,49 @@ function mockFetch(path, options) {
       }
       if (path === '/api/runs') return resolve(RUNS);
 
-      /* ---------- 导入（D3：实际创建默认对象；须先于 ops/workflows/jobs 子资源判断，避免被 {id} 分支拦截） ---------- */
+      /* ---------- 导入（D7=A：mock 校验重名 409；实际创建默认对象；须先于 ops/workflows/jobs 子资源判断，避免被 {id} 分支拦截） ---------- */
       if (path === '/api/ops/import') {
-        var iop = Object.assign({ opId: __uid32(), name: (body.name || 'imported_op'), type: (body.type || 'bash'), version: 1, description: '导入的 OP', content: (body.content || ''), timeoutMs: 300000, interactive: false, inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+        var iopName = (body && body.name) || 'imported_op';
+        if (OP_BY_NAME[iopName]) return resolve({ error: 'OP_NAME_EXISTS', message: '同名 OP 已存在（导入冲突）: ' + iopName });   // X7：crud-02 3.2.8
+        var iop = {
+          opId: __uid32(), name: iopName, type: (body && body.type) || 'prompt', version: 1,
+          description: '导入的 OP', content: (body && body.content) || '', timeoutMs: 300000,
+          interactive: false, inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+        };
         OPS.push(iop); OP_BY_ID[iop.opId] = iop; OP_BY_NAME[iop.name] = iop;
-        return resolve({ ok: true, opId: iop.opId });
+        return resolve(iop);   // crud-02 3.2.8：返回导入创建的 OP 对象
       }
       if (path === '/api/workflows/import') {
-        var iwf = Object.assign({ workflowId: __uid32(), name: (body.name || 'imported_workflow'), version: 1, nodes: [], edges: [], inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+        var iwfName = (body && body.name) || 'imported_workflow';
+        if (WORKFLOW_BY_NAME[iwfName]) return resolve({ error: 'WORKFLOW_NAME_EXISTS', message: '同名 Workflow 已存在（导入冲突）: ' + iwfName });   // X7：crud-03 3.3.9
+        // 模拟「按 manifest 复用依赖」：以默认骨架（仅 Start + End）创建；依赖复用版本不一致的 warnings 模拟场景略
+        var iwfSid = __uid32(), iwfEid = __uid32();
+        var iwf = {
+          workflowId: __uid32(), name: iwfName, version: 1, description: '导入的 Workflow',
+          inputs: [], outputs: [],
+          nodes: [
+            { nodeId: iwfSid, label: 'node_start', kind: 'start', position: { x: 40, y: 175 } },
+            { nodeId: iwfEid, label: 'node_end', kind: 'end', position: { x: 620, y: 175 } }
+          ],
+          edges: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+        };
         WORKFLOWS.push(iwf); WORKFLOW_BY_ID[iwf.workflowId] = iwf; WORKFLOW_BY_NAME[iwf.name] = iwf;
-        return resolve({ ok: true, workflowId: iwf.workflowId });
+        return resolve(iwf);   // crud-03 3.3.9：返回导入创建的 Workflow 对象
       }
       if (path === '/api/jobs/import') {
-        var ijob = Object.assign({ jobId: __uid32(), name: (body.name || 'imported_job'), version: 1, kind: 'persistent', target: (body.target || null), trigger: (body.trigger || null), enabled: true, inputs: {}, concurrency: 'skip', needsUpdate: false, createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, body);
+        var ijobName = (body && body.name) || 'imported_job';
+        if (JOB_BY_NAME[ijobName]) return resolve({ error: 'JOB_NAME_EXISTS', message: '同名 Job 已存在（导入冲突）: ' + ijobName });   // X7：crud-04 3.4.10
+        // 模拟「按 manifest 复用依赖」：target 指向现有首个 Workflow（复用，不自动创建）；Job.version 重置为 1（crud-04 3.4.10）
+        var ijobWf = WORKFLOWS[0];
+        var ijob = {
+          jobId: __uid32(), name: ijobName, version: 1, kind: 'persistent', description: '导入的 Job',
+          target: { kind: 'workflow', workflowId: ijobWf ? ijobWf.workflowId : '', workflowVersion: ijobWf ? ijobWf.version : 1 },
+          trigger: { kind: 'manual' }, enabled: true, workspace: '/path/to/workspace',
+          inputs: {}, concurrency: 'skip', needsUpdate: false,
+          createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+        };
         JOBS.push(ijob); JOB_BY_ID[ijob.jobId] = ijob; JOB_BY_NAME[ijob.name] = ijob;
-        return resolve({ ok: true, jobId: ijob.jobId });
+        return resolve(ijob);   // crud-04 3.4.10：返回导入创建的 Job 对象
       }
 
       /* ---------- Client 子资源 ---------- */
@@ -1069,8 +1162,11 @@ function mockFetch(path, options) {
         var cid = parts[2], cl = CLIENT_BY_ID[cid];
         if (parts[3] === 'test') return resolve({ success: true, exitCode: 0, rawOutput: 'ok', error: null, durationMs: 23 });
         if (method === 'DELETE') {
+          // crud-01 3.1.5：被 Job（target.kind=op 的 target.clientId）引用 → 409
+          var cRefJob = JOBS.find(function (j) { return j.target && j.target.clientId === cid; });
+          if (cRefJob) return resolve({ error: 'CLIENT_REFERENCED', message: 'Client 正被 Job「' + cRefJob.name + '」引用，删除被拒绝' });
           var ci = CLIENTS.findIndex(function (c) { return c.clientId === cid; });
-          if (ci >= 0) { CLIENTS.splice(ci, 1); delete CLIENT_BY_ID[cid]; }
+          if (ci >= 0) { delete CLIENT_BY_NAME[CLIENTS[ci].name]; CLIENTS.splice(ci, 1); delete CLIENT_BY_ID[cid]; }
           return resolve({ ok: true });
         }
         if (method === 'PUT' && cl) { Object.assign(cl, body, { clientId: cid, updatedAtMs: String(Date.now()) }); return resolve(cl); }
@@ -1083,11 +1179,24 @@ function mockFetch(path, options) {
         if (parts[3] === 'execute') return resolve({ runId: __newRunId() });
         if (parts[3] === 'export') return resolve({ yaml: 'name: ' + (op ? op.name : '') + '\ntype: ' + (op ? op.type : '') + '\n' });
         if (method === 'PUT' && op) {
-          if (body.versionBump === true) op.version = (parseInt(op.version, 10) || 1) + 1;
-          Object.assign(op, body, { opId: op.opId, updatedAtMs: String(Date.now()) });
+          // crud-02 3.2.4：请求体 {op, bumpVersion}；bumpVersion=true → version+1，false → 覆盖当前版本
+          var opUpd = Object.assign({}, body.op || {});
+          if (opUpd.name && opUpd.name !== op.name && OP_BY_NAME[opUpd.name]) return resolve({ error: 'OP_NAME_EXISTS', message: 'OP 名称已存在: ' + opUpd.name });
+          delete opUpd.opId; delete opUpd.version; delete opUpd.createdAtMs; delete opUpd.updatedAtMs;
+          delete OP_BY_NAME[op.name];
+          Object.assign(op, opUpd, { updatedAtMs: String(Date.now()) });
+          if (body.bumpVersion === true) op.version = (parseInt(op.version, 10) || 1) + 1;
+          OP_BY_NAME[op.name] = op;
           return resolve(op);
         }
         if (method === 'DELETE' && op) {
+          // crud-02 3.2.5：被 Workflow 节点或 Job.target(kind=op) 引用 → 409
+          var opRefWf = WORKFLOWS.find(function (w) { return (w.nodes || []).some(function (n) { return n.opId === op.opId; }); });
+          var opRefJob = JOBS.find(function (j) { return j.target && j.target.kind === 'op' && j.target.opId === op.opId; });
+          if (opRefWf || opRefJob) {
+            var opRefBy = opRefWf ? 'Workflow「' + opRefWf.name + '」' : 'Job「' + opRefJob.name + '」';
+            return resolve({ error: 'OP_REFERENCED', message: 'OP 正被 ' + opRefBy + ' 引用，删除被拒绝' });
+          }
           var oi = OPS.findIndex(function (x) { return x.opId === parts[2]; });
           if (oi >= 0) OPS.splice(oi, 1);
           delete OP_BY_ID[parts[2]]; delete OP_BY_NAME[op.name];
@@ -1111,13 +1220,22 @@ function mockFetch(path, options) {
           return resolve({ needsUpdate: outs.length > 0, outdatedNodes: outs });
         }
         if (parts[3] === 'outdated-nodes' || (parts[3] === 'needs-update' && parts[4] === 'nodes')) return resolve({ outdatedNodes: [] });
-        if (parts[3] === 'export') return resolve({ zip: 'UEsDBBQACAgI...' });
+        if (parts[3] === 'export') return resolve({ zip: 'UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==' });
         if (method === 'PUT' && wf) {
-          if (body.versionBump === true) wf.version = (parseInt(wf.version, 10) || 1) + 1;
-          Object.assign(wf, body, { workflowId: wf.workflowId, updatedAtMs: String(Date.now()) });
+          // crud-03 3.3.4：请求体 {workflow, bumpVersion}
+          var wfUpd = Object.assign({}, body.workflow || {});
+          if (wfUpd.name && wfUpd.name !== wf.name && WORKFLOW_BY_NAME[wfUpd.name]) return resolve({ error: 'WORKFLOW_NAME_EXISTS', message: 'Workflow 名称已存在: ' + wfUpd.name });
+          delete wfUpd.workflowId; delete wfUpd.version; delete wfUpd.createdAtMs; delete wfUpd.updatedAtMs;
+          delete WORKFLOW_BY_NAME[wf.name];
+          Object.assign(wf, wfUpd, { updatedAtMs: String(Date.now()) });
+          if (body.bumpVersion === true) wf.version = (parseInt(wf.version, 10) || 1) + 1;
+          WORKFLOW_BY_NAME[wf.name] = wf;
           return resolve(wf);
         }
         if (method === 'DELETE' && wf) {
+          // crud-03 3.3.5：被 Job 引用 → 409
+          var wfRefJob = JOBS.find(function (j) { return j.target && j.target.kind === 'workflow' && j.target.workflowId === wf.workflowId; });
+          if (wfRefJob) return resolve({ error: 'WORKFLOW_REFERENCED', message: 'Workflow 正被 Job「' + wfRefJob.name + '」引用，删除被拒绝' });
           var wi = WORKFLOWS.findIndex(function (x) { return x.workflowId === parts[2]; });
           if (wi >= 0) WORKFLOWS.splice(wi, 1);
           delete WORKFLOW_BY_ID[parts[2]]; delete WORKFLOW_BY_NAME[wf.name];
@@ -1132,17 +1250,23 @@ function mockFetch(path, options) {
         if (parts[3] === 'run') return resolve({ runId: __newRunId() });
         if (parts[3] === 'enable' && job) { job.enabled = true; job.updatedAtMs = String(Date.now()); return resolve(job); }
         if (parts[3] === 'disable' && job) { job.enabled = false; job.updatedAtMs = String(Date.now()); return resolve(job); }
-        if (parts[3] === 'export') return resolve({ zip: 'UEsDBBQACAgI...' });
+        if (parts[3] === 'export') return resolve({ zip: 'UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==' });
         if (parts[3] === 'last-run') return resolve(lastRunOfJob(parts[2]));
         if (method === 'PUT' && job) {
-          if (body.versionBump === true) job.version = (parseInt(job.version, 10) || 1) + 1;
-          Object.assign(job, body, { jobId: job.jobId, updatedAtMs: String(Date.now()) });
+          // crud-04 3.4.4：请求体 {job, bumpVersion}，job 为全量替换
+          var jobUpd = Object.assign({}, body.job || {});
+          if (jobUpd.name && jobUpd.name !== job.name && JOB_BY_NAME[jobUpd.name]) return resolve({ error: 'JOB_NAME_EXISTS', message: 'Job 名称已存在: ' + jobUpd.name });
+          delete jobUpd.jobId; delete jobUpd.version; delete jobUpd.createdAtMs; delete jobUpd.updatedAtMs;
+          delete JOB_BY_NAME[job.name];
+          Object.assign(job, jobUpd, { updatedAtMs: String(Date.now()) });
+          if (body.bumpVersion === true) job.version = (parseInt(job.version, 10) || 1) + 1;
+          JOB_BY_NAME[job.name] = job;
           return resolve(job);
         }
         if (method === 'DELETE' && job) {
-          // A1/D1：有在途实例（waiting/running/terminating）拒绝删除
+          // crud-04 3.4.5：有在途实例（waiting/running/terminating）拒绝删除；终止只能在运行历史页操作（D4=B）
           var jobActive = RUNS.some(function (r) { return r.jobId === parts[2] && (r.status === 'waiting' || r.status === 'running' || r.status === 'terminating'); });
-          if (jobActive) return resolve({ error: 'JOB_HAS_ACTIVE_RUNS', message: '该 Job 存在在途运行实例（waiting/running/terminating），请先终止或等待完成' });
+          if (jobActive) return resolve({ error: 'JOB_HAS_ACTIVE_RUNS', message: '该 Job 存在在途运行实例（waiting/running/terminating），请到运行历史终止或等待完成后再删除' });
           var ji = JOBS.findIndex(function (x) { return x.jobId === parts[2]; });
           if (ji >= 0) JOBS.splice(ji, 1);
           delete JOB_BY_ID[parts[2]]; delete JOB_BY_NAME[job.name];
@@ -1153,7 +1277,64 @@ function mockFetch(path, options) {
 
       /* ---------- Run 子资源 ---------- */
       if (parts[1] === 'runs') {
-        if (path === '/api/runs/export') return resolve({ filePath: (SETTINGS.runDir || '') + '/export/job_result.xlsx' });
+        if (path === '/api/runs/export') {
+          // crud-05 3.5.10：后端按筛选生成两 sheet 的 .xlsx，以 base64 二进制返回；前端解码后写入所选目录
+          var ef = body.filters || {};
+          var EF_ENUMS = {
+            status: ['waiting', 'running', 'terminating', 'success', 'failed', 'cancelled', 'timeout'],
+            triggeredBy: ['manual', 'schedule', 'single_op', 'single_workflow', 'retry'],
+            targetKind: ['op', 'workflow'],
+            jobKind: ['persistent', 'virtual'],
+            timeRange: ['last_1h', 'last_24h', 'last_2d', 'last_3d', 'last_5d', 'last_7d', 'last_30d']
+          };
+          var EF_RANGE_MS = { last_1h: 3600000, last_24h: 86400000, last_2d: 172800000, last_3d: 259200000, last_5d: 432000000, last_7d: 604800000, last_30d: 2592000000 };
+          var eErrs = [];
+          Object.keys(EF_ENUMS).forEach(function (k) {
+            if (ef[k] != null && EF_ENUMS[k].indexOf(ef[k]) < 0) eErrs.push('filters.' + k + ' 取值非法: ' + ef[k]);
+          });
+          if (ef.version != null && !/^\d+$/.test(String(ef.version))) eErrs.push('filters.version 须为数字: ' + ef.version);
+          if (eErrs.length) return resolve({ error: 'VALIDATION_ERROR', message: eErrs.join('；') });
+          var efNow = Date.now();
+          var efRuns = RUNS.filter(function (r) {
+            if (ef.status && r.status !== ef.status) return false;
+            if (ef.targetKind && (!r.target || r.target.kind !== ef.targetKind)) return false;
+            if (ef.jobKind && r.jobKind !== ef.jobKind) return false;
+            if (ef.triggeredBy && r.triggeredBy !== ef.triggeredBy) return false;
+            if (ef.workspace && r.workspace !== ef.workspace) return false;
+            if (ef.version && String(r.jobVersion) !== String(ef.version)) return false;
+            if (ef.timeRange) {
+              var efT = Number(r.startedAtMs || r.createdAtMs || 0);
+              if (!efT) return false;
+              if ((efNow - efT) > EF_RANGE_MS[ef.timeRange]) return false;
+            }
+            return true;
+          });
+          // 后端生成工作簿（原型在浏览器内借 CDN 的 SheetJS 扮演后端生成）
+          var historyHeader = ['runId', 'name', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'durationMs'];
+          var detailHeader = ['recordId', 'jobId', 'stepId', 'activationSeq', 'retrySeq', 'opId', 'opVersion', 'opName', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'durationMs'];
+          var historyRows = [historyHeader];
+          var detailRows = [detailHeader];
+          efRuns.forEach(function (r) {
+            historyRows.push([
+              r.runId, r.name, r.jobId, r.jobKind, r.jobVersion == null ? '' : r.jobVersion,
+              r.triggeredBy, r.workspace, r.status, r.terminatedBy || '',
+              r.startedAtMs, r.finishedAtMs, r.durationMs
+            ]);
+            (r.steps || []).forEach(function (s) {
+              detailRows.push([
+                s.recordId, r.jobId, s.stepId, s.activationSeq, s.retrySeq, s.opId, s.opVersion, s.opName, s.clientId,
+                s.status, s.exitCode, JSON.stringify(s.inputs == null ? null : s.inputs), s.bodySnapshot || '',
+                JSON.stringify(s.outputs == null ? null : s.outputs), s.rawOutput || '', s.timedOut,
+                s.startedAtMs, s.finishedAtMs, s.durationMs
+              ]);
+            });
+          });
+          var efWb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(efWb, XLSX.utils.aoa_to_sheet(historyRows), '运行历史');
+          XLSX.utils.book_append_sheet(efWb, XLSX.utils.aoa_to_sheet(detailRows), '运行明细');
+          var efB64 = XLSX.write(efWb, { bookType: 'xlsx', type: 'base64' });
+          return resolve({ xlsx: efB64 });
+        }
         var run = RUN_BY_ID[parts[2]];
         if (!run) return resolve(null);
         if (parts[3] === 'can-retry') {

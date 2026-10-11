@@ -19,7 +19,7 @@
 | POST | `/api/runs/{runId}/rerun` | — | `{runId}` | 重跑 (用最新版本) |
 | POST | `/api/runs/{runId}/retry` | — | `{runId}` | 从失败 step 重试 |
 | GET | `/api/runs/{runId}/can-retry` | — | `{canRetry:bool, reason:string}` | 检查前提条件 |
-| POST | `/api/runs/export` | `{filters, filePath}` | `{filePath}` | 导出 Excel |
+| POST | `/api/runs/export` | `{filters}` | `{xlsx: base64}` | 生成运行历史 Excel（前端解码后落盘） |
 
 **JobRun 对象**：
 ```json
@@ -74,13 +74,13 @@
 }
 ```
 
-**时间筛选**：`?timeRange=last_2d|last_3d|last_5d|custom&startMs=&endMs=`
+**时间筛选**：`?timeRange=last_1h|last_24h|last_2d|last_3d|last_5d|last_7d|last_30d`（固定枚举，无自定义区间）
 
-**导出 Excel**：
+**导出 Excel（`POST /api/runs/export` 生成，前端落盘）**：
 - Sheet1 "运行历史"：runId, name, jobId, jobKind, jobVersion, triggeredBy, workspace, status, terminatedBy, startedAtMs, finishedAtMs, durationMs（name 为 JobRun 名称快照，见字段说明）
 - Sheet2 "运行明细"：recordId, jobId, stepId, activationSeq, retrySeq, opId, opVersion, opName, clientId, status, exitCode, inputs(JSON), bodySnapshot, outputs(JSON), rawOutput, timedOut, startedAtMs, finishedAtMs, durationMs
 - 文件名：`job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`；时间戳在前（便于按导出时序排序）、`jobResultCount` = 本次导出的运行历史条数（Sheet1 行数）
-- 由后端生成文件写入用户指定目录（前端传目录路径）。
+- **`POST /api/runs/export` 由后端按上述两 Sheet 生成 `.xlsx`，以 base64 二进制返回（`{xlsx: base64}`），不落盘**；前端解码后写入用户所选目录（详见 3.5.10）。
 
 **JobRun 对象字段说明**：
 
@@ -90,7 +90,7 @@
 | name | string | 运行名称快照：persistent = jobs.name；virtual（single_op / single_workflow）= op.name / workflow.name（= target.name） |
 | jobId | string(32 位 UUID) | 所属 Job |
 | jobKind | enum | `persistent` / `virtual` |
-| jobVersion | integer | Job 版本 |
+| jobVersion | integer \| null | Job 版本（Job 修订号）；**virtual Run 无 Job 修订号 → `null`**（见 3.5.1 `version` 过滤语义） |
 | triggeredBy | enum | `manual` / `schedule` / `single_op` / `single_workflow` / `retry` |
 | target | object | 目标快照：`{kind, opId, opVersion, workflowId, workflowVersion, name}`（拆列存储于 target_kind / target_id / target_version / target_name；Client 信息在步骤层 step_records.client_id 记录） |
 | inputs | object | 本次执行入参 |
@@ -158,10 +158,8 @@
 | status | query | string | 否 | — | 状态：waiting/running/terminating/success/failed/cancelled/timeout |
 | workspace | query | string | 否 | — | 工作区 |
 | jobKind | query | string | 否 | — | 来源：persistent/virtual |
-| version | query | string | 否 | — | 版本号，按 **`job_version`**（Job 修订号）精确等值过滤——非 target 快照版本（OP / Workflow 的 target_version）；若需按快照版本过滤暂不支持（可用 `keyword` 检索目标名称辅助定位） |
-| timeRange | query | string | 否 | — | `last_2d` / `last_3d` / `last_5d` / `custom` |
-| startMs | query | string | 条件 | — | timeRange=custom 时必填（毫秒时间戳） |
-| endMs | query | string | 条件 | — | timeRange=custom 时必填 |
+| version | query | string | 否 | — | **纯数字**（如 `2`），按 **`job_version`**（Job 修订号）精确等值过滤——非 target 快照版本（OP / Workflow 的 target_version）；**virtual Run 的 `job_version` 为 NULL，任何版本值都不匹配**。若需按快照版本过滤暂不支持（可用 `keyword` 检索目标名称辅助定位） |
+| timeRange | query | string | 否 | — | `last_1h` / `last_24h` / `last_2d` / `last_3d` / `last_5d` / `last_7d` / `last_30d`（固定枚举，无自定义区间） |
 | sort | query | string | 否 | `-startedAtMs` | 排序字段：startedAtMs/durationMs/createdAtMs，`-` 前缀降序 |
 
 **请求体**：无
@@ -172,7 +170,7 @@
 { "items": [ JobRun, ... ], "total": 6, "page": 1, "page_size": 10 }
 ```
 
-**错误响应**：400 `VALIDATION_ERROR`（page_size/status/triggeredBy/timeRange/sort 取值非法，或 timeRange=custom 缺 startMs/endMs）。
+**错误响应**：400 `VALIDATION_ERROR`（page_size/status/triggeredBy/timeRange/sort 取值非法）。
 
 ---
 
@@ -377,9 +375,9 @@
 
 ---
 
-### 3.5.10 POST /api/runs/export —— 导出 Excel
+### 3.5.10 POST /api/runs/export —— 生成运行历史 Excel
 
-**功能说明**：按筛选条件将运行历史导出为 Excel（Sheet1 运行历史 + Sheet2 运行明细），由后端生成文件写入前端指定的目录。
+**功能说明**：按筛选条件由**后端生成** Excel（Sheet1 运行历史 + Sheet2 运行明细），以 **base64 二进制**形式返回。接口**只生成文件内容、不落盘**；前端拿到 base64 后解码为字节流，由用户在浏览器中选择目录写入磁盘。程序形态为非 Tauri 的普通 Rust 服务端 + HTTP + 浏览器前端，因此**文件落盘始终在前端完成**（与 OP / Workflow / Job 实体导出同一口径：后端供内容、前端写文件）。
 
 **路径参数**：无
 
@@ -389,31 +387,36 @@
 
 ```json
 {
-  "filters": {"status":"failed","timeRange":"last_5d"},
-  "filePath": "/path/to/export_dir",
-  "fileName": "job_result-20261007120000000-6.xlsx"
+  "filters": {"status":"failed","timeRange":"last_5d"}
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| filters | object | 否 | 与 GET /api/runs 一致的筛选条件 |
-| filePath | string | 是 | 导出目标目录路径（后端生成文件写入） |
-| fileName | string | 否 | **自定义文件名（D7）**：不传时后端生成默认名 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前、便于按导出时序排序；`jobResultCount` = 本次导出条数 = Sheet1 行数）；**所有导出 UI 的输入框默认预填该默认名且允许用户修改**，修改后的值作为本字段提交 |
+| filters | object | 否 | 与 GET /api/runs 一致的筛选条件（status / targetKind / jobKind / triggeredBy / workspace / version / timeRange），仅用于确定导出范围 |
 
 **成功响应 `200 OK`**：
 
 ```json
-{ "filePath": "/path/to/export_dir/job_result-20261007120000000-6.xlsx" }
+{ "xlsx": "UEsDBBQACAgI..." }
 ```
 
-**文件名与边界（C5/D7 定稿）**：
+| 字段 | 类型 | 说明 |
+|-|-|-|
+| xlsx | string (base64) | 生成的 `.xlsx` 文件二进制内容（base64 编码）。两个 Sheet：运行历史（每个 Run 一行）+ 运行明细（每个 step 一行），列定义见 3.5「导出 Excel」。前端解码后原样写入用户所选目录 |
 
-- **同名文件已存在**：**覆盖写入**（导出即最新快照，同路径旧文件被替换；默认名含毫秒时间戳 + 计数，天然规避重名；用户自定义重名时覆盖并在响应 filePath 中体现实际路径）。
-- **并发导出**：多次导出互相独立；后端**单进程内按请求顺序串行写文件**，写入采用**原子落盘**（先写 `*.tmp` 临时文件再 rename，避免半成品文件）；同目录并发导出各自独立完成。
-- **失败与重试**：写失败返回 500 `INTERNAL_ERROR`，**不自动重试**（错误码含原因：目录不存在 / 权限 / 磁盘满）；前端可在失败提示后由用户重新点击导出。
+**文件名与落盘规则（D5/D7，前端侧）**：
 
-**错误响应**：400 `VALIDATION_ERROR`（filePath 缺失/非法、fileName 含非法字符（`\ / : * ? " < > |` 或空）、**或 filters 取值非法——与 GET /api/runs 同一校验：status / triggeredBy / timeRange / sort 等枚举、page_size、timeRange=custom 缺 startMs/endMs**）；500 `INTERNAL_ERROR`（写文件失败）。
+| 项目 | 规则 |
+|-|-|
+| 文件名 | UI 前端预填默认名 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前、便于按导出时序排序；`jobResultCount` = 本次导出条数 = Sheet1 行数），**允许用户自定义（D7）**；文件名**不经过本接口**，由前端落盘时使用 |
+| 校验 | 前端落盘前**仅拒绝含路径分隔符（`/`、`\`）或 `..` 的文件名**（D5）；**除此外不校验任何字符或扩展名**，其余非法字符交由写入时浏览器的 OS/IO 决定成败 |
+| 写入 | 前端以 `showDirectoryPicker()` 选择目录 → `getFileHandle(name, {create:true})` → `createWritable()` 写字节流（**同名覆盖**） |
+| 并发与失败 | 多次导出互相独立；写失败由浏览器抛出、前端提示，用户可重新导出 |
+
+**错误响应**：400 `VALIDATION_ERROR`（filters 取值非法——与 GET /api/runs 同一校验：status / targetKind / jobKind / triggeredBy / timeRange 枚举、version 须为数字）。
+
+> **说明**：本接口**不接收** `filePath` / `fileName`，返回的是**文件内容（base64）**而非 `{filePath}`。文件名的校验与文件写入均在前端进行（D5 规则在前端执行）；接口职责 = 「按筛选生成 xlsx 内容」。
 
 ---
 

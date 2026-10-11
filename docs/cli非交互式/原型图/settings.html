@@ -271,13 +271,15 @@ function save(){
     payload[g.id][ctl.dataset.key] = String(ctl.value);
   });
   mockFetch('/api/settings', {method:'PUT', body: JSON.stringify(payload)}).then(function(s){
+    // P4：后端校验失败（只读项拒绝 / 超上限）返回 { error, message }，不渲染错误对象
+    if (s && s.error) { alert('保存失败：' + (s.message || s.error)); return; }
     renderSettings(s);
     document.getElementById('saveTip').classList.add('show');
     setTimeout(()=>document.getElementById('saveTip').classList.remove('show'), 2400);
   });
 }
 function resetAll(){
-  // 调用恢复默认接口：POST /api/settings/reset（crud-06 3.4），将 JSON 重置为默认值并写回；返回更新后配置驱动重渲染
+  // 调用恢复默认接口：POST /api/settings/reset（crud-06 3.5），将 JSON 重置为默认值并写回；返回更新后配置驱动重渲染
   if(confirm('恢复全部配置为默认值？')) { mockFetch('/api/settings/reset', {method:'POST'}).then(renderSettings); }
 }
 // 调用接口获取配置（与其他页面一致：mockFetch('/api/xxx').then(渲染函数)）

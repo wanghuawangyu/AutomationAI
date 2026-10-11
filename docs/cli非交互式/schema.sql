@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS job_runs (
     run_id          TEXT PRIMARY KEY,                    -- 32 位 UUID
     job_id          TEXT NOT NULL,                       -- 所属 job (jobs.job_id)
     job_kind        TEXT NOT NULL CHECK (job_kind IN ('persistent','virtual')),
-    job_version     INTEGER,
+    job_version     INTEGER,                             -- Job 修订号; virtual Run (单次执行) 无此值 -> NULL
     triggered_by    TEXT NOT NULL CHECK (triggered_by IN ('manual','schedule','single_op','single_workflow','retry')),
 
     -- target 快照 (运行时锁定版本)

@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Workflow 管理 · AI 自动化</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="mock-data.js"></script>
 <link rel="stylesheet" href="workflow-canvas.css" />
 <script src="workflow-canvas.js"></script>
@@ -1586,13 +1585,14 @@
       inputs: collectWfParams('#wfInputTable', true),
       outputs: collectWfParams('#wfOutputTable', false),
       nodes: Object.keys(ns).map(function (id) { return ns[id]; }),
-      edges: curEdges(),
-      versionBump: bump
+      edges: curEdges()
     };
+    // 编辑：PUT {workflow, bumpVersion}（crud-03 3.3.4）；新建：POST
     var req = existing
-      ? mockFetch('/api/workflows/' + existing.workflowId, { method: 'PUT', body: JSON.stringify(payload) })
-      : (delete payload.versionBump, mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(payload) }));
-    req.then(function () {
+      ? mockFetch('/api/workflows/' + existing.workflowId, { method: 'PUT', body: JSON.stringify({ workflow: payload, bumpVersion: !!bump }) })
+      : mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(payload) });
+    req.then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
       closeModal('versionModal');
       closeView();
       renderWorkflowList();
@@ -1619,7 +1619,10 @@
       description: (src.description || '') + '（副本）',
       createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
     });
-    mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(copy) }).then(function () { renderWorkflowList(); });
+    mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(copy) }).then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      renderWorkflowList();
+    });
   }
 
   /* 删除 Workflow：确认后 DELETE /api/workflows/{workflowId} */
@@ -1633,7 +1636,7 @@
     });
   }
 
-  /* ==================== 导出（选择目录并下载 ZIP） ==================== */
+  /* ==================== 导出（后端生成 ZIP 内容，前端选择目录并写入文件） ==================== */
   var exportTargetName = '';
   var exportTargetVersion = '';
 
@@ -1666,31 +1669,29 @@
       alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
-  async function confirmExport() {
-    var fileName = document.getElementById('exportFileName').value;
-    if (!exportDirHandle) {
-      alert('请先选择导出目录');
-      return;
-    }
-    try {
-      var zip = new JSZip();
-      zip.file('manifest.json', JSON.stringify({ name: exportTargetName, version: exportTargetVersion, kind: 'workflow' }, null, 2));
-      zip.file('workflow.yaml', 'name: ' + exportTargetName + '\nversion: ' + exportTargetVersion + '\nnodes: 5\n');
-      var ops = zip.folder('ops');
-      ['check_tests', 'review', 'deploy', 'notify'].forEach(function (op) {
-        ops.file(op + '.yaml', 'name: ' + op + '\nversion: v2\n');
-      });
-      var blob = await zip.generateAsync({ type: 'blob' });
-
-      var fileHandle = await exportDirHandle.getFileHandle(fileName, { create: true });
-      var writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-      closeModal('exportModal');
-    } catch (e) {
-      alert('导出失败：' + e.message);
-    }
+  function base64ToBlob(b64) {
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: 'application/zip' });
+  }
+  function confirmExport() {
+    var fileName = document.getElementById('exportFileName').value.trim();
+    if (!exportDirHandle) { alert('请先选择导出目录'); return; }
+    if (!fileName) { alert('请填写导出文件名'); return; }
+    var wf = WORKFLOW_BY_NAME[exportTargetName];
+    // crud-03 3.3.8：POST /api/workflows/{workflowId}/export 返回 {zip: base64}，由前端写入所选目录
+    mockFetch('/api/workflows/' + (wf ? wf.workflowId : exportTargetName) + '/export', { method: 'POST' })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        return exportDirHandle.getFileHandle(fileName, { create: true })
+          .then(function (fileHandle) { return fileHandle.createWritable(); })
+          .then(function (writable) { writable.write(base64ToBlob(res.zip || '')); return writable.close(); });
+      })
+      .then(function () {
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+        closeModal('exportModal');
+      })
+      .catch(function (err) { alert('导出失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   /* ==================== 弹窗控制 ==================== */

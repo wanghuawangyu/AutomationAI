@@ -93,7 +93,7 @@
 | 2 | OP 管理 | OP CRUD、单次执行、导入导出 YAML | ops |
 | 3 | Workflow 管理 | Workflow CRUD、校验、单次执行、导入导出 ZIP | workflows, workflow_nodes, ops |
 | 4 | Job 管理 | Job CRUD、手动运行、启用/禁用、导入导出 ZIP | jobs, job_runs |
-| 5 | 运行历史管理 | Run 列表/详情/终止/重跑/重试/导出 Excel | job_runs, step_records |
+| 5 | 运行历史管理 | Run 列表/详情/终止/重跑/重试/导出 Excel（生成 xlsx 以 base64 返回，前端落盘） | job_runs, step_records |
 | 6 | 单次执行器 (Executor) | 通过 Client 执行单个 OP，封装进程调用 | step_records, ops, clients |
 | 7 | 定时任务管理 (Scheduler) | 加载 cron Job，到点触发 | jobs, job_runs |
 | 8 | 编排控制 (Engine/WorkerPool) | DAG 调度、边路由、重试、循环 | workflows, workflow_nodes, job_runs, step_records |
@@ -132,12 +132,12 @@
 
 ### 3.6 系统与配置
 
-> 详细设计见独立文档：`proposal-02-后端crud-06配置管理.md`。此处为**配置类接口一览**（C4 补全，含 `settings/reset`）：
+> 详细设计见独立文档：`proposal-02-后端crud-06配置管理.md`。此处为**配置类接口一览**（C4 补全，含 `settings/reset`）。**主从约定（U2）：接口定义、请求/响应、校验规则一律以 crud-06 为准，本节仅作索引，不另行维护细节，防止两处漂移**：
 
 | 方法 | 端点 | 功能 | 详章 |
 |-|-|-|-|
 | GET | `/api/system/status` | 系统状态（进程 / 运行时长 / 在途 Run 数） | crud-06 3.1 |
-| GET | `/api/system/version` | 版本信息（app / config_version / db_version） | crud-06 3.2 |
+| GET | `/api/system/version` | 版本信息（返回 `{version}`；config_version / db_version 属 **GET /api/settings** 附加返回，不在此接口，见 crud-06 3.2/3.3） | crud-06 3.2 |
 | GET | `/api/settings` | 读取全部配置 | crud-06 3.3 |
 | PUT | `/api/settings` | 更新配置（校验 + 原子写回 ai-automation.json） | crud-06 3.4 |
 | POST | `/api/settings/reset` | 恢复默认配置（只读项不参与） | crud-06 3.5 |

@@ -126,7 +126,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | 方法 | 端点 | 功能 | 章节 |
 |-|-|-|-|
 | GET | `/api/system/status` | 系统状态（进程运行状态 / 运行时长 / 在途 Run 数） | 3.1 |
-| GET | `/api/system/version` | 版本信息（app / config_version / db_version） | 3.2 |
+| GET | `/api/system/version` | 版本信息（返回 `{version}`；config_version / db_version 属 GET /api/settings 附加返回） | 3.2 |
 | GET | `/api/settings` | 读取全部配置（只读项由 runDir 推导 / 接口附加） | 3.3 |
 | PUT | `/api/settings` | 更新配置（校验 + 内存更新 + 原子写回 ai-automation.json） | 3.4 |
 | POST | `/api/settings/reset` | 恢复默认配置（内置默认值，只读项不参与） | 3.5 |
@@ -263,7 +263,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | 项 | 来源 / 维护方 | 说明 |
 |-|-|-|
 | `db_path` / `workspace_root` | 由 `runDir` 推导 | 只读，不可 PUT |
-| `config_version` | **配置模块**维护 | `ai-automation.json` 的**结构版本**（存于 JSON 内）；启动读取时若缺失或低于程序支持版本 → 自动迁移后写回并递增；用户不可改 |
+| `config_version` | **配置模块**维护 | `ai-automation.json` 的**结构版本**（存于 JSON 内）；启动读取时若缺失或低于程序支持版本 → 自动迁移后写回并递增；用户不可改。**迁移失败回退（P6）**：① 读取/解析/迁移步骤异常 → **不写回**、原文件先备份为 `ai-automation.json.bak`，按「程序支持版本」内置默认结构加载（保证可启动），`config_version` 保持原值**不递增**，错误记录日志并经 `GET /api/settings` 只读附加返回 `migrate_error`，前端提示「配置迁移失败，已按默认结构加载，原配置已备份」；② 迁移后**写回失败**（磁盘满/权限/rename 失败）→ 内存保持迁移后值、磁盘原文件不动，返回 500 `WRITE_FAILED`，`config_version` 不递增（下次启动重新尝试迁移）。**程序支持版本**判定：内置 `SUPPORTED_CONFIG_VERSION` 常量；仅当 JSON 中 `config_version` 缺失或数值小于该常量时才触发迁移 |
 | `db_version` | **DB 迁移**维护 | SQLite schema 版本（等价 `PRAGMA user_version`），**不存于 JSON、仅经本接口只读附加返回**；**配置界面不展示**（拍板） |
 
 **数值项上限**：
@@ -303,7 +303,9 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 ### 3.6 GET /api/workspaces —— 最近使用的工作区列表
 
-**功能说明**：返回最近使用的工作区路径列表，前端在新建 / 编辑任务时快速选择工作区。
+**功能说明**：返回最近使用的工作区路径列表，前端在新建 / 编辑任务与运行历史筛选时快速选择工作区。
+
+**数据来源（D6 定稿）**：取自 `job_runs.workspace` **去重**（`SELECT DISTINCT workspace FROM job_runs`），按**最近使用**排序（`ORDER BY MAX(created_at_ms) DESC`，即该工作区最近一次运行时间倒序），取 `limit` 条。**不读取配置或独立的工作区表**——工作区是运行历史的自然后果。
 
 **路径参数**：无
 
@@ -311,8 +313,8 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 | 参数 | 位置 | 类型 | 必填 | 默认 | 说明 |
 |-|-|-|-|-|-|
-| limit | query | integer | 否 | 10 | 返回条数上限 |
-| keyword | query | string | 否 | — | 模糊匹配路径 |
+| limit | query | integer | 否 | 10 | 返回条数上限（去重后） |
+| keyword | query | string | 否 | — | 模糊匹配路径（`workspace LIKE %keyword%`） |
 
 **请求体**：无
 
