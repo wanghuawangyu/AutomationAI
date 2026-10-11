@@ -132,7 +132,16 @@
 
 ### 3.6 系统与配置
 
-> 已迁移至独立文档：`proposal-02-后端crud-06配置管理.md`（内容见该文件，此处不再重复）。
+> 详细设计见独立文档：`proposal-02-后端crud-06配置管理.md`。此处为**配置类接口一览**（C4 补全，含 `settings/reset`）：
+
+| 方法 | 端点 | 功能 | 详章 |
+|-|-|-|-|
+| GET | `/api/system/status` | 系统状态（进程 / 运行时长 / 在途 Run 数） | crud-06 3.1 |
+| GET | `/api/system/version` | 版本信息（app / config_version / db_version） | crud-06 3.2 |
+| GET | `/api/settings` | 读取全部配置 | crud-06 3.3 |
+| PUT | `/api/settings` | 更新配置（校验 + 原子写回 ai-automation.json） | crud-06 3.4 |
+| POST | `/api/settings/reset` | 恢复默认配置（只读项不参与） | crud-06 3.5 |
+| GET | `/api/workspaces` | 最近使用的工作区列表 | crud-06 3.6 |
 
 ---
 

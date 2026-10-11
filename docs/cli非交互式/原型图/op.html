@@ -610,15 +610,13 @@
 
 <script>
   /* ==================== OP 数据 ==================== */
-  var OP_DATA = OPS;
+  var OP_DATA = OP_BY_NAME;   // 按 name 索引（mock-data.js 的 OPS 为 API 数组，索引表为 OP_BY_NAME）
 
-  /* OP 类型 → 可选 Client 列表 */
-  var CLIENT_BY_TYPE = {
-    prompt: ['Claude Code', 'Codex CLI'],
-    bash: ['本地 Bash'],
-    python: ['本地 Python'],
-    powershell: ['本地 PowerShell']
-  };
+  /* OP 类型 → 可选 Client（由 CLIENTS 按 type 过滤，clientId 为 value） */
+  function clientsForType(type) {
+    if (type === 'prompt') return CLIENTS.filter(function (c) { return c.type === 'prompt'; });
+    return CLIENTS.filter(function (c) { return c.type === type; });
+  }
 
   var TYPE_TAG = {
     prompt: 'tag-prompt', bash: 'tag-bash', python: 'tag-python', powershell: 'tag-powershell'
@@ -692,14 +690,14 @@
           '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + op.name + '</span> <span class="tag tag-ver">v' + op.version + '</span>' +
         '</td>' +
         '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + op.type + '</span></td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + op.timeout + 's</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + (op.timeoutMs / 1000) + 's</td>' +
         '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (op.description || '') + '</td>' +
         '<td style="padding:10px 8px">' +
           '<button class="btn btn-sm btn-ghost-primary" onclick="openExecute(\'' + op.name + '\')">执行</button>' +
           '<button class="btn btn-sm" onclick="openEditor(\'' + op.name + '\',\'' + op.type + '\',\'v' + op.version + '\')">编辑</button>' +
-          '<button class="btn btn-sm">复制</button>' +
+          '<button class="btn btn-sm" onclick="dupOp(\'' + op.name + '\')">复制</button>' +
           '<button class="btn btn-sm" onclick="openExport(\'' + op.name + '\',\'v' + op.version + '\')">导出</button>' +
-          '<button class="btn btn-sm btn-danger">删除</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="delOp(\'' + op.name + '\')">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -773,7 +771,7 @@
     // 第一行：类型 + 超时 + 描述
     html += '<tr>' +
       '<td class="dt-k">类型</td><td class="dt-v">' + data.type + '</td>' +
-      '<td class="dt-k">超时</td><td class="dt-v">' + data.timeout + 's</td>' +
+      '<td class="dt-k">超时</td><td class="dt-v">' + (data.timeoutMs / 1000) + 's</td>' +
       '<td class="dt-k">描述</td><td class="dt-v">' + (data.description || '-') + '</td>' +
       '</tr>';
 
@@ -837,7 +835,7 @@
         '编辑: ' + name + ' <span class="tag tag-ver" id="editorVersion">' + data.version + '</span>';
       document.getElementById('opName').value = name;
       document.getElementById('opDesc').value = data.description || '';
-      document.getElementById('opTimeout').value = data.timeout;
+      document.getElementById('opTimeout').value = data.timeoutMs / 1000;
       editorVersion = data.version;
       currentOpName = name;
       currentOpType = data.type;
@@ -862,10 +860,10 @@
           '<input type="text" value="' + (p.name || '') + '" />' +
           '<select><option>string</option></select>' +
           '<select>' +
-            '<option' + (p.required === '是' ? ' selected' : '') + '>是</option>' +
-            '<option' + (p.required === '否' ? ' selected' : '') + '>否</option>' +
+            '<option' + (p.required === true || p.required === '是' ? ' selected' : '') + '>是</option>' +
+            '<option' + (p.required !== true && p.required !== '是' ? ' selected' : '') + '>否</option>' +
           '</select>' +
-          '<input type="text" value="' + (p.def || '') + '" placeholder="default" />' +
+          '<input type="text" value="' + ((p.default == null) ? '' : p.default) + '" placeholder="default" />' +
           '<input type="text" value="' + (p.description || '') + '" placeholder="description" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
@@ -994,8 +992,72 @@
   }
 
   function doSave() {
-    closeModal('versionModal');
-    closeView('editor');
+    var opt = document.querySelector('#versionModal input[name="versionOpt"]:checked');
+    var bump = opt && opt.value === 'update';
+    var name = document.getElementById('opName').value.trim();
+    var payload = {
+      name: name,
+      description: document.getElementById('opDesc').value,
+      timeoutMs: (parseInt(document.getElementById('opTimeout').value, 10) || 300) * 1000,
+      type: currentOpType,
+      content: document.getElementById('contentArea').value,
+      inputs: collectParams('#inputTable', true),
+      outputs: collectParams('#outputTable', false),
+      versionBump: bump
+    };
+    var existing = OP_BY_NAME[name];
+    var req;
+    if (existing) {
+      // 编辑：PUT /api/ops/{opId}（keep=覆盖当前版本；update=版本 +1，历史运行保留旧版本快照）
+      req = mockFetch('/api/ops/' + existing.opId, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      // 新建：POST /api/ops（默认 v1）
+      delete payload.versionBump;
+      req = mockFetch('/api/ops', { method: 'POST', body: JSON.stringify(payload) });
+    }
+    req.then(function () {
+      closeModal('versionModal');
+      closeView('editor');
+      renderOpList();
+    });
+  }
+
+  /* 复制 OP：深拷贝为 v1 新 OP（name 加 _copy 后缀），POST /api/ops */
+  function dupOp(name) {
+    var src = OP_BY_NAME[name];
+    if (!src) return;
+    var copy = Object.assign({}, src, {
+      opId: __uid32(), name: name + '_copy', version: 1,
+      description: (src.description || '') + '（副本）',
+      createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+    });
+    mockFetch('/api/ops', { method: 'POST', body: JSON.stringify(copy) }).then(function () { renderOpList(); });
+  }
+
+  /* 删除 OP：确认后 DELETE /api/ops/{opId} */
+  function delOp(name) {
+    var op = OP_BY_NAME[name];
+    if (!op) return;
+    if (!confirm('确认删除 OP「' + name + '」？删除后引用该 OP 的 Workflow 将标记为 needsUpdate')) return;
+    mockFetch('/api/ops/' + op.opId, { method: 'DELETE' }).then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      renderOpList();
+    });
+  }
+
+  /* 从参数表格收集入参 / 出参（isInput=true 时含 required/default 列） */
+  function collectParams(sel, isInput) {
+    var out = [];
+    var rows = document.querySelectorAll(sel + ' .pt-row');
+    rows.forEach(function (r) {
+      var cells = r.querySelectorAll('input, select');
+      if (isInput) {
+        out.push({ name: cells[0].value, type: cells[1].value, required: cells[2].value === '是', default: cells[3].value || null, description: cells[4].value });
+      } else {
+        out.push({ name: cells[0].value, type: cells[1].value, description: cells[2].value });
+      }
+    });
+    return out;
   }
 
   /* ---------- 单次执行流程（Client 按 OP 类型过滤） ---------- */
@@ -1014,17 +1076,17 @@
       data.inputs.forEach(function (p) {
         inputsHtml +=
           '<div class="field">' +
-            '<label>' + p.name + (p.required === '是' ? '<span class="required">*</span>' : '') + '</label>' +
-            '<input type="text" value="' + (p.def || '') + '" />' +
+            '<label>' + p.name + (p.required === true || p.required === '是' ? '<span class="required">*</span>' : '') + '</label>' +
+            '<input type="text" value="' + ((p.default == null) ? '' : p.default) + '" />' +
           '</div>';
       });
     }
     document.getElementById('execInputs').innerHTML = inputsHtml;
 
-    // 按 OP 类型渲染 Client 下拉
-    var clients = CLIENT_BY_TYPE[data.type] || [];
+    // 按 OP 类型渲染 Client 下拉（value = clientId）
+    var clients = clientsForType(data.type);
     var sel = document.getElementById('execClientSelect');
-    sel.innerHTML = clients.map(function (c) { return '<option>' + c + '</option>'; }).join('');
+    sel.innerHTML = clients.map(function (c) { return '<option value="' + c.clientId + '">' + c.name + '</option>'; }).join('');
 
     showView('execute');
   }
@@ -1033,15 +1095,22 @@
     document.getElementById('confirmOpName').textContent =
       document.getElementById('execOpName').textContent;
     document.getElementById('confirmClient').textContent =
-      document.getElementById('execClientSelect').value || '—';
+      (CLIENT_BY_ID[document.getElementById('execClientSelect').value] || {}).name || '—';
     document.getElementById('confirmInputs').textContent = '（见执行表单）';
     openModal('confirmModal');
   }
 
   function doExecute() {
-    closeModal('confirmModal');
-    closeView('execute');
-    window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+    // POST /api/ops/{opId}/execute —— 单次执行（virtual Job）
+    var op = OP_BY_NAME[document.getElementById('execOpName').textContent];
+    var cid = document.getElementById('execClientSelect').value || '';
+    var req = { method: 'POST', body: JSON.stringify({ clientId: cid, inputs: {}, workspace: '/path/to/workspace' }) };
+    var p = op ? mockFetch('/api/ops/' + op.opId + '/execute', req) : Promise.resolve(null);
+    p.then(function () {
+      closeModal('confirmModal');
+      closeView('execute');
+      window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+    });
   }
 
   /* ---------- 导出（选择目录并下载文件） ---------- */
@@ -1074,7 +1143,7 @@
     var yaml = 'name: ' + name + '\nversion: ' + version + '\n';
     yaml += 'description: ' + (d.description || '') + '\n';
     yaml += 'type: ' + d.type + '\n';
-    yaml += 'timeout: ' + d.timeout + '\n';
+    yaml += 'timeoutMs: ' + d.timeoutMs + '\n';
     yaml += 'inputs:\n';
     if (!d.inputs || !d.inputs.length) { yaml += '  []\n'; }
     else {

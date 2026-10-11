@@ -38,7 +38,7 @@
 
 **业务规则**：
 - `type=bash/python/powershell` 时需 `binaryPath`（`exitCodeSuccess` 为通用可选配置，默认 `[0]`）；其余 prompt 专用字段为空。
-- `type=prompt` 时需 `command`；`argsTemplate`（按 inputMode 使用占位符：arg=`{{prompt}}`、file=`{{prompt-file}}`、stdin=无，可选）、`inputMode`（arg/stdin/file）按需配置；`outputMode`/`outputJsonPath` 为通用输出解析配置（主要用于 prompt 类主函数解析 CLI 输出，见 5.4/5.5）。
+- `type=prompt` 时需 `command`；`argsTemplate`（按 inputMode 使用占位符：arg=`{{prompt}}`、file=`{{prompt-file}}`、stdin=无，可选）、`inputMode`（arg/stdin/file）按需配置；`outputMode`/`outputJsonPath` **仅 prompt 类使用**（用于主函数解析 CLI 输出，见 5.4/5.5）。**脚本类（bash / python / powershell）不设 outputMode / outputJsonPath / argsTemplate / inputMode，恒为空（null）**。
 - 删除 Client 前检查是否被 Job 引用，被引用时返回 409。
 
 **Client 对象字段说明**：
@@ -52,8 +52,8 @@
 | command         | string \| null     | prompt 类型专用：可执行命令                                             |
 | argsTemplate    | string \| null     | prompt 类型专用：参数模板字符串，按 inputMode 使用对应占位符（arg=`{{prompt}}` / file=`{{prompt-file}}` / stdin=无，见 5.5）；可选——可不使用、用固定参数 |
 | inputMode       | enum \| null       | prompt 类型专用：`arg` / `stdin` / `file`                               |
-| outputMode      | enum \| null       | 输出解析：`text` / `json` / `jsonl`                                     |
-| outputJsonPath  | string \| null     | outputMode=json 时提取出参的 JSON 路径                                  |
+| outputMode      | enum \| null       | **仅 prompt 类**：`text` / `json` / `jsonl`（脚本类恒为 null）                                     |
+| outputJsonPath  | string \| null     | **仅 prompt 类**：outputMode=json 时提取出参的 JSON 路径（脚本类恒为 null）                                  |
 | exitCodeSuccess | number[] \| null   | 视为成功的退出码集合，如 `[0]`                                          |
 | binaryPath      | string \| null     | bash/python/powershell 类型专用：可执行文件路径                         |
 | createdAtMs     | string             | 创建时间（毫秒时间戳字符串）                                            |
@@ -198,8 +198,8 @@
 | command         | string \| null   | 条件 | type=prompt 时必填                 |
 | argsTemplate    | string \| null  | 否   | 参数模板字符串（按 inputMode 使用占位符：arg=`{{prompt}}`/file=`{{prompt-file}}`/stdin=无，见 5.5） |
 | inputMode       | enum \| null     | 否   | arg / stdin / file                 |
-| outputMode      | enum \| null     | 否   | text / json / jsonl                |
-| outputJsonPath  | string \| null   | 否   | JSON 提取路径                      |
+| outputMode      | enum \| null     | 否   | **仅 prompt 类**：text / json / jsonl（脚本类恒为 null）                |
+| outputJsonPath  | string \| null   | 否   | **仅 prompt 类**：JSON 提取路径（脚本类恒为 null）                      |
 | exitCodeSuccess | number[] \| null | 否   | 成功退出码，默认 `[0]`             |
 | binaryPath      | string \| null   | 条件 | type=bash/python/powershell 时必填 |
 
@@ -251,8 +251,8 @@
 | command         | string \| null   | 条件 | type=prompt 时必填                 |
 | argsTemplate    | string \| null  | 否   | 参数模板字符串（按 inputMode 使用占位符：arg=`{{prompt}}`/file=`{{prompt-file}}`/stdin=无，见 5.5） |
 | inputMode       | enum \| null     | 否   | arg / stdin / file                 |
-| outputMode      | enum \| null     | 否   | text / json / jsonl                |
-| outputJsonPath  | string \| null   | 否   | JSON 提取路径                      |
+| outputMode      | enum \| null     | 否   | **仅 prompt 类**：text / json / jsonl（脚本类恒为 null）                |
+| outputJsonPath  | string \| null   | 否   | **仅 prompt 类**：JSON 提取路径（脚本类恒为 null）                      |
 | exitCodeSuccess | number[] \| null | 否   | 成功退出码                         |
 | binaryPath      | string \| null   | 条件 | type=bash/python/powershell 时必填 |
 

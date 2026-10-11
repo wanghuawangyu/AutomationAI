@@ -234,144 +234,6 @@
 
         <div class="run-list">
 
-          <!-- 成功：OP 单次执行 → 进入 OP 执行详情 -->
-          <article class="run-card">
-            <div class="run-icon">📦</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openOpDetail('check_tests','v2','v2','from-list')">check_tests</span>
-                <span class="tag tag-op">OP v2</span>
-                <span class="badge badge-success">✓ 成功</span>
-                <span class="meta">12.3s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">2 分钟前</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>虚拟 Job / 单次执行</span>
-                <span><span class="k">工作区：</span><span class="mono">/path/to/workspace</span></span>
-              </div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" onclick="openRerun('check_tests')">重跑</button>
-            </div>
-          </article>
-
-          <!-- 失败：Workflow -->
-          <article class="run-card">
-            <div class="run-icon">📋</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openWfDetail('run-002')">deploy_workflow</span>
-                <span class="tag tag-wf">Workflow v1</span>
-                <span class="badge badge-failed">✗ 失败</span>
-                <span class="meta">8.2s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">5 分钟前</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>持久 Job / 手动</span>
-                <span><span class="k">当前节点：</span>deploy</span>
-              </div>
-              <div class="run-note note-failed">✗ 失败节点：deploy（step 3/4）· exit code 1</div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" disabled title="需要更新后才能重试">重试</button>
-              <button class="btn btn-sm" onclick="openRerun('deploy_workflow')">重跑</button>
-            </div>
-          </article>
-
-          <!-- 失败：Workflow，定时触发 -->
-          <article class="run-card">
-            <div class="run-icon">⏰</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openWfDetail('run-003')">hourly_check</span>
-                <span class="tag tag-job">Job v1</span>
-                <span class="badge badge-failed">✗ 失败</span>
-                <span class="meta">8.2s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">2 小时前</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>持久 Job / 定时</span>
-                <span><span class="k">target：</span>Workflow hourly_check v1</span>
-              </div>
-              <div class="run-note note-failed">✗ 失败节点：health_check · exit code 1</div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" disabled title="需要更新后才能重试">重试</button>
-              <button class="btn btn-sm" onclick="openRerun('hourly_check')">重跑</button>
-            </div>
-          </article>
-
-          <!-- 成功：Workflow，手动触发 -->
-          <article class="run-card">
-            <div class="run-icon">📋</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openWfDetail('run-008')">hourly_check</span>
-                <span class="tag tag-job">Job v1</span>
-                <span class="badge badge-success">✓ 成功</span>
-                <span class="meta">5.3s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">昨天 23:40</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>持久 Job / 手动</span>
-                <span><span class="k">target：</span>Workflow hourly_check v1</span>
-              </div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" disabled title="超时不可重试">重试</button>
-              <button class="btn btn-sm" onclick="openRerun('deploy_workflow')">重跑</button>
-            </div>
-          </article>
-
-          <!-- 成功：OP Job（daily_cleanup） -->
-          <article class="run-card">
-            <div class="run-icon">⏰</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openOpDetail('clean_logs','v2','v3','from-list')">daily_cleanup</span>
-                <span class="tag tag-job">Job v2</span>
-                <span class="badge badge-success">✓ 成功</span>
-                <span class="meta">3.2s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">1 周前</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>持久 Job / 定时</span>
-                <span><span class="k">target：</span>OP clean_logs v2</span>
-              </div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" onclick="openRerun('daily_cleanup')">重跑</button>
-            </div>
-          </article>
-
-          <!-- 失败：OP Job（data_sync），版本已更新 → 无 [重试]，只能 [重跑] -->
-          <article class="run-card">
-            <div class="run-icon">⏰</div>
-            <div class="run-main">
-              <div class="run-title">
-                <span class="run-name" onclick="openOpDetail('process_data','v2','v3','from-list')">data_sync</span>
-                <span class="tag tag-job">Job v2</span>
-                <span class="badge badge-failed">✗ 失败</span>
-                <span class="meta">4.1s</span>
-                <span class="dot-sep">·</span>
-                <span class="meta">5 小时前</span>
-              </div>
-              <div class="run-sub">
-                <span><span class="k">来源：</span>持久 Job / 定时</span>
-                <span><span class="k">target：</span>OP process_data v2</span>
-              </div>
-              <div class="run-note note-warn">⚠ 版本已更新（失败时 v2 / 当前 v3），无法重试，请使用 [重跑]</div>
-            </div>
-            <div class="run-actions">
-              <button class="btn btn-sm" onclick="openRerun('data_sync')">重跑</button>
-            </div>
-          </article>
-
         </div>
       </div>
     </div>
@@ -411,9 +273,7 @@
       <!-- 执行历史：同一 step 的多次执行记录 -->
       <div class="section" id="opHistorySection">
         <div class="section-title">执行历史</div>
-        <select class="select" style="max-width:360px" onchange="switchOpHistory(this.value)">
-          <option value="1" selected>第 2 次 · 12:01:35 · 成功（12.3s）← 当前</option>
-          <option value="0">第 1 次 · 12:01:23 · 失败（5.2s）</option>
+        <select class="select" id="opHistorySelect" style="max-width:360px" onchange="switchOpHistory(this.value)">
         </select>
       </div>
 
@@ -641,7 +501,7 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="job_result-20261006120000000.xlsx" />
+        <input type="text" id="exportFileName" value="job_result-20261006120000000-1.xlsx" placeholder="job_result-{yyyyMMddHHmmssSSS}-{count}.xlsx（可自定义名称）" />
       </div>
       <div class="field">
         <label>导出条数</label>
@@ -700,7 +560,8 @@
   function exportAll() {
     var now = new Date();
     function pad(n, w) { return String(n).padStart(w || 2, '0'); }
-    var fileName = 'job_result-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + pad(now.getMilliseconds(), 3) + '.xlsx';
+    // 默认文件名：job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx（D7：默认名允许用户自定义，输入框可编辑）
+    var fileName = 'job_result-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + pad(now.getMilliseconds(), 3) + '-' + RUNS.length + '.xlsx';
     document.getElementById('exportFileName').value = fileName;
     document.getElementById('exportCount').textContent = '6';
     document.getElementById('exportDir').value = '';
@@ -724,34 +585,34 @@
       alert('Excel 库未加载成功，请检查网络连接后刷新页面');
       return;
     }
-    var historyHeader = ['id', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'duration'];
+    // Sheet1「运行历史」列严格对齐 crud-05 3.5.10（runId, name, jobId, jobKind, jobVersion, triggeredBy, workspace, status, terminatedBy, startedAtMs, finishedAtMs, durationMs）
+    var historyHeader = ['runId', 'name', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'durationMs'];
     var historyRows = [historyHeader];
-    var historyData = [
-      { id: 'run-001', jobId: 'job-check-tests', jobKind: 'virtual', jobVersion: 2, triggeredBy: 'single_op', workspace: '/path/ws-001', status: 'success', terminatedBy: '', startedAtMs: 1728105683000, finishedAtMs: 1728105695300, duration: 12.3 },
-      { id: 'run-002', jobId: 'job-deploy', jobKind: 'virtual', jobVersion: 2, triggeredBy: 'manual', workspace: '/path/ws-002', status: 'success', terminatedBy: '', startedAtMs: 1728104710000, finishedAtMs: 1728104755600, duration: 45.6 },
-      { id: 'run-003', jobId: 'job-hourly-check', jobKind: 'persistent', jobVersion: 1, triggeredBy: 'schedule', workspace: '/path/ws-003', status: 'failed', terminatedBy: 'error', startedAtMs: 1728104400000, finishedAtMs: 1728104408200, duration: 8.2 },
-      { id: 'run-004', jobId: 'job-review', jobKind: 'virtual', jobVersion: 1, triggeredBy: 'single_op', workspace: '/path/ws-001', status: 'success', terminatedBy: '', startedAtMs: 1728103800000, finishedAtMs: 1728103806100, duration: 6.1 },
-      { id: 'run-005', jobId: 'job-notify', jobKind: 'persistent', jobVersion: 2, triggeredBy: 'retry', workspace: '/path/ws-004', status: 'timeout', terminatedBy: 'timeout', startedAtMs: 1728102900000, finishedAtMs: 1728103200000, duration: 300.0 },
-      { id: 'run-006', jobId: 'job-data-sync', jobKind: 'persistent', jobVersion: 2, triggeredBy: 'schedule', workspace: '/path/ws-005', status: 'failed', terminatedBy: 'error', startedAtMs: 1728087600000, finishedAtMs: 1728087604100, duration: 4.1 }
-    ];
-    historyData.forEach(function (r) {
-      historyRows.push([r.runId, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace, r.status, r.terminatedBy, r.startedAtMs, r.finishedAtMs, r.duration]);
+    RUNS.forEach(function (r) {
+      historyRows.push([
+        r.runId, r.name, r.jobId, r.jobKind, r.jobVersion, r.triggeredBy, r.workspace,
+        r.status, r.terminatedBy == null ? '' : r.terminatedBy,
+        r.startedAtMs, r.finishedAtMs == null ? '' : r.finishedAtMs,
+        r.durationMs == null ? '' : r.durationMs
+      ]);
     });
 
-    var detailHeader = ['ResultId', 'jobId', 'stepId', 'opId', 'opVersion', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'duration'];
+    // Sheet2「运行明细」列严格对齐 crud-05 3.5.10（一条 step_record = 一行）
+    var detailHeader = ['recordId', 'jobId', 'stepId', 'activationSeq', 'retrySeq', 'opId', 'opVersion', 'opName', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'durationMs'];
     var detailRows = [detailHeader];
-    // 从 RUN_HISTORY 动态读取所有 step 记录
-    RUN_HISTORY.forEach(function(run) {
-      run.steps.forEach(function(s) {
+    RUNS.forEach(function (run) {
+      run.steps.forEach(function (s) {
         detailRows.push([
-          s.recordId, run.runId, s.stepId, s.opId, s.opVersion, s.clientId,
-          s.status, s.exitCode,
-          JSON.stringify(s.inputs),
+          s.recordId, run.jobId, s.stepId, s.activationSeq, s.retrySeq,
+          s.opId, s.opVersion, s.opName || '', s.clientId || '',
+          s.status, s.exitCode == null ? '' : s.exitCode,
+          JSON.stringify(s.inputs || {}),
           s.bodySnapshot || '',
           JSON.stringify(s.outputs || {}),
           s.rawOutput || '',
           s.timedOut,
-          s.startedAtMs, s.finishedAtMs, s.duration
+          s.startedAtMs, s.finishedAtMs == null ? '' : s.finishedAtMs,
+          s.durationMs == null ? '' : s.durationMs
         ]);
       });
     });
@@ -829,34 +690,45 @@
     pageData.forEach(function(r) {
       var badgeClass = r.status === 'success' ? 'badge-success' : r.status === 'failed' ? 'badge-failed' : r.status === 'timeout' ? 'badge-timeout' : 'badge-running';
       var badgeText = r.status === 'success' ? '✓ 成功' : r.status === 'failed' ? '✗ 失败' : r.status === 'timeout' ? '⏱ 超时' : '● 运行中';
-      var tagClass = r.jobType === 'OP' ? 'tag-op' : 'tag-wf';
-      var clickHandler = r.jobType === 'OP'
-        ? "openOpDetail('" + r.jobName + "','v" + r.jobVersion + "','v" + r.jobVersion + "','from-list')"
+      var targetKind = r.target && r.target.kind === 'op' ? 'OP' : 'Workflow';
+      var tagClass = targetKind === 'OP' ? 'tag-op' : 'tag-wf';
+      var targetName = (r.target && r.target.name) || r.name;
+      var targetVersion = r.target ? (r.target.kind === 'op' ? r.target.opVersion : r.target.workflowVersion) : r.jobVersion;
+      var clickHandler = targetKind === 'OP'
+        ? "openOpDetail('" + targetName + "','v" + targetVersion + "','v" + targetVersion + "','from-list')"
         : "openWfDetail('" + r.runId + "')";
+      // 按钮可用性：严格按 can-retry 五条件 / 重跑前提（D1 定稿；不再写死）
+      var retryInfo = canRetryOf(r);
+      var rerunInfo = canRerunOf(r);
       var actions = '';
-      if (r.status === 'running') {
-        actions = '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + r.jobName + '\')">终止</button>';
-      } else if (r.status === 'failed') {
-        actions = '<button class="btn btn-sm" disabled title="需要更新后才能重试">重试</button><button class="btn btn-sm" onclick="openRerun(\'' + r.jobName + '\')">重跑</button>';
-      } else if (r.status === 'timeout') {
-        actions = '<button class="btn btn-sm" disabled title="超时不可重试">重试</button><button class="btn btn-sm" onclick="openRerun(\'' + r.jobName + '\')">重跑</button>';
-      } else {
-        actions = '<button class="btn btn-sm" onclick="openRerun(\'' + r.jobName + '\')">重跑</button>';
+      if (r.status === 'waiting' || r.status === 'running' || r.status === 'terminating') {
+        actions += '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + r.runId + '\')">终止</button>';
       }
-      var failedNode = r.failedNode || '-';
+      if (r.status === 'success' || r.status === 'failed' || r.status === 'timeout' || r.status === 'cancelled') {
+        actions += retryInfo.ok
+          ? '<button class="btn btn-sm btn-ghost-primary" onclick="openRetry(\'' + r.runId + '\')">重试</button>'
+          : '<button class="btn btn-sm" disabled title="' + (retryInfo.reason || '不满足重试条件') + '">重试</button>';
+        actions += rerunInfo.ok
+          ? '<button class="btn btn-sm" onclick="openRerun(\'' + r.runId + '\')">重跑</button>'
+          : '<button class="btn btn-sm" disabled title="' + (rerunInfo.reason || '不可重跑') + '">重跑</button>';
+      }
+      // 「失败节点」为前端聚合（后端无 failedNode 字段）：取失败/超时的最后一条 step 的 opName
+      var fs = failedStepOf(r);
+      var failedNode = fs ? (fs.opName || fs.stepId) : '-';
       var workspace = r.workspace || '-';
-      var triggerText = r.triggeredBy === 'schedule' ? '持久 Job / 定时' : r.triggeredBy === 'manual' ? '持久 Job / 手动' : '单次执行';
+      var triggerText = r.triggeredBy === 'schedule' ? '持久 Job / 定时' : r.triggeredBy === 'manual' ? '持久 Job / 手动' : r.triggeredBy === 'retry' ? '重试' : '单次执行';
+      var durationText = (r.durationMs == null) ? '-' : (r.durationMs / 1000).toFixed(1) + 's';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:10px 8px;cursor:pointer" onclick="' + clickHandler + '">' +
-          '<span style="font-weight:500">' + r.jobName + '</span>' +
+          '<span style="font-weight:500">' + r.name + '</span>' +
         '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          '<span class="tag ' + tagClass + '">' + r.jobType + '</span> ' + r.jobName + ' v' + r.jobVersion +
+          '<span class="tag ' + tagClass + '">' + targetKind + '</span> ' + targetName + ' v' + targetVersion +
         '</td>' +
         '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + failedNode + '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + workspace + '</td>' +
         '<td style="padding:10px 8px;font-size:12px">' + triggerText + '</td>' +
-        '<td style="padding:10px 8px;font-size:12px"><span class="badge ' + badgeClass + '">' + badgeText + '</span> ' + r.duration + 's</td>' +
+        '<td style="padding:10px 8px;font-size:12px"><span class="badge ' + badgeClass + '">' + badgeText + '</span> ' + durationText + '</td>' +
         '<td style="padding:10px 8px">' + actions + '</td>' +
       '</tr>';
     });
@@ -897,13 +769,13 @@
     document.getElementById('opCurVer').textContent = curVer;
     document.getElementById('opInfoExecVer').textContent = execVer + '（快照）';
 
-    // 从 RUN_HISTORY 中找到对应的 run 和 step 数据
+    // 从 RUNS 中找到对应的 run 和 step 数据（按 opName 匹配，对齐后端 step_records.op_name 快照）
     var stepData = null;
     var runData = null;
-    for (var i = 0; i < RUN_HISTORY.length; i++) {
-      var run = RUN_HISTORY[i];
+    for (var i = 0; i < RUNS.length; i++) {
+      var run = RUNS[i];
       for (var j = 0; j < run.steps.length; j++) {
-        if (run.steps[j].opId === name) {
+        if (run.steps[j].opName === name) {
           stepData = run.steps[j];
           runData = run;
           break;
@@ -914,6 +786,41 @@
     if (stepData && stepData.bodySnapshot) {
       document.getElementById('opBodyBlock').textContent = stepData.bodySnapshot;
     }
+
+    // 重跑按钮动态绑定本次 run 的 runId（静态默认 onclick 仅作占位；A1 修复）
+    var opRerunBtn = document.getElementById('opRerunBtn');
+    if (opRerunBtn) {
+      opRerunBtn.onclick = function () { openRerun(runData ? runData.runId : name); };
+    }
+
+    // 执行历史：同一 step 的多条 StepRecord（D3：每条执行一条记录；默认选中最后一条）
+    opHistoryData = [];
+    var histSelect = document.getElementById('opHistorySelect');
+    if (runData && stepData) {
+      var recs = stepRecordsOf(runData, stepData.stepId);   // 降序：latest first
+      opHistoryData = recs.map(function (h) {
+        var badge = h.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>'
+          : h.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>'
+          : h.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 超时</span>'
+          : '<span class="badge badge-running">● 运行中</span>';
+        var d = (h.durationMs == null) ? '—' : (h.durationMs / 1000).toFixed(1) + 's';
+        return {
+          status: h.status, statusBadge: badge, durationText: d,
+          error: h.error || '', output: h.rawOutput || '',
+          exitCode: h.exitCode == null ? '' : String(h.exitCode),
+          inputs: h.inputs || {}, outputs: h.outputs || {},
+          label: '第 ' + h.retrySeq + ' 次 · (a' + h.activationSeq + '/r' + h.retrySeq + ') · ' + d
+        };
+      });
+    }
+    if (histSelect) {
+      histSelect.innerHTML = opHistoryData.length
+        ? opHistoryData.map(function (h, idx) {
+            return '<option value="' + idx + '"' + (idx === 0 ? ' selected' : '') + '>' + h.label + (idx === 0 ? ' ← 当前' : '') + '</option>';
+          }).join('')
+        : '<option value="0" selected>（无执行记录）</option>';
+    }
+    if (opHistoryData.length) switchOpHistory(0);
 
     // 根据来源展示触发对象
     var triggerText = '';
@@ -951,30 +858,15 @@
   }
 
   /* ---------- OP 执行历史切换 ---------- */
-  var opHistoryData = [
-    {
-      time: '12:01:23', status: '失败', duration: '5.2s',
-      statusBadge: '<span class="badge badge-failed">✗ 失败</span>',
-      error: 'Error: Connection timeout after 5000ms\n  at Client._timeout (claude.js:128)\n  at process._tickCallback (internal/process/next_tick.js:61)',
-      output: '', exitCode: '1',
-      inputs: { test_cmd: 'npm run test' },
-      outputs: {}
-    },
-    {
-      time: '12:01:35', status: '成功', duration: '12.3s',
-      statusBadge: '<span class="badge badge-success">✓ 成功</span>',
-      error: '', output: '23 tests passed, 0 failed', exitCode: '0',
-      inputs: { test_cmd: 'npm run test' },
-      outputs: { passed: 'true', count: '23', result: '{"passed":true,"count":23}' }
-    }
-  ];
+  var opHistoryData = [];   // 由 openOpDetail 从 RUNS 的 StepRecord[] 动态填充（不再硬编码）
   function switchOpHistory(idx) {
     var h = opHistoryData[idx];
+    if (!h) return;
     var infoVals = document.querySelectorAll('#view-op-detail .info-grid .info-v');
     infoVals[2].innerHTML = h.statusBadge;
-    infoVals[3].textContent = h.duration;
+    infoVals[3].textContent = h.durationText;
     var outputBlocks = document.querySelectorAll('#view-op-detail .pre-block');
-    if (h.status === '失败') {
+    if (h.status === 'failed' || h.status === 'timeout') {
       outputBlocks[1].textContent = h.error;
     } else {
       outputBlocks[1].textContent = h.output;
@@ -991,12 +883,10 @@
     mockFetch('/api/runs/' + runId).then(function(run) {
       if (!run) return;
 
-      // 查找对应的 Workflow 定义：
-      // 1. 如果 jobName 直接在 WORKFLOWS 中，直接查询
-      // 2. 否则先查 Job，再查 target.workflow
-      var wfVersion = run.jobVersion;
-      // 通过 run.workflowId 查询 Workflow 定义
-      return mockFetch('/api/workflows/' + run.workflowId).then(function(wf) {
+      // 查找对应的 Workflow 定义（run.target 为快照，取 target.workflowId）
+      var wfVersion = run.target ? run.target.workflowVersion : run.jobVersion;
+      var wfId = run.target ? run.target.workflowId : null;
+      return mockFetch('/api/workflows/' + wfId).then(function(wf) {
         return { run: run, wf: wf, wfVersion: wfVersion };
       });
     }).then(function(result) {
@@ -1005,10 +895,10 @@
       var wf = result.wf;
       var wfVersion = result.wfVersion;
 
-    // 构建节点状态：从 run.steps 中匹配每个 op 节点的执行状态
+    // 构建节点状态：从 run.steps 中匹配每个 op 节点的执行状态（steps 为扁平数组；同一 step 多条记录时取最后一条，D3）
     currentWfNodes = {};
-    Object.keys(wf.nodes).forEach(function (nodeId) {
-      var n = wf.nodes[nodeId];
+    (wf.nodes || []).forEach(function (n) {
+      var nodeId = n.nodeId;
       currentWfNodes[nodeId] = Object.assign({}, n);
       // 坐标直接保留 position（与编辑画布结构体一致，由 workflow-canvas.js 渲染）
 
@@ -1018,21 +908,16 @@
         if (run.status === 'success') currentWfNodes[nodeId].status = 'success';
         else currentWfNodes[nodeId].status = 'waiting';
       } else {
-        // op 节点：从 steps 中匹配
-        var matched = null;
-        for (var j = 0; j < run.steps.length; j++) {
-          if (run.steps[j].opId === n.op) { matched = run.steps[j]; break; }
-        }
+        // op 节点：stepId === nodeId（一条执行 = 一条 StepRecord）
+        var matched = lastRecordOf(run, nodeId);
         if (matched) {
           currentWfNodes[nodeId].status = matched.status;
-          currentWfNodes[nodeId].duration = matched.duration ? matched.duration + 's' : '—';
           currentWfNodes[nodeId].exitCode = matched.exitCode;
           currentWfNodes[nodeId].error = matched.error;
           currentWfNodes[nodeId].inputs = matched.inputs;
           currentWfNodes[nodeId].outputs = matched.outputs;
         } else {
           currentWfNodes[nodeId].status = 'waiting';
-          currentWfNodes[nodeId].duration = '—';
         }
       }
     });
@@ -1060,14 +945,16 @@
     document.getElementById('wfDetailTrigger').textContent = '触发: ' + triggerText;
 
     // 耗时
-    document.getElementById('wfInfoDuration').textContent = run.duration ? run.duration + 's' : '—';
+    document.getElementById('wfInfoDuration').textContent = (run.durationMs == null) ? '—' : (run.durationMs / 1000).toFixed(1) + 's';
     document.getElementById('wfInfoExecVer').textContent = 'v' + wfVersion + '（快照）';
 
     // 失败/超时提示条
     var failBar = document.getElementById('wfFailBar');
     var timeoutBar = document.getElementById('wfTimeoutBar');
-    if (run.status === 'failed' && run.failedNode) {
-      var failedOp = currentWfNodes[run.failedNode] ? currentWfNodes[run.failedNode].op : run.failedNode;
+    if (run.status === 'failed' && failedStepOf(run)) {
+      var fstep = failedStepOf(run);
+      var fop = OP_BY_ID[fstep.opId];
+      var failedOp = fop ? fop.name : (fstep.opName || fstep.stepId);
       failBar.innerHTML = '✗ 该 Workflow 执行失败。失败节点: ' + failedOp;
       failBar.style.display = 'inline-flex';
       timeoutBar.style.display = 'none';
@@ -1090,14 +977,18 @@
 
     // 操作按钮
     var headActions = document.getElementById('wfHeadActions');
-    if (run.status === 'failed') {
-      headActions.innerHTML =
-        '<button class="btn" disabled title="需要更新后才能重试">重试</button>' +
-        '<button class="btn" onclick="openRerun(\'' + run.jobName + '\')">重跑</button>';
-    } else if (run.status === 'running') {
-      headActions.innerHTML = '<button class="btn btn-danger" onclick="openTerminate(\'' + run.jobName + '\')">终止</button>';
+    var retryInfo = canRetryOf(run);
+    var rerunInfo = canRerunOf(run);
+    if (run.status === 'waiting' || run.status === 'running' || run.status === 'terminating') {
+      headActions.innerHTML = '<button class="btn btn-danger" onclick="openTerminate(\'' + run.runId + '\')">终止</button>';
     } else {
-      headActions.innerHTML = '<button class="btn" onclick="openRerun(\'' + run.jobName + '\')">重跑</button>';
+      headActions.innerHTML =
+        (retryInfo.ok
+          ? '<button class="btn btn-ghost-primary" onclick="openRetry(\'' + run.runId + '\')">重试</button>'
+          : '<button class="btn" disabled title="' + (retryInfo.reason || '不满足重试条件') + '">重试</button>') +
+        (rerunInfo.ok
+          ? '<button class="btn" onclick="openRerun(\'' + run.runId + '\')">重跑</button>'
+          : '<button class="btn" disabled title="' + (rerunInfo.reason || '不可重跑') + '">重跑</button>');
     }
 
     // 入参 / 出参
@@ -1172,42 +1063,71 @@
       },
       onNodeClick: function (id, n) {
         if (n.kind === 'start' || n.kind === 'end') return;
-        openOpDetail(n.op, n.opVersion, n.opVersion, 'from-wf', n);
+        var opDef = OP_BY_ID[n.opId];
+        openOpDetail(opDef ? opDef.name : (n.label || id), n.opVersion, n.opVersion, 'from-wf', n);
       }
     });
   }
 
-  /* ==================== 重试 ==================== */
-  function openRetry(name) {
-    document.getElementById('retryJobName').textContent = name;
+  /* 当前操作的 Run（终止 / 重跑 / 重试均以 runId 为接口参数） */
+  var currentActionRunId = null;
+
+  /* ==================== 重试（can-retry 五条件；接口：POST /api/runs/{runId}/retry） ==================== */
+  function openRetry(runId) {
+    var run = RUN_BY_ID[runId];
+    var info = canRetryOf(run);
+    if (!info.ok) { alert('不可重试：' + info.reason); return; }
+    currentActionRunId = runId;
+    document.getElementById('retryJobName').textContent = (run && run.name) || runId;
     openModal('retryModal');
   }
 
   function doRetry() {
+    var runId = currentActionRunId;
     closeModal('retryModal');
-    closeView();
+    if (!runId) return;
+    mockFetch('/api/runs/' + runId + '/retry', { method: 'POST' }).then(function () {
+      closeView();
+      mockFetch('/api/runs').then(renderRunList);
+    });
   }
 
-  /* ==================== 重跑（固定使用最新版本） ==================== */
-  function openRerun(name) {
-    document.getElementById('rerunName').textContent = name;
+  /* ==================== 重跑（固定最新版本；接口：POST /api/runs/{runId}/rerun） ==================== */
+  function openRerun(runId) {
+    var run = RUN_BY_ID[runId];
+    var info = canRerunOf(run);
+    if (!info.ok) { alert('不可重跑：' + info.reason); return; }
+    currentActionRunId = runId;
+    document.getElementById('rerunName').textContent = (run && run.name) || runId;
     openModal('rerunModal');
   }
 
   function doRerun() {
+    var runId = currentActionRunId;
     closeModal('rerunModal');
-    closeView();
+    if (!runId) return;
+    mockFetch('/api/runs/' + runId + '/rerun', { method: 'POST' }).then(function () {
+      closeView();
+      mockFetch('/api/runs').then(renderRunList);
+    });
   }
 
-  /* ==================== 终止 ==================== */
-  function openTerminate(name) {
-    document.getElementById('terminateName').textContent = name;
+  /* ==================== 终止（接口：POST /api/runs/{runId}/terminate） ==================== */
+  function openTerminate(runId) {
+    var run = RUN_BY_ID[runId];
+    currentActionRunId = runId;
+    document.getElementById('terminateName').textContent = (run && run.name) || runId;
     openModal('terminateModal');
   }
 
   function doTerminate() {
+    var runId = currentActionRunId;
     closeModal('terminateModal');
-    closeView();
+    if (!runId) return;
+    mockFetch('/api/runs/' + runId + '/terminate', { method: 'POST' }).then(function () {
+      closeView();
+      mockFetch('/api/runs').then(renderRunList);
+    });
   }
 
   /* ==================== 弹窗控制 ==================== */

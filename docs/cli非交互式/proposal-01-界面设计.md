@@ -419,10 +419,10 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 | Client类型 | prompt / bash / python / powershell |
 | 二进制路径 | 可执行文件路径 |
 | 输入方式 | 有参数模板时显示"参数模板: ..."，无参数模板时显示"固定调用方式" |
-| 输出解析方式 | json / text |
+| 输出解析方式 | **仅 prompt 类**：json / text；**脚本类（bash / python / powershell）无此字段，显示 `-`** |
 | 操作 | 编辑、导出、复制、删除 |
 
-> 点击名称行展开/折叠详情，同时只展开一条。Bash/Python/PowerShell 类型无参数模板行（调用方式固定，仅二进制路径不同）。
+> 点击名称行展开/折叠详情，同时只展开一条。Bash/Python/PowerShell 类型**无参数模板行、也无输出解析行**（调用方式固定，仅二进制路径不同；两者均显示 `-`）。
 
 ### 8.6 编辑器视图（prompt 类型）
 
@@ -431,7 +431,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 │  ← 返回  编辑: Claude Code                    │
 ├──────────────────────────────────────────────┤
 │  名称: [Claude Code          ]                │
-│  描述: [Claude Code CLI 适配  ]                │
+│  描述: [Claude Code CLI          ]            │
 │                                              │
 │  类型:  (●) Prompt  ( ) Bash  ( ) Python  ( ) PowerShell │
 │                                              │
@@ -856,9 +856,9 @@ interface WorkflowNode {
 }
 
 type ParamBinding =
-  | { kind: "node_output"; nodeId: string; name: string }
-  | { kind: "workflow_input"; name: string }
-  | { kind: "literal"; value: string };
+  | { kind: "node_output"; nodeId: string; outputName: string }   // 取上游节点出参
+  | { kind: "workflow_input"; inputName: string }                // 取 Workflow 入参
+  | { kind: "literal"; value: string };                          // 固定值
 
 interface WorkflowEdge {
   from: string;
@@ -866,10 +866,9 @@ interface WorkflowEdge {
   condition: EdgeCondition;
 }
 
-type EdgeCondition =
-  | { kind: "on_success" }          // 绿色锚点
-  | { kind: "on_failure" }          // 红色锚点
-  | { kind: "always" };             // 蓝色锚点
+// 边条件：字符串枚举（与后端 API 结构体一致）
+// 注：早期设计曾用 `{kind:"on_success"}` 对象形态，已废弃——统一为字符串。
+type EdgeCondition = "on_success" | "on_failure" | "always";
 ```
 
 ### 10.3 Start / End 固定节点
@@ -1637,7 +1636,7 @@ interface StepRecord {
 }
 ```
 
-> **同一 step 多次执行**：step 因**重试**或**循环回跳重入**会多次执行，每次执行产生一条独立的 StepRecord，由 `(activationSeq, retrySeq)` 唯一区分（`activationSeq` 回跳 +1；`retrySeq` 重试 +1）。查看 OP 执行详情时，执行历史以下拉选项展示，**按 `(activationSeq, retrySeq)` 降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。
+> **同一 step 多次执行**：step 因**重试**或**循环回跳重入**会多次执行，每次执行产生一条独立的 StepRecord（**不内嵌在一条记录里**），由 `(activationSeq, retrySeq)` 唯一区分（`activationSeq` 回跳 +1；`retrySeq` 重试 +1）。查看 OP 执行详情时，执行历史以下拉选项展示，**按 `(activationSeq, retrySeq)` 降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。**判断该 step 的最终结果一律以最后一条记录为准**（D3；不做 `attempts` 内嵌数组）。
 
 ### 12.4 第一层：Job 运行历史列表
 
@@ -1651,15 +1650,21 @@ interface StepRecord {
 │  名称              Target                失败节点      工作区           触发方式        结果        操作  │
 │  ────────────────  ──────────────────  ────────────  ──────────────  ──────────────  ──────────  ──── │
 │  check_tests       OP check_tests v2    -             /path/ws-001    单次执行         ✓ 成功 12.3s  [重跑] │
-│  deploy_workflow    Workflow deploy_workflow v2 -          /path/ws-002    单次执行         ● 运行中      [终止] │
-│  hourly_check      Workflow hourly_check v1 health_check /path/ws-003 持久 Job / 定时  ✗ 失败 8.2s   [重试置灰][重跑] │
-│  deploy_workflow    Workflow deploy_workflow v2 -          /path/ws-004    持久 Job / 定时  ⏱ 超时 137.5s [重跑] │
-│  daily_cleanup      OP clean_logs v2    -             /path/ws-005    持久 Job / 定时  ✓ 成功 3.2s   [重跑] │
-│  data_sync          OP process_data v2  -             /path/ws-006    持久 Job / 定时  ✗ 失败 4.1s   [重跑] │
+│  deploy_workflow   Workflow deploy_workflow v2 -      /path/ws-002    单次执行         ● 运行中      [终止] │
+│  hourly_check      Workflow hourly_check v1 health_check /path/ws-003 持久 Job / 定时  ✗ 失败 8.2s   [重试][重跑] │
+│  deploy_workflow   Workflow deploy_workflow v2 -      /path/ws-004    持久 Job / 定时  ⏱ 超时 137.5s [重试][重跑] │
+│  daily_cleanup     OP clean_logs v2     -             /path/ws-005    持久 Job / 定时  ✓ 成功 3.2s   [重跑] │
+│  data_sync         OP process_data v2   -             /path/ws-006    持久 Job / 定时  ✗ 失败 4.1s   [重试置灰][重跑] │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                          每页 [10 ▾] 共 6 条  [上一页] 1/1 [下一页] │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **操作按钮可用性（C1 定稿：按 can-retry 五条件动态决定，不写死）**：前端调用 `GET /api/runs/{runId}/can-retry`（五条件，见 crud-05 3.5.9 / 4.8）决定 **[重试]** 是否可点；不可点时置灰并以其 `reason` 作 tooltip。要点：
+> - **超时（timeout）结束且在跑 step 存在超时 step 时 [重试] 可点**（用于手动重试超时 step）——不再固定置灰；
+> - **仅 Workflow 支持重试**：target=OP 的 Run（如 `data_sync`）[重试] 恒置灰；
+> - **needsUpdate 时 [重试] 置灰**：Workflow 或 Job 需更新（`needsUpdate=true`）、或 Run 快照版本 ≠ 当前版本时，[重试] 置灰，tooltip 显示 reason（如「版本已更新，请使用 [重跑]」「Workflow 或 Job 需要更新，无法重试」）；
+> - `[重跑]` 仅要求 Run 已结束且 target 仍存在（见 12.8.5）。
 
 **列表列说明**：
 
@@ -1667,7 +1672,7 @@ interface StepRecord {
 |-|-|
 | 名称 | JobRun 名称（persistent = Job 名；临时运行 = OP / Workflow 名），点击进入执行详情（OP 详情 / Workflow 详情） |
 | Target | 目标类型 + 名称 + 版本号 |
-| 失败节点 | 失败时显示失败节点名，否则显示 `-` |
+| 失败节点 | **前端聚合计算字段**（JobRun 结构无 `failedNode` 字段）：取该 Run 的 `steps` 中**最后一条 `failed` 或 `timeout` 的 step** 的 `opName`（超时 step 同样计入，如示例超时行 `deploy`）；无 failed/timeout step 时显示 `-` |
 | 工作区 | 工作目录路径 |
 | 触发方式 | 持久 Job / 定时 / 持久 Job / 手动 / 单次执行 |
 | 结果 | 状态徽标（**7 态**：`⏳ waiting 等待中` / `● running 运行中` / `⏹ terminating 终止中` / `✓ success 成功` / `✗ failed 失败` / `⏱ timeout 超时` / `⊘ cancelled 已取消`）+ 执行耗时（如 `✓ 成功 12.3s`） |
@@ -1732,7 +1737,7 @@ interface StepRecord {
 
 **布局**：执行信息 + 入参/出参（本次执行值）+ 画布（只读执行状态）。**无 OP 库，无右侧节点详情面板。**
 
-> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录中的 `workflowId` 调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 nodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
+> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录快照中的 `target.workflowId`（**嵌套于 `run.target`，无顶层 `workflowId` 字段**，见 §12.3 JobRun 结构）调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 nodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -1976,7 +1981,7 @@ interface StepRecord {
 |-|-|
 | 导出范围 | 当前筛选条件下的所有条目 |
 | 文件格式 | Excel（`.xlsx`），首行为表头 |
-| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10） |
+| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10）——**D7：默认名预填且允许用户自定义**，输入框可编辑，自定义值作为 `POST /api/runs/export` 的 `fileName` 提交 |
 | 导出弹窗 | 展示文件名、导出条数（运行历史数 + 运行明细数）、导出目录选择 |
 | 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；由**后端**生成 `.xlsx` 写入所选目录并返回 `{filePath}`（见 crud-05 3.5.10） |
 
@@ -2416,7 +2421,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | UC-R2 | 查看 Workflow 运行详情 | 运行历史 → 点击 Workflow 类型的名称 | 进入 Workflow 执行详情页，展示只读画布（从 Workflow 定义动态渲染），节点上显示 OP 名称 |
 | UC-R3 | 从 Workflow 画布进入 OP 详情 | Workflow 执行详情 → 点击画布中某节点 | 进入该 OP 的执行详情，触发字段显示"Workflow" |
 | UC-R4 | 搜索与筛选 | 运行历史 → 搜索框输入关键词 + 选择下拉条件（类型/来源/触发/状态/工作区/版本/时间） | 列表按所有条件组合过滤 |
-| UC-R5 | 全部导出 Excel | 运行历史 → [全部导出] → 选目录 → [导出] | 生成 `job_result-{时间戳}.xlsx`，含"运行历史"和"运行明细"两个 sheet，写入所选目录 |
+| UC-R5 | 全部导出 Excel | 运行历史 → [全部导出] → 选目录 → [导出] | 生成 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（默认名，允许自定义），含"运行历史"和"运行明细"两个 sheet，写入所选目录 |
 | UC-R6 | 重试失败的 Job | 运行历史 → 失败记录 → [重试] | 从失败节点开始重试（需版本一致） |
 | UC-R7 | 重跑 Job | 运行历史 → 某记录 → [重跑] | 使用最新版本重新执行 |
 | UC-R8 | 终止运行中 Job | 运行历史 → 运行中记录 → [终止] | 终止执行 |

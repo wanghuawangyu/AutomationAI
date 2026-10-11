@@ -69,7 +69,7 @@
   .badge-restart{color:var(--warn);background:var(--warn-bg)}
   .badge-ro{color:var(--text-3);background:#f1f3f7}
   .cfg-control{flex:0 0 auto;display:flex;align-items:center;gap:10px}
-  .cfg-input{width:150px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;text-align:right}
+  .cfg-input{width:300px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fbfbfd;text-align:right}
   .cfg-input:focus{border-color:#b9cbfb;background:#fff;box-shadow:0 0 0 3px rgba(59,110,246,.09)}
   .cfg-input.ro{background:#f3f4f6;color:var(--text-3);cursor:not-allowed}
   .cfg-select{padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-family:inherit;font-size:13px;outline:none;background:#fff;color:var(--text)}
@@ -146,17 +146,18 @@
 <script src="mock-data.js"></script>
 <script>
 // ============ 配置界面展示元数据 ============
-// 配置值唯一来源 = mockFetch('/api/settings') 返回的 SETTINGS（定义于 mock-data.js，与 crud-06 3.3 结构体一致）；
+// 配置值唯一来源 = mockFetch('/api/settings') 返回的配置（mock-data.js 中的 SETTINGS，与 crud-06 3.3 结构体一致）；
+// 注意：本页缓存变量用 CFG，**不可命名为 SETTINGS**，否则会覆盖 mock 数据源的全局 SETTINGS（导致接口返回 null）
 // GROUPS 仅承载展示元数据（label / desc / unit / type / mode / max / options），不包含任何配置值（界面不硬编码配置）
 // mode: dyn=即时生效  ro=只读（当前无 restart 项；Worker 池大小重启生效仅在 job_queue_running_max 的 desc 注明）
-var SETTINGS = null;   // 由 mockFetch('/api/settings') 填充
+var CFG = null;   // 由 mockFetch('/api/settings') 填充（当前配置快照）
 const GROUPS = [
   { id:'general', name:'通用', icon:'🛠', desc:'系统级基础配置，db_path / workspace_root 由 runDir（-c 运行目录）推导，只读展示', note:null,
     items:[
       {key:'poll_interval_ms', label:'前端轮询建议间隔', unit:'ms', type:'num', mode:'dyn', desc:'前端轮询后端状态的建议间隔。'},
       {key:'db_path', label:'数据库文件路径', type:'text', mode:'ro', desc:'SQLite 文件，由 runDir（-c）推导，不可修改。'},
       {key:'workspace_root', label:'默认工作区根目录', type:'text', mode:'ro', desc:'由 runDir（-c）推导，不可修改。'},
-      {key:'config_version', label:'配置版本', type:'text', mode:'ro', desc:'当前 ai-automation.json 的结构版本。'}
+      {key:'config_version', label:'配置版本', type:'text', mode:'ro', desc:'当前 ai-automation.json 的结构版本（由配置模块维护，仅只读展示、界面不可修改；DB 结构版本 db_version 接口附加返回但界面不展示）。'}
       // db_version（DB 结构版本）：接口附加返回，但**界面不展示**（D3 拍板）
     ]},
   { id:'client', name:'Client', icon:'🧩', desc:'CLI 客户端适配配置', note:null,
@@ -185,7 +186,7 @@ const GROUPS = [
       {key:'max_loop_multiplier', label:'循环执行总次数上限', type:'num', mode:'dyn', desc:'循环节点执行总次数上限；0=不限制（按 max×3），否则与 max×3 取较小值。'},
       {key:'engine_event_retention_days', label:'失败事件保留时长', unit:'天', type:'num', mode:'dyn', desc:'失败调度事件保留 1 天后软删除、2 天后物理删除。'}
     ]},
-  { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；非同一并发限制——一个 JobRun 可并行多 step）', note:'任务排队一律入 DB（step_records waiting）：入队（派发）总是成功，池满（无空闲 Worker）不报错，任务留在 waiting 等调度线程指派；排队中（waiting）的 OP 可直接取消，running 的 OP 不可外部取消（仅等其自然结束或自身超时）。不做本地滞留队列。',
+  { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；数值派生自同一配置，语义与 Task Runner 并发阈值不同——阈值为 running 的 JobRun 数上限，池大小为常驻执行体数）', note:'任务排队一律入 DB（step_records waiting）：入队（派发）总是成功，池满（无空闲 Worker）不报错，任务留在 waiting 等调度线程指派；排队中（waiting）的 OP 可直接取消，running 的 OP 不可外部取消（仅等其自然结束或自身超时）。不做本地滞留队列。',
     items:[
       {key:'worker_pool_size', label:'Worker 池大小', type:'text', mode:'ro', desc:'= ceil(job_queue_running_max × 1.5)（示例：running_max=10 → 15），不按 CPU 核数；随 running_max 联动派生。'},
       {key:'worker_max_concurrency', label:'并发执行上限', type:'text', mode:'ro', desc:'= worker_pool_size；单个 Worker 内仅一个工作线程。'}
@@ -233,7 +234,7 @@ function renderNav(){
   document.querySelectorAll('.cfg-nav-item').forEach(b=>b.onclick=()=>{current=b.dataset.id;render();});
 }
 function render(){
-  const RD = (SETTINGS && SETTINGS.runDir) ? SETTINGS.runDir : 'C:\\Users\\alice\\.ai-automation';   // 后端返回的已是展开后的绝对路径：直接展示；此处拼接仅用于底部信息条的展示用途（前端不自行拼可执行路径）
+  const RD = (CFG && CFG.runDir) ? CFG.runDir : 'C:\\Users\\alice\\.ai-automation';   // 后端返回的已是展开后的绝对路径：直接展示；此处拼接仅用于底部信息条的展示用途（前端不自行拼可执行路径）
   document.getElementById('srcInfo').innerHTML =
     '配置文件：<code>' + RD + '/ai-automation.json</code> · DB：<code>' + RD + '/data/data.db</code> · 日志：<code>' + RD + '/logs/</code>';
   const g = GROUPS.find(x=>x.id===current);
@@ -245,8 +246,8 @@ function render(){
     list.innerHTML = '<div class="empty-tip">当前分组暂无独立配置项</div>';
   } else {
     list.innerHTML = g.items.map(function(it){
-      // 配置值唯一来源 = SETTINGS（mockFetch('/api/settings') 返回，mock-data.js）；界面不硬编码配置值
-      var val = (SETTINGS && SETTINGS[g.id] && SETTINGS[g.id][it.key] != null) ? SETTINGS[g.id][it.key] : '';
+      // 配置值唯一来源 = CFG（mockFetch('/api/settings') 返回，mock-data.js）；界面不硬编码配置值
+      var val = (CFG && CFG[g.id] && CFG[g.id][it.key] != null) ? CFG[g.id][it.key] : '';
       return `
       <div class="cfg-item">
         <div class="cfg-info">
@@ -261,8 +262,19 @@ function render(){
   if(g.note){ note.style.display='block'; note.innerHTML = 'ℹ️ ' + g.note; } else { note.style.display='none'; }
 }
 function save(){
-  document.getElementById('saveTip').classList.add('show');
-  setTimeout(()=>document.getElementById('saveTip').classList.remove('show'), 2400);
+  // PUT /api/settings（crud-06 3.4）：仅提交当前分组内可修改项（data-key）；只读项（db_path / workspace_root / config_version / db_version）不提交
+  var g = GROUPS.find(x=>x.id===current);
+  var payload = {}; payload[g.id] = {};
+  document.querySelectorAll('#cfgList .cfg-control [data-key]').forEach(function(ctl){
+    var it = g.items.find(x=>x.key===ctl.dataset.key);
+    if(!it || it.mode==='ro') return;
+    payload[g.id][ctl.dataset.key] = String(ctl.value);
+  });
+  mockFetch('/api/settings', {method:'PUT', body: JSON.stringify(payload)}).then(function(s){
+    renderSettings(s);
+    document.getElementById('saveTip').classList.add('show');
+    setTimeout(()=>document.getElementById('saveTip').classList.remove('show'), 2400);
+  });
 }
 function resetAll(){
   // 调用恢复默认接口：POST /api/settings/reset（crud-06 3.4），将 JSON 重置为默认值并写回；返回更新后配置驱动重渲染
@@ -270,7 +282,7 @@ function resetAll(){
 }
 // 调用接口获取配置（与其他页面一致：mockFetch('/api/xxx').then(渲染函数)）
 function renderSettings(s){
-  SETTINGS = s;   // 存全局供分组切换时 render() 持续取值
+  CFG = s;   // 存页面缓存供分组切换时 render() 持续取值（不碰 mock 数据源的全局 SETTINGS）
   renderNav();
   render();
 }

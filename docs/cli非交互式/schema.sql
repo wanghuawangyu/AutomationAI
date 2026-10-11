@@ -255,16 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_steps_waiting ON step_records(status, created_at_
 CREATE INDEX IF NOT EXISTS idx_steps_activation ON step_records(run_id, step_id, activation_seq, retry_seq); -- 定位一次实际执行 / 重试计数 / 循环上限判定
 
 -- ============================================================
--- 8. settings —— 系统配置 (KV)
---    ⚠ 已废弃（见 crud-06 配置管理）：配置改为存储于运行目录下的
---    ai-automation.json（唯一事实来源），settings 表不再使用。
---    运行目录由 CLI 入口 -c 指定，默认 ~/.ai-automation。
---    相关路径：DB {run}/data/data.db；日志 {run}/logs/。
--- ============================================================
--- （原 settings 表定义及默认 INSERT 已移除，配置迁移至 ai-automation.json）
-
--- ============================================================
--- 9. engine_events —— Engine 调度事件流 (调度过程记录, 事件溯源)
+-- 8. engine_events —— Engine 调度事件流 (调度过程记录, 事件溯源)
 --    参考 Mistral engine: Engine 采用事件驱动, 每次
 --    "节点完成→决定下一步" 产生一条调度事件并持久化于此;
 --    **写即处理、无事件循环**: 事件 INSERT 后立即由 process_event 同步处理
@@ -305,7 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_evts_processed ON engine_events(processed);
 CREATE INDEX IF NOT EXISTS idx_evts_created   ON engine_events(created_at_ms);
 
 -- ============================================================
--- 10. run_edge_state —— Engine 运行态“边状态”可选 checkpoint 表 (见 crud-03 4.3.3)
+-- 9. run_edge_state —— Engine 运行态“边状态”可选 checkpoint 表 (见 crud-03 4.3.3)
 --    ⚠ 可选：不是热路径（热路径 = 内存 RunContext）。用途:
 --      (1) 恢复加速: 把 RunContext 周期性/结束时快照至本表，重启优先读快照、减少重放量;
 --      (2) 运维/诊断: 直接 SQL 观察某 run 的边状态。
@@ -329,7 +320,7 @@ CREATE INDEX IF NOT EXISTS idx_run_edge_state_run  ON run_edge_state(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_edge_state_from ON run_edge_state(run_id, from_node_id);
 
 -- ============================================================
--- 11. run_node_state —— Engine 运行态“节点就绪”可选 checkpoint 表 (见 crud-03 4.3.3)
+-- 10. run_node_state —— Engine 运行态“节点就绪”可选 checkpoint 表 (见 crud-03 4.3.3)
 --    ⚠ 可选：不是热路径（热路径 = 内存 RunContext），与 run_edge_state 同生命周期。
 --    可选存“当前 activation”的就绪快照，用于恢复加速/诊断:
 --      节点就绪 = pending_in_edges = 0 且 activated_in_edges >= 1

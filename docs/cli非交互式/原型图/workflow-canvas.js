@@ -6,8 +6,10 @@
  * 用法：
  *   WFCanvas.render(canvasEl, nodes, edges, opts)
  *
- *   nodes: { nodeId: { label, kind:'start'|'op'|'end', x, y, op?, opVersion?, timeout?, outdated?, ... } }
- *   edges: [{from,to,condition}] 或 [[from,to,condition]] 均可
+ *   nodes: { nodeId: { nodeId, label, kind:'start'|'op'|'end', position:{x,y},
+ *                     opId?, opVersion?, clientId?, bindings?, retry?, outdated? } }
+ *          （与后端 API 的 WorkflowNode 一致；无 op / params / client / timeout 等旧字段）
+ *   edges: [{from, to, condition:'on_success'|'on_failure'|'always'}]（API 结构；兼容旧的 [from,to,cond] 三元组）
  *   opts: {
  *     width, height,                 // 画布尺寸，默认 1100 x 400
  *     editable: bool,                // 编辑模式：锚点/拖动/右键删除
@@ -38,12 +40,9 @@ var WFCanvas = (function () {
 
   function isSysNode(n) { return n.kind === 'start' || n.kind === 'end'; }
 
-  /* 边归一化：支持 [{from,to,condition}] 与 [[from,to,cond]] */
+  /* 边归一化：一律为 API 对象形态 [{from,to,condition}]（旧三元组兼容已移除，A5） */
   function normalizeEdges(edges) {
     return (edges || []).map(function (e) {
-      if (Array.isArray(e)) {
-        return { from: e[0], to: e[1], condition: e[2] || 'on_success' };
-      }
       return { from: e.from, to: e.to, condition: e.condition || 'on_success' };
     });
   }
@@ -162,7 +161,8 @@ var WFCanvas = (function () {
       html += '<div class="dn-title">End ◉</div><div class="dn-meta">结束节点</div>';
       if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
     } else {
-      html += '<div class="dn-title">' + (n.label || n.op || id) + '</div>';
+      var opDef = n.opId && (typeof OP_BY_ID !== 'undefined') ? OP_BY_ID[n.opId] : null;
+      html += '<div class="dn-title">' + (n.label || (opDef ? opDef.name : '') || id) + '</div>';
       var meta = opts.nodeMeta ? opts.nodeMeta(id, n) : ('v' + (n.opVersion || ''));
       html += '<div class="dn-meta">' + (meta || '') + '</div>';
       if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';

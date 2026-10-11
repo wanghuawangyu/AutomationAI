@@ -156,7 +156,7 @@
 }
 ```
 
-> 列表项额外含 `lastRun`（最近一次执行摘要，可为 null；`status` 取完整 `RunStatus`：waiting/running/success/failed/cancelled/timeout），其余字段同 Job 对象。
+> 列表项额外含 `lastRun`（最近一次执行摘要，可为 null；`status` 取完整 `RunStatus`：waiting/running/terminating/success/failed/cancelled/timeout——**可为非终态**（waiting / running / terminating），前端「最近运行结果」按非终态渲染为「运行中/终止中」样式，终态渲染为对应结果徽标）。
 
 **错误响应**：400 `VALIDATION_ERROR`（page_size/needsUpdate/enabled/failed/sort 取值非法）。
 
@@ -246,9 +246,9 @@
 
 **功能说明**：删除 Job，同时取消其已注册的定时触发。
 
-- **有在途运行时拒绝删除**：若该 Job 存在 `waiting` / `running` 的 JobRun → **409 `JOB_HAS_ACTIVE_RUNS`**（防悬挂；需先终止/等待完成）。
+- **有在途运行时拒绝删除**：若该 Job 存在 `waiting` / `running` / `terminating` 的 JobRun → **409 `JOB_HAS_ACTIVE_RUNS`**（防悬挂；`terminating` 仍在途——已提交终止、等待在跑 OP 收敛，仍占并发名额，见 crud-05 4.6；需先终止完成/等待终态后删除）。
 - **历史保留与展示**：已终态的 `job_runs` 随 Job 删除**保留**（`job_id` 作快照引用，不再是强外键，见 `schema.sql`）；运行历史用 Run 自身的**名称快照 `name`**（persistent = 时任 jobs.name）展示 Job 名称，不依赖 `jobs` 表；已删 Job 的 Run **可查看详情**但**不可跳转到 Job 定义**，[重跑] 需 target（op/workflow）仍存在（否则 404 `TARGET_NOT_FOUND`），[重试] 仅依赖 target=workflow 及五条件（Job 已删则不检查 Job.needsUpdate，视为 false）。
-- **删除的原子性（#5）**：并发检查（count waiting/running）与删除在**同一事务（`BEGIN IMMEDIATE`）**内执行（先查后删）；与创建侧对称，防「检查通过后、Run 才插入」产生悬挂 Run。
+- **删除的原子性（#5）**：并发检查（count waiting/running/terminating）与删除在**同一事务（`BEGIN IMMEDIATE`）**内执行（先查后删）；与创建侧对称，防「检查通过后、Run 才插入」产生悬挂 Run。
 - **重试的「五条件」摘要**（详见 proposal-01 §12.8.2 / crud-05 4.8）：① target=Workflow；② Run 已结束且**存在失败/超时 step**（failed / timeout / cancelled 均可）；③ 版本一致（Run 快照版本 = 当前版本）；④ Workflow.needsUpdate=false；⑤ Job.needsUpdate=false（Job 已删 → 视为 false）。**waiting / running / terminating 不可重试**。
 
 **路径参数**：`jobId`（32 位 UUID，必填）
@@ -263,7 +263,7 @@
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | jobId 格式非法 |
 | 404 | `JOB_NOT_FOUND` | jobId 不存在 |
-| 409 | `JOB_HAS_ACTIVE_RUNS` | 该 Job 存在 waiting / running 实例，拒绝删除 |
+| 409 | `JOB_HAS_ACTIVE_RUNS` | 该 Job 存在 waiting / running / terminating 实例，拒绝删除 |
 
 ---
 
@@ -291,24 +291,24 @@
 | 400 | `VALIDATION_ERROR` | jobId 格式非法 |
 | 404 | `JOB_NOT_FOUND` | jobId 不存在 |
 | 409 | `JOB_NEEDS_UPDATE` | needsUpdate=true，需更新后才能运行 |
-| 409 | `CONCURRENCY_CONFLICT` | 并发策略 skip 且已有 waiting/running 实例；或队列深度达上限（**queue / parallel 均适用**：全局 waiting 计数 ≥ `job_queue_waiting_max`，见下注 #3） |
+| 409 | `CONCURRENCY_CONFLICT` | 并发策略 skip 且已有 waiting/running/terminating 实例；或队列深度达上限（**queue / parallel 均适用**：全局 waiting 计数 ≥ `job_queue_waiting_max`，见下注 #3） |
 
 > **校验顺序（返回首个命中）**：`needsUpdate` → `concurrency`（即优先 `JOB_NEEDS_UPDATE` > `CONCURRENCY_CONFLICT`）；**enabled 不参与运行校验**（禁用仅停定时，不影响手动运行，见 4.5.1/4.5.4）。
 
 **手动运行的并发策略（`concurrency`）精确语义**：
 
-| 值 | 已有 waiting/running 实例时 | 落地 |
+| 值 | 已有 waiting/running/terminating 实例时 | 落地 |
 |-|-|-|
-| `skip` | 拒绝 → 409 `CONCURRENCY_CONFLICT` | 同 Job 同时最多 1 个在途实例 |
+| `skip` | 拒绝 → 409 `CONCURRENCY_CONFLICT` | 同 Job 同时最多 1 个在途实例（terminating 仍占在途名额，等收敛释放） |
 | `queue` | **允许创建 waiting 排队**（同 Job 可多个 waiting）；**全局 waiting 队列深度上限**（下注）达限 → 409 `CONCURRENCY_CONFLICT` | 所有 waiting 均落在 **`job_runs` 全局队列**（非 Job 私有队列），由 Task Runner 按 created_at FIFO 与全局并发配额调度；同 Job 多实例按入库顺序逐个执行 |
 | `parallel` | **允许创建 waiting**，**Job 内无上限** | 并行度仅受 Task Runner **全局并发配额**约束；同 Job 可多实例同时运行 |
 
-> **`job_queue_waiting_max` 的语义（#4）**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ settings `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running')`）。
+> **`job_queue_waiting_max` 的语义（#4）**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ settings `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running','terminating')`）。
 >
 > **适用范围（#3，全入口生效）**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
 
 - `queue` / `parallel` **真正差别**：**Job 内串行 vs 并行**（`queue` 同 Job 多实例逐个执行、`parallel` 同 Job 多实例同时运行）；**全局 waiting 上限（`job_queue_waiting_max`）对两者及各创建入口一律生效**（全入口，见上注 #3）——它并非 queue/parallel 的区分标志。
-- **原子性**：并发检查与创建 JobRun 在**同一事务（`BEGIN IMMEDIATE`）内**执行——先 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running')` 判定，再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。
+- **原子性**：并发检查与创建 JobRun 在**同一事务（`BEGIN IMMEDIATE`）内**执行——先 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running','terminating')` 判定，再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。
 - **manual Job 的 `enabled`**：`enabled` 仅对 schedule 语义有效（是否注册定时）；**manual Job 的 `enabled` 固定为 true、不参与运行判断**（disable 只停定时，不影响手动运行）。
 
 ---
@@ -518,9 +518,9 @@ cron 到点 (jobId):
   │        - trigger.kind != schedule    → 跳过
   │        - needsUpdate=true            → 跳过，记 warning（不静默跑旧定义）
   │        - cron 已解析失败 / 非法      → 跳过，记 error（**防御性检查**：注册时已校验；此处防持久化定义在注册后被人为改坏的异常）
-  ├─ 2. 并发占用检查（统计该 Job 的 job_runs 中 status ∈ {waiting, running} 的实例）:
-  │        - **只要存在任一 waiting / running 实例 → 本次 cron 不触发（跳过），不 queue、不 parallel**
-  │        - 仅当无 waiting / running 实例时，才继续创建 JobRun
+  ├─ 2. 并发占用检查（统计该 Job 的 job_runs 中 status ∈ {waiting, running, terminating} 的实例）:
+  │        - **只要存在任一 waiting / running / terminating 实例 → 本次 cron 不触发（跳过），不 queue、不 parallel**
+  │        - 仅当无 waiting / running / terminating 实例时，才继续创建 JobRun
   │        - **全局 waiting 上限（job_queue_waiting_max，#3）**：`count(*) FROM job_runs WHERE status='waiting'`（全局）≥ job_queue_waiting_max（默认 20、可调、上限 1000）→ 本次 cron **跳过不触发**（不报 409、不排队；下个 cron 周期重试）
   │        - **步骤 2-3 在同一事务（`BEGIN IMMEDIATE`）内**：先查后插，保证与手动运行 / 并发 cron 的『检查-创建』原子（#1）
   ├─ 3. 创建 JobRun: triggered_by=schedule、status=waiting、快照 target/target_version/inputs/workspace（含名称快照 name/target_name）
@@ -529,13 +529,13 @@ cron 到点 (jobId):
 
 - **Scheduler 不直接执行**：与手动运行（3.4.6）同链路：创建 JobRun → `TaskRunner.add_job` → Engine/WorkerPool。
 - **触发源**：`job_runs.triggered_by='schedule'`（区别于 manual / single_op / single_workflow / retry）。
-- **cron 固定按 skip 语义**：定时触发**只要该 Job 已有 waiting 或 running 实例即跳过本次**（不排队、不并行）；`concurrency` 的 `queue` / `parallel` 仅作用于**手动运行**（3.4.6）等其它入口。
+- **cron 固定按 skip 语义**：定时触发**只要该 Job 已有 waiting / running / terminating 实例即跳过本次**（不排队、不并行；terminating 等收敛，仍占在途名额）；`concurrency` 的 `queue` / `parallel` 仅作用于**手动运行**（3.4.6）等其它入口。
 
 **4.5.3 错过触发与重叠（missed / overlap）**
 
 | 场景 | 处理 |
 |-|-|
-| 上一实例仍在跑 / 已在 waiting，cron 又到点 | **cron 跳过本次**（只要存在 waiting 或 running 实例即不触发） |
+| 上一实例仍在跑 / 已在 waiting，cron 又到点 | **cron 跳过本次**（只要存在 waiting / running / terminating 实例即不触发，terminating 等收敛） |
 | Daemon 停机期间错过的 cron 点 | **不补跑**（missed runs 直接跳过）；重启后按**下一个** cron 点触发 |
 | 同一时刻多个 Job 到点 | 各自独立创建 JobRun；实际并行度由 Task Runner 全局并发配额（settings）约束 |
 | cron 触发的`waiting` 任务堆积 | 由 Task Runner 按配额逐个调度；**不会因堆积而丢任务**（落库排队） |

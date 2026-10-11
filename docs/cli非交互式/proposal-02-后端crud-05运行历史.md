@@ -158,7 +158,7 @@
 | status | query | string | 否 | — | 状态：waiting/running/terminating/success/failed/cancelled/timeout |
 | workspace | query | string | 否 | — | 工作区 |
 | jobKind | query | string | 否 | — | 来源：persistent/virtual |
-| version | query | string | 否 | — | 版本号 |
+| version | query | string | 否 | — | 版本号，按 **`job_version`**（Job 修订号）精确等值过滤——非 target 快照版本（OP / Workflow 的 target_version）；若需按快照版本过滤暂不支持（可用 `keyword` 检索目标名称辅助定位） |
 | timeRange | query | string | 否 | — | `last_2d` / `last_3d` / `last_5d` / `custom` |
 | startMs | query | string | 条件 | — | timeRange=custom 时必填（毫秒时间戳） |
 | endMs | query | string | 条件 | — | timeRange=custom 时必填 |
@@ -231,7 +231,7 @@
 
 ### 3.5.5 GET /api/runs/{runId}/steps/{stepId} —— 单步骤多次执行记录
 
-**功能说明**：查询某 step 因**重试 / 循环回跳**产生的全部执行记录，按执行降序（最新在上，即 `(activation_seq, retry_seq)` 降序），用于对比每次尝试的结果。
+**功能说明**：查询某 step 因**重试 / 循环回跳**产生的全部执行记录，按执行降序（最新在上，即 `(activation_seq, retry_seq)` 降序），用于对比每次尝试的结果。**判断该 step 的最终结果（成败 / 是否需重试 / 是否已达上限）一律以「最后一条记录」（即 `(activation_seq, retry_seq)` 最大者）为准**（D3 拍板）。
 
 **路径参数**：
 
@@ -390,7 +390,8 @@
 ```json
 {
   "filters": {"status":"failed","timeRange":"last_5d"},
-  "filePath": "/path/to/export_dir"
+  "filePath": "/path/to/export_dir",
+  "fileName": "job_result-20261007120000000-6.xlsx"
 }
 ```
 
@@ -398,6 +399,7 @@
 |-|-|-|-|
 | filters | object | 否 | 与 GET /api/runs 一致的筛选条件 |
 | filePath | string | 是 | 导出目标目录路径（后端生成文件写入） |
+| fileName | string | 否 | **自定义文件名（D7）**：不传时后端生成默认名 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前、便于按导出时序排序；`jobResultCount` = 本次导出条数 = Sheet1 行数）；**所有导出 UI 的输入框默认预填该默认名且允许用户修改**，修改后的值作为本字段提交 |
 
 **成功响应 `200 OK`**：
 
@@ -405,7 +407,13 @@
 { "filePath": "/path/to/export_dir/job_result-20261007120000000-6.xlsx" }
 ```
 
-**错误响应**：400 `VALIDATION_ERROR`（filePath 缺失/非法，**或 filters 取值非法——与 GET /api/runs 同一校验：status / triggeredBy / timeRange / sort 等枚举、page_size、timeRange=custom 缺 startMs/endMs**）；500 `INTERNAL_ERROR`（写文件失败）。
+**文件名与边界（C5/D7 定稿）**：
+
+- **同名文件已存在**：**覆盖写入**（导出即最新快照，同路径旧文件被替换；默认名含毫秒时间戳 + 计数，天然规避重名；用户自定义重名时覆盖并在响应 filePath 中体现实际路径）。
+- **并发导出**：多次导出互相独立；后端**单进程内按请求顺序串行写文件**，写入采用**原子落盘**（先写 `*.tmp` 临时文件再 rename，避免半成品文件）；同目录并发导出各自独立完成。
+- **失败与重试**：写失败返回 500 `INTERNAL_ERROR`，**不自动重试**（错误码含原因：目录不存在 / 权限 / 磁盘满）；前端可在失败提示后由用户重新点击导出。
+
+**错误响应**：400 `VALIDATION_ERROR`（filePath 缺失/非法、fileName 含非法字符（`\ / : * ? " < > |` 或空）、**或 filters 取值非法——与 GET /api/runs 同一校验：status / triggeredBy / timeRange / sort 等枚举、page_size、timeRange=custom 缺 startMs/endMs**）；500 `INTERNAL_ERROR`（写文件失败）。
 
 ---
 
@@ -424,7 +432,7 @@
 
 > Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
-**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，只读派生）**是两个独立概念**，见 crud-06 一）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：`running_count.load() < job_queue_running_max` 时扫描 DB 中 `waiting` 任务并触发运行、计数自增（`fetch_add(1)`）；达到上限则暂停调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，轮询即获得调度机会。
+**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，默认 10 阈值 → 15 个 Worker，只读派生；**一个 JobRun 可并行多个 step，故池大小需大于并发阈值**，见 crud-03 4.4 / crud-06 一）**是两个独立概念**）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：`running_count.load() < job_queue_running_max` 时扫描 DB 中 `waiting` 任务并触发运行、计数自增（`fetch_add(1)`）；达到上限则暂停调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，轮询即获得调度机会。
 
 > **waiting → running 的前提（D1 定稿）**：需**入队成功**（单次 OP 入 step_records waiting；Job / Workflow 完成 engine_start 处理并成功写入首个 dispatch_step）后才置 running；**池满不影响入队**（无空闲 Worker 时任务就留在 step_records waiting，由调度线程稍后指派），**不存在“派发失败由上游重试”**。
 

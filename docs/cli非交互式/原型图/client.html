@@ -452,6 +452,7 @@
 
   /* 判断是否新建：新建时不预填默认值 */
   var isNewClient = false;
+  var editingClientId = null;   // 当前编辑的 Client（新建时为 null；供保存与测试接口使用）
 
   // ---------- 分页状态 ----------
   var allClients = [];
@@ -496,26 +497,33 @@
 
     pageData.forEach(function(c) {
       var tagClass = 'tag-' + c.type;
-      var inputMethod = c.paramTemplate ? '参数模板: ' + c.paramTemplate : '固定调用方式';
+      var inputMethod = c.argsTemplate ? '参数模板: ' + c.argsTemplate : (c.inputMode ? '输入方式: ' + c.inputMode : '固定调用方式');
       var detailRows = '';
-      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + c.type + '</td><td class="dt-k">格式</td><td class="dt-v">' + c.format + '</td><td class="dt-k">描述</td><td class="dt-v">' + c.description + '</td></tr>';
-      detailRows += '<tr><td class="dt-k">二进制路径</td><td class="dt-v mono" colspan="5">' + c.binaryPath + '</td></tr>';
-      if (c.paramTemplate) {
-        detailRows += '<tr><td class="dt-k">参数模板</td><td class="dt-v mono" colspan="5">' + c.paramTemplate + '</td></tr>';
+      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + c.type + '</td><td class="dt-k">描述</td><td class="dt-v" colspan="3">' + c.description + '</td></tr>';
+      if (c.type === 'prompt') {
+        detailRows += '<tr><td class="dt-k">command</td><td class="dt-v mono" colspan="5">' + (c.command || '-') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">inputMode</td><td class="dt-v mono" colspan="5">' + (c.inputMode || '-') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">outputMode</td><td class="dt-v mono" colspan="5">' + (c.outputMode || '-') + (c.outputJsonPath ? ' / ' + c.outputJsonPath : '') + '</td></tr>';
+      } else {
+        /* 脚本类（bash / python / powershell）无输出模式字段（恒为空） */
+        detailRows += '<tr><td class="dt-k">binaryPath</td><td class="dt-v mono" colspan="5">' + (c.binaryPath || '-') + '</td></tr>';
+      }
+      if (c.argsTemplate) {
+        detailRows += '<tr><td class="dt-k">argsTemplate</td><td class="dt-v mono" colspan="5">' + c.argsTemplate + '</td></tr>';
       }
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + c.clientId + '\',\'' + c.type + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.clientId + '</span>' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.name + '</span>' +
         '</td>' +
         '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + c.type + '</span></td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + c.binaryPath + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (c.binaryPath || c.command || '-') + '</td>' +
         '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim)">' + inputMethod + '</td>' +
-        '<td style="padding:10px 8px">' + c.format + '</td>' +
+        '<td style="padding:10px 8px">' + (c.outputMode || '-') + '</td>' +
         '<td style="padding:10px 8px">' +
           '<button class="btn btn-sm" onclick="editClient(\'' + c.clientId + '\',\'' + c.type + '\')">编辑</button>' +
           '<button class="btn btn-sm" onclick="openExport(\'' + c.clientId + '\',\'' + c.type + '\')">导出</button>' +
-          '<button class="btn btn-sm">复制</button>' +
-          '<button class="btn btn-sm btn-danger">删除</button>' +
+          '<button class="btn btn-sm" onclick="dupClient(\'' + c.clientId + '\')">复制</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="delClient(\'' + c.clientId + '\')">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -575,6 +583,7 @@
   /* 新建 Client：命令 / 二进制路径均为空 */
   function openEditor() {
     isNewClient = true;
+    editingClientId = null;
     listView.classList.remove('active');
     editorView.classList.add('active');
     editorTitle.textContent = '新建 Client';
@@ -597,35 +606,38 @@
     document.querySelector('input[name="clientType"][value="prompt"]').checked = true;
   }
 
-  function editClient(name, type) {
+  function editClient(clientIdOrName, type) {
+    // 入参为列表传来的 clientId（兼容传 name 的旧调用）；编辑界面直接回填该 Client 的真实字段（crud-01 3.1）
+    var c = CLIENT_BY_ID[clientIdOrName] || CLIENT_BY_NAME[clientIdOrName];
+    if (!c) { alert('未找到 Client：' + clientIdOrName); return; }
     isNewClient = false;
+    editingClientId = c.clientId;
     listView.classList.remove('active');
     editorView.classList.add('active');
-    editorTitle.textContent = '编辑: ' + name;
-    document.getElementById('clientName').value = name;
-    document.getElementById('clientDesc').value = name + ' 适配';
+    editorTitle.textContent = '编辑: ' + c.name;
 
-    // 演示数据：按 name 填充
-    var samples = {
-      'Claude Code': { cmd: 'claude', args: '-p {{prompt}} --output-format json', bin: 'claude' },
-      'Codex CLI': { cmd: 'codex', args: 'exec --silent', bin: 'codex' },
-      '本地 Bash': { cmd: '', args: '', bin: '/usr/bin/bash' },
-      '本地 Python': { cmd: '', args: '', bin: '/usr/bin/python3' },
-      '本地 PowerShell': { cmd: '', args: '', bin: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' }
-    };
-    var s = samples[name] || { cmd: '', args: '', bin: '' };
-    document.getElementById('promptCommand').value = s.cmd;
-    document.getElementById('promptArgs').value = s.args;
-    document.getElementById('promptInputMode').value = 'arg';
-    document.getElementById('promptOutputMode').value = 'json';
-    document.getElementById('promptJsonPath').value = '$.result';
-    document.getElementById('promptExitCode').value = '0';
-    document.getElementById('bashPath').value = s.bin;
-    document.getElementById('pythonPath').value = s.bin;
-    document.getElementById('psPath').value = s.bin;
+    /* 名称 / 描述 */
+    document.getElementById('clientName').value = c.name || '';
+    document.getElementById('clientDesc').value = c.description || '';
 
-    document.querySelector('input[name="clientType"][value="' + type + '"]').checked = true;
-    switchType(type);
+    /* prompt 专用：command / argsTemplate / inputMode */
+    document.getElementById('promptCommand').value = c.command || '';
+    document.getElementById('promptArgs').value = c.argsTemplate || '';
+    document.getElementById('promptInputMode').value = c.inputMode || 'stdin';
+
+    /* 通用输出解析 */
+    document.getElementById('promptOutputMode').value = c.outputMode || 'text';
+    document.getElementById('promptJsonPath').value = c.outputJsonPath || '';
+    document.getElementById('promptExitCode').value = (c.exitCodeSuccess && c.exitCodeSuccess.length) ? c.exitCodeSuccess.join(',') : '0';
+
+    /* bash / python / powershell：binaryPath */
+    document.getElementById('bashPath').value = c.binaryPath || '';
+    document.getElementById('pythonPath').value = c.binaryPath || '';
+    document.getElementById('psPath').value = c.binaryPath || '';
+
+    updateArgHint();
+    document.querySelector('input[name="clientType"][value="' + (c.type || type) + '"]').checked = true;
+    switchType(c.type || type);
   }
 
   function closeEditor() {
@@ -645,8 +657,54 @@
       var binId = { bash: 'bashPath', python: 'pythonPath', powershell: 'psPath' }[type];
       if (!document.getElementById(binId).value.trim()) { alert('请填写二进制路径'); return; }
     }
-    // 保存（演示）
-    closeEditor();
+
+    var binVal = { bash: 'bashPath', python: 'pythonPath', powershell: 'psPath' }[type];
+    var exitCodes = document.getElementById('promptExitCode').value.split(',')
+      .map(function (s) { return parseInt(s.trim(), 10); })
+      .filter(function (n) { return !isNaN(n); });
+    var payload = {
+      name: name,
+      description: document.getElementById('clientDesc').value || null,
+      type: type,
+      command: type === 'prompt' ? document.getElementById('promptCommand').value : null,
+      argsTemplate: (type === 'prompt' && document.getElementById('promptArgs').value) ? document.getElementById('promptArgs').value : null,
+      inputMode: type === 'prompt' ? document.getElementById('promptInputMode').value : null,
+      outputMode: type === 'prompt' ? (document.getElementById('promptOutputMode').value || 'text') : null,
+      outputJsonPath: type === 'prompt' ? (document.getElementById('promptJsonPath').value || null) : null,
+      exitCodeSuccess: exitCodes.length ? exitCodes : [0],
+      binaryPath: type === 'prompt' ? null : document.getElementById(binVal).value
+    };
+
+    // 新建 → POST /api/clients；编辑 → PUT /api/clients/{clientId}（crud-01 3.1.4 / 3.1.5）
+    var p = isNewClient
+      ? mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(payload) })
+      : mockFetch('/api/clients/' + editingClientId, { method: 'PUT', body: JSON.stringify(payload) });
+    p.then(function () {
+      closeEditor();
+      mockFetch('/api/clients').then(renderClientList);
+    });
+  }
+
+  /* 复制 Client：深拷贝为新 Client（name 加 _copy 后缀），POST /api/clients */
+  function dupClient(clientId) {
+    var src = CLIENT_BY_ID[clientId];
+    if (!src) return;
+    var copy = Object.assign({}, src, {
+      clientId: __uid32(), name: src.name + '_copy',
+      createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+    });
+    mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(copy) }).then(function () { renderClientList(); });
+  }
+
+  /* 删除 Client：确认后 DELETE /api/clients/{clientId} */
+  function delClient(clientId) {
+    var cl = CLIENT_BY_ID[clientId];
+    if (!cl) return;
+    if (!confirm('确认删除 Client「' + cl.name + '」？')) return;
+    mockFetch('/api/clients/' + clientId, { method: 'DELETE' }).then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      renderClientList();
+    });
   }
 
   // ---------- 类型切换 ----------
@@ -710,10 +768,21 @@
   }
 
   function runTest() {
+    // POST /api/clients/{clientId}/test（同步执行，见 crud-01 3.1.6）
+    var cid = (typeof editingClientId !== 'undefined' && editingClientId) ? editingClientId : (CLIENTS[0] && CLIENTS[0].clientId);
     var result = document.getElementById('testResult');
-    // 模拟测试成功
-    result.className = 'test-result show ok';
-    result.innerHTML = '✓ 命令可用（模拟测试结果）';
+    if (!cid) { result.className = 'test-result show err'; result.textContent = '✗ 未选择 Client'; return; }
+    result.className = 'test-result';
+    result.textContent = '测试中...';
+    mockFetch('/api/clients/' + cid + '/test', { method: 'POST' }).then(function (r) {
+      if (r && r.success) {
+        result.className = 'test-result show ok';
+        result.textContent = '✓ 命令可用（exitCode=' + r.exitCode + '，' + r.durationMs + 'ms）';
+      } else {
+        result.className = 'test-result show err';
+        result.textContent = '✗ 测试失败：' + ((r && r.error) || 'unknown');
+      }
+    });
   }
 
   // ---------- 弹窗控制 ----------
@@ -795,13 +864,20 @@
     }
   }
   function buildClientYaml(name, type) {
-    var c = CLIENTS[name] || { binaryPath: name, format: 'text', paramTemplate: '' };
-    var yaml = 'name: ' + name + '\n';
+    var c = CLIENT_BY_ID[name] || CLIENT_BY_NAME[name] || { name: name, type: type };
+    var yaml = 'name: ' + c.name + '\n';
     yaml += 'type: ' + c.type + '\n';
-    yaml += 'description: ' + c.description + '\n';
-    yaml += 'bin: ' + c.binaryPath + '\n';
-    if (c.paramTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.paramTemplate) + '\n';
-    yaml += 'outputFormat: ' + c.format + '\n';
+    yaml += 'description: ' + (c.description || '') + '\n';
+    if (c.type === 'prompt') {
+      yaml += 'command: ' + c.command + '\n';
+      if (c.argsTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.argsTemplate) + '\n';
+      yaml += 'inputMode: ' + c.inputMode + '\n';
+    } else {
+      yaml += 'binaryPath: ' + c.binaryPath + '\n';
+    }
+    if (c.outputMode) yaml += 'outputMode: ' + (c.outputMode || 'text') + '\n';
+    if (c.outputJsonPath) yaml += 'outputJsonPath: ' + c.outputJsonPath + '\n';
+    if (c.exitCodeSuccess) yaml += 'exitCodeSuccess: ' + JSON.stringify(c.exitCodeSuccess) + '\n';
     return yaml;
   }
   function confirmExport() {

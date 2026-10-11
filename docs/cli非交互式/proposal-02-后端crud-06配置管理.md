@@ -70,7 +70,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | | `history_max_age_days` | 180 | 动态 | **单条记录最大保存天数（半年，硬上限 180）** |
 | **Engine** | `max_loop_multiplier` | 0 | 动态 | 循环总次数上限（0=不限制） |
 | | `engine_event_retention_days` | 1 | 动态 | Engine 事件清理（`engine_events` 表，重放事件）：**成功 run 完成即物理删本 run 事件**；失败 run 最终不重试 → 1 天软删 / 2 天硬删。**不影响 `step_records` 明细**（后者由运行历史 `history_max_*` 保留） |
-| **Worker** | `worker_pool_size` | =1.5×running | 只读派生 | Worker 池大小 = `ceil(job_queue_running_max × 1.5)`，只读展示；**与 Task Runner 并发阈值无关** |
+| **Worker** | `worker_pool_size` | =1.5×running | 只读派生 | Worker 池大小 = `ceil(job_queue_running_max × 1.5)`，只读展示；**数值派生自同一配置，语义与 Task Runner 并发阈值不同**（阈值为 running 的 JobRun 数上限，池大小为常驻执行体数） |
 | | `worker_max_concurrency` | =pool_size | 只读派生 | = `worker_pool_size`（单 Worker 单工作线程） |
 | **Task Runner** | `runner_poll_interval_ms` | 1000 | 动态 | **后端** Task Runner 调度轮询间隔（ms；区别于前端 `poll_interval_ms`） |
 | | `runner_batch_size` | 10 | 动态 | 单轮调度批数 |
@@ -85,7 +85,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | 概念 | 取值 | 作用 |
 |-|-|-|
 | Task Runner 并发阈值（`running_count` 上限） | **`job_queue_running_max`**（默认 10） | Runner 调度：`running_count < 阈值` 才把 waiting 的 JobRun 取出并置 running |
-| Worker 池大小 `worker_pool_size` | `ceil(job_queue_running_max × 1.5)`（派生，只读） | WorkerPool 内部常驻执行体数量，**与 Runner 阈值无直接关系**（一个 JobRun 可同时跑多个 step） |
+| Worker 池大小 `worker_pool_size` | `ceil(job_queue_running_max × 1.5)`（派生，只读） | WorkerPool 内部常驻执行体数量；**数值派生自同一配置，语义与 Runner 阈值不同**（一个 JobRun 可并行多个 step） |
 | Worker 串行上限 `worker_max_concurrency` | = `worker_pool_size`（派生） | 同时执行的 OP 数上限（单 Worker 单线程） |
 
 ### 运行历史保存策略（v2 重新设计）
@@ -120,6 +120,17 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 ---
 
 ## 三、接口定义
+
+**接口一览（C4：配置类接口全集，便于读者总览）**：
+
+| 方法 | 端点 | 功能 | 章节 |
+|-|-|-|-|
+| GET | `/api/system/status` | 系统状态（进程运行状态 / 运行时长 / 在途 Run 数） | 3.1 |
+| GET | `/api/system/version` | 版本信息（app / config_version / db_version） | 3.2 |
+| GET | `/api/settings` | 读取全部配置（只读项由 runDir 推导 / 接口附加） | 3.3 |
+| PUT | `/api/settings` | 更新配置（校验 + 内存更新 + 原子写回 ai-automation.json） | 3.4 |
+| POST | `/api/settings/reset` | 恢复默认配置（内置默认值，只读项不参与） | 3.5 |
+| GET | `/api/workspaces` | 最近使用的工作区列表 | 3.6 |
 
 ### 3.1 GET /api/system/status —— 系统状态
 
@@ -270,11 +281,27 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 > 未列出的布尔/枚举/字符串项按类型校验（布尔、枚举白名单、非空等）；上限均为**可配置的最大值**，超过即 400 `VALIDATION_ERROR`。
 > **`max_loop_multiplier` 合法取值**：`0` **或** `1..10000`；`0` 语义为“不限制”，**优先于上限**（上限仅约束非零取值）。
 
-**恢复默认（reset）**：`POST /api/settings/reset` —— 将 `ai-automation.json` **重置为程序内置默认值**（校验后更新内存并**原子写回**，语义同 PUT），返回更新后的全部配置（结构同 GET /api/settings）。只读项（`db_path` / `workspace_root` / `config_version` / `db_version` / worker 派生）**不参与重置**（仍按 runDir 推导 / 接口附加）；失败语义同 PUT（500 `WRITE_FAILED`）。配置界面「恢复默认」按钮调用此接口。
+**恢复默认（reset）**：见 3.5 节。
 
 ---
 
-### 3.5 GET /api/workspaces —— 最近使用的工作区列表
+### 3.5 POST /api/settings/reset —— 恢复默认配置
+
+**功能说明**：将 `ai-automation.json` **重置为程序内置默认值**（校验后更新内存并**原子写回**，语义同 PUT 3.4），返回更新后的全部配置（结构同 GET /api/settings）。只读项（`db_path` / `workspace_root` / `config_version` / `db_version` / worker 派生）**不参与重置**（仍按 runDir 推导 / 接口附加）；失败语义同 PUT（500 `WRITE_FAILED`）。配置界面「恢复默认」按钮调用此接口。
+
+**路径参数**：无　**查询参数**：无　**请求体**：无
+
+**成功响应 `200 OK`**：更新后的全部配置（结构同 GET /api/settings）。
+
+**错误响应**：
+
+| 状态码 | code | 场景 |
+|-|-|-|
+| 500 | `WRITE_FAILED` | ai-automation.json 原子写回失败（磁盘 / 权限） |
+
+---
+
+### 3.6 GET /api/workspaces —— 最近使用的工作区列表
 
 **功能说明**：返回最近使用的工作区路径列表，前端在新建 / 编辑任务时快速选择工作区。
 
@@ -331,3 +358,4 @@ WorkerPool **不设本地滞留队列**（废弃 `worker_queue_depth`）。**任
 | v2 | settings 表废弃 → `ai-automation.json` 唯一事实来源；新增 `-c` 运行目录；实时写回；按业务分组；`history_*` 三维度保存策略；日志绕接 zip 按最大文件数；Worker 池派生；Scheduler 时区固定 Local；**GET /api/settings 返回顶层 `runDir`，只读派生项由后端按 runDir 拼接为具体路径下发** |
 | v2.1 | 路径拼接职责统一（一律后端拼接绝对路径下发，前端不拼）；可配置项/派生只读项来源说清；`job_queue_waiting_max` 上限放宽到 1000（默认 20，超出即拒新建，用户可调）；`history_max_age_days` 硬上限 180；`max_loop_multiplier` 合法取值 0 或 1..10000；`db_version` 界面不展示 |
 | v2.2 | **WorkerPool 定稿为 DB 排队**：入队（派发）总是成功、池满不报错（删除 Err(NoIdleWorker)）；等待中的 step 可直接 cancel、running 的不可 cancel；术语「入队/执行失败/DB 错误」分立 |
+| v2.3 | 前端原型（mock / index / workflow / job / client / op）严格对齐 API 结构；bindings 定稿结构化对象（outputName/inputName）、EdgeCondition 定稿字符串枚举；遣词修正：「与并发阈值无关」→「数值派生自同一配置、语义不同」 |

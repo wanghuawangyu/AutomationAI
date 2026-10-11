@@ -598,110 +598,75 @@
   var NODE_W = 130, NODE_H = 46;
 
   /* ==================== OP 库数据 ==================== */
-  var OP_LIB = [
-    { name: 'check_tests',    type: 'prompt',     version: 2, timeout: 300,
-      inputs: [{ name: 'test_cmd', required: true }],
-      outputs: ['passed', 'count', 'result'] },
-    { name: 'review',         type: 'prompt',     version: 2, timeout: 600,
-      inputs: [{ name: 'test_result', required: true }],
-      outputs: ['approved'] },
-    { name: 'deploy',         type: 'prompt',     version: 2, timeout: 120,
-      inputs: [{ name: 'target_env', required: true }],
-      outputs: ['url'] },
-    { name: 'notify',         type: 'prompt',     version: 1, timeout: 60,
-      inputs: [{ name: 'message', required: true }],
-      outputs: [] },
-    { name: 'notify_fail',    type: 'prompt',     version: 1, timeout: 60,
-      inputs: [], outputs: [] },
-    { name: 'clean_logs',     type: 'powershell', version: 3, timeout: 120,
-      inputs: [{ name: 'endpoint', required: true }], outputs: [] },
-    { name: 'process_data',   type: 'python',     version: 3, timeout: 300,
-      inputs: [{ name: 'source', required: true }], outputs: ['count'] },
-    { name: 'health_check',   type: 'bash',       version: 1, timeout: 180,
-      inputs: [{ name: 'endpoint', required: true }], outputs: ['healthy'] },
-    { name: 'collect_metrics',type: 'python',     version: 1, timeout: 240,
-      inputs: [{ name: 'endpoint', required: true }], outputs: ['metrics'] },
-    { name: 'run_lint',       type: 'bash',       version: 2, timeout: 180,
-      inputs: [{ name: 'target', required: true }], outputs: ['issues'] }
-  ];
+  /* OP 库数据：直接复用 mock-data.js 的 OPS（API 结构：opId / name / type / version / timeoutMs / inputs[] / outputs[]） */
+  var OP_LIB = OPS;
 
   var TYPE_ICON = { prompt: '💬', bash: '🐚', python: '🐍', powershell: '⚡' };
 
   function findOpDef(name) {
-    for (var i = 0; i < OP_LIB.length; i++) {
-      if (OP_LIB[i].name === name) return OP_LIB[i];
-    }
-    return null;
+    return OP_BY_NAME[name] || null;
   }
 
   /* ==================== Workflow 数据 ==================== */
 
-  function makeStartNode() { return { label: 'node_start', kind: 'start', position: { x: 20, y: 175 } }; }
-  function makeEndNode()   { return { label: 'node_end',   kind: 'end',   position: { x: 850, y: 175 } }; }
+  function makeStartNode(nodeId) { return { nodeId: nodeId, label: 'node_start', kind: 'start', position: { x: 20, y: 175 } }; }
+  function makeEndNode(nodeId)   { return { nodeId: nodeId, label: 'node_end',   kind: 'end',   position: { x: 850, y: 175 } }; }
 
   /* 空 Workflow：仅 Start + End（nodeId 为 32 位 UUID，与后端一致） */
   function makeEmptyNodes() {
     var nodes = {};
-    nodes[genNodeId()] = makeStartNode();
-    nodes[genNodeId()] = makeEndNode();
+    var sid = genNodeId(), eid = genNodeId();
+    nodes[sid] = makeStartNode(sid);
+    nodes[eid] = makeEndNode(eid);
     return nodes;
   }
   function makeEmptyEdges() { return []; }
 
-  /* 5 个 OP 节点的完整示例 */
-  /* 从 mock-data.js 的 WORKFLOWS 初始化编辑数据（与预览界面共享同一数据源） */
+  /* 从 mock-data.js 的 WORKFLOWS 初始化编辑数据（与预览界面共享同一数据源；严格按 API 结构） */
   function buildNodesFromWf(wfName) {
-    var wf = WORKFLOWS[wfName];
+    var wf = WORKFLOW_BY_NAME[wfName];
     var nodes = {};
-    Object.keys(wf.nodes).forEach(function(id) {
-      var n = wf.nodes[id];
+    (wf.nodes || []).forEach(function (n) {
+      var id = n.nodeId;
       if (n.kind === 'start') {
-        nodes[id] = makeStartNode();
+        nodes[id] = makeStartNode(id);
         if (n.position) { nodes[id].position.x = n.position.x; nodes[id].position.y = n.position.y; }
       } else if (n.kind === 'end') {
-        nodes[id] = makeEndNode();
+        nodes[id] = makeEndNode(id);
         if (n.position) { nodes[id].position.x = n.position.x; nodes[id].position.y = n.position.y; }
       } else {
-        // OP 节点：从 mock-data 读取基础字段，补充编辑所需字段
+        // OP 节点：直接使用 API 字段（opId / opVersion / clientId / bindings 结构化对象 / retry）
         nodes[id] = {
+          nodeId: id,
           label: n.label,
           kind: 'op',
-          op: n.op,
+          opId: n.opId,
           opVersion: n.opVersion || 1,
-          type: 'prompt',
-          timeout: 300,
-          client: 'Claude Code',
-          bindings: [],
-          params: n.params || {},
+          clientId: n.clientId || null,
+          bindings: JSON.parse(JSON.stringify(n.bindings || {})),
           retry: n.retry || null,
           outdated: false,
-          position: { x: (n.position ? n.position.x : n.x) || 200, y: (n.position ? n.position.y : n.y) || 60 }
+          position: { x: (n.position ? n.position.x : 200) || 200, y: (n.position ? n.position.y : 60) || 60 }
         };
-        // 把 params 转成 bindings
-        if (n.params) {
-          Object.keys(n.params).forEach(function(k) {
-            nodes[id].bindings.push({ name: k, kind: 'literal', from: n.params[k] });
-          });
-        }
       }
     });
     return nodes;
   }
 
   function buildEdgesFromWf(wfName) {
-    var wf = WORKFLOWS[wfName];
-    return (wf.edges || []).map(function(e) {
-      return { from: e[0], to: e[1], condition: e[2] };
+    var wf = WORKFLOW_BY_NAME[wfName];
+    return (wf.edges || []).map(function (e) {
+      return { from: e.from, to: e.to, condition: e.condition };
     });
   }
 
-  /* 从 WORKFLOWS 初始化 3 条 Workflow 的编辑数据 */
+  /* 从 WORKFLOWS 初始化 4 条 Workflow 的编辑数据 */
   var WORKFLOW_DATA = {};
-  Object.keys(WORKFLOWS).forEach(function(name) {
-    WORKFLOW_DATA[name] = {
-      nodes: buildNodesFromWf(name),
-      edges: buildEdgesFromWf(name),
-      version: 'v' + WORKFLOWS[name].version
+  WORKFLOWS.forEach(function (wf) {
+    WORKFLOW_DATA[wf.name] = {
+      nodes: buildNodesFromWf(wf.name),
+      edges: buildEdgesFromWf(wf.name),
+      version: 'v' + wf.version
     };
   });
 
@@ -808,9 +773,9 @@
         '<td style="padding:10px 8px">' +
           execBtn +
           '<button class="btn btn-sm" onclick="openEditor(\'' + w.name + '\')">编辑</button>' +
-          '<button class="btn btn-sm">复制</button>' +
+          '<button class="btn btn-sm" onclick="dupWf(\'' + w.name + '\')">复制</button>' +
           '<button class="btn btn-sm" onclick="openExport(\'' + w.name + '\',\'v' + w.version + '\')">导出</button>' +
-          '<button class="btn btn-sm btn-danger">删除</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="delWf(\'' + w.name + '\')">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -860,7 +825,7 @@
   }
 
   function buildDetailPanel(name, version) {
-    var wf = WORKFLOWS[name];
+    var wf = WORKFLOW_BY_NAME[name];
     if (!wf) return '<div style="padding:20px">未找到 Workflow 数据</div>';
 
     // 画布节点/连线由 renderDcCanvas() 通过 workflow-canvas.js 统一渲染
@@ -894,18 +859,19 @@
 
   /* 查看界面画布：由 workflow-canvas.js 统一渲染（只读模式） */
   function renderDcCanvas(name) {
-    var wf = WORKFLOWS[name];
+    var wf = WORKFLOW_BY_NAME[name];
     if (!wf) return;
     var container = document.getElementById('dcLeft_' + name);
     if (!container) return;
 
     var nodes = {};
-    Object.keys(wf.nodes).forEach(function (id) {
-      var n = wf.nodes[id];
-      nodes[id] = {
+    (wf.nodes || []).forEach(function (n) {
+      nodes[n.nodeId] = {
+        nodeId: n.nodeId,
         kind: n.kind,
-        position: { x: (n.position ? n.position.x : n.x) || 0, y: (n.position ? n.position.y : n.y) || 0 },
-        op: n.op,
+        label: n.label,
+        position: { x: (n.position ? n.position.x : 0) || 0, y: (n.position ? n.position.y : 0) || 0 },
+        opId: n.opId,
         opVersion: n.opVersion
       };
     });
@@ -927,25 +893,36 @@
 
     var panel = panelEl.querySelector('.dc-right');
     // 从当前展开的 Workflow 数据中动态读取节点
-    var wf = WORKFLOWS[name];
-    var n = wf && wf.nodes ? wf.nodes[id] : null;
+    var wf = WORKFLOW_BY_NAME[name];
+    var n = null;
+    if (wf) {
+      for (var i = 0; i < (wf.nodes || []).length; i++) {
+        if (wf.nodes[i].nodeId === id) { n = wf.nodes[i]; break; }
+      }
+    }
     if (!n) return;
-    var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.label || n.op || id);
+    var opDef = n.opId ? OP_BY_ID[n.opId] : null;
+    var opName = opDef ? opDef.name : '-';
+    var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.label || opName || id);
     var html = '<div style="font-weight:600;margin-bottom:12px">' + label + '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">节点配置</div>';
     html += '<div style="font-size:13px;line-height:2">';
-    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + (n.op || '-') + '</span></div>';
+    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + opName + '</span></div>';
     html += '<div><span style="color:var(--text-3)">版本：</span>v' + (n.opVersion || '-') + '</div>';
     html += '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin:14px 0 8px">节点参数</div>';
     html += '<div style="font-size:13px;line-height:2">';
-    var params = n.params || {};
-    var paramKeys = Object.keys(params);
-    if (paramKeys.length === 0) {
+    var bindings = n.bindings || {};
+    var bindKeys = Object.keys(bindings);
+    if (bindKeys.length === 0) {
       html += '<div style="color:var(--text-3)">无参数</div>';
     } else {
-      paramKeys.forEach(function(k) {
-        html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + params[k] + '</span></div>';
+      bindKeys.forEach(function(k) {
+        var b = bindings[k] || {};
+        var desc = b.kind === 'node_output' ? ('前置出参 ' + (b.nodeId || '') + '.' + (b.outputName || ''))
+          : b.kind === 'workflow_input' ? ('Workflow 入参 ' + (b.inputName || ''))
+          : ('字面量 ' + (b.value || ''));
+        html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + desc + '</span></div>';
       });
     }
     html += '</div>';
@@ -1104,7 +1081,8 @@
       editable: true,
       selectedId: selectedNodeId,
       nodeMeta: function (id, n) {
-        return 'OP v' + n.opVersion + ' · ' + n.timeout + 's';
+        var def = OP_BY_ID[n.opId];
+        return 'OP v' + n.opVersion + ' · ' + (def ? (def.timeoutMs / 1000) : '—') + 's';
       },
       onNodeClick: function (id) { selectNode(id); },
       beforeAddEdge: function (from, to, condition) {
@@ -1197,18 +1175,19 @@
 
   function createNode(op, x, y) {
     var id = genNodeId();
-    var bindings = (op.inputs || []).map(function (inp) {
-      return { name: inp.name, kind: '', from: '' };
+    /* bindings：结构化对象（API 结构）——按 OP 入参名建空槽 */
+    var bindings = {};
+    (op.inputs || []).forEach(function (inp) {
+      bindings[inp.name] = { kind: 'literal', value: '' };
     });
 
     curNodes()[id] = {
+      nodeId: id,
       label: 'node_' + (++nodeSeq),
       kind: 'op',
-      op: op.name,
+      opId: op.opId,
       opVersion: op.version,
-      type: op.type,
-      timeout: op.timeout,
-      client: 'Claude Code',
+      clientId: null,
       bindings: bindings,
       retry: null,
       outdated: false,
@@ -1243,8 +1222,8 @@
     }
 
     editingDraft = {
-      client: n.client,
-      bindings: JSON.parse(JSON.stringify(n.bindings || [])),
+      clientId: n.clientId,
+      bindings: JSON.parse(JSON.stringify(n.bindings || {})),
       retry: n.retry ? JSON.parse(JSON.stringify(n.retry)) : null
     };
     renderNodePanel(id);
@@ -1256,7 +1235,7 @@
     var n = curNodes()[editingNodeId];
     if (!n || n.kind !== 'op') return;
 
-    n.client = editingDraft.client;
+    n.clientId = editingDraft.clientId;
     n.bindings = JSON.parse(JSON.stringify(editingDraft.bindings));
     n.retry = editingDraft.retry ? JSON.parse(JSON.stringify(editingDraft.retry)) : null;
 
@@ -1316,21 +1295,25 @@
     if (!draft) {
       /* 兜底：无草稿，直接显示只读 */
       editingDraft = {
-        client: n.client,
-        bindings: JSON.parse(JSON.stringify(n.bindings || [])),
+        clientId: n.clientId,
+        bindings: JSON.parse(JSON.stringify(n.bindings || {})),
         retry: n.retry ? JSON.parse(JSON.stringify(n.retry)) : null
       };
       draft = editingDraft;
     }
+
+    var opDef = OP_BY_ID[n.opId];
+    var opName = opDef ? opDef.name : '(已删除)';
+    var opTimeoutS = opDef ? (opDef.timeoutMs / 1000) : '—';
 
     var html = '';
 
     /* 基本信息 */
     html += '<div class="panel-section">';
     html += '<div class="ps-row"><span class="ps-k">节点</span><span class="ps-v mono">' + id + '</span></div>';
-    html += '<div class="ps-row"><span class="ps-k">OP</span><span class="ps-v">' + n.op +
+    html += '<div class="ps-row"><span class="ps-k">OP</span><span class="ps-v">' + opName +
             ' <span class="tag tag-ver">v' + n.opVersion + '</span></span></div>';
-    html += '<div class="ps-row"><span class="ps-k">超时</span><span class="ps-v">' + n.timeout +
+    html += '<div class="ps-row"><span class="ps-k">超时</span><span class="ps-v">' + opTimeoutS +
             's <span style="color:var(--text-3);font-size:11.5px">（由 OP 定义）</span></span></div>';
     html += '</div>';
 
@@ -1340,56 +1323,58 @@
               ' · OP 最新: v' + (n.opVersion + 1) + '</span></div>';
     }
 
-    /* Client */
+    /* Client（value = clientId，label = name） */
     html += '<div class="panel-section" style="margin-top:16px">';
     html += '<label class="ps-label">Client</label>';
     html += '<select class="ps-select" onchange="setNodeClient(this.value)">';
-    ['Claude Code', 'Codex CLI', '本地 Bash', '本地 Python', '本地 PowerShell'].forEach(function (c) {
-      html += '<option' + (draft.client === c ? ' selected' : '') + '>' + c + '</option>';
+    html += '<option value="">— 未指定（执行时回退 Job.target.clientId） —</option>';
+    CLIENTS.forEach(function (c) {
+      html += '<option value="' + c.clientId + '"' + (draft.clientId === c.clientId ? ' selected' : '') + '>' + c.name + '</option>';
     });
     html += '</select>';
     html += '</div>';
 
-    /* 参数绑定 */
+    /* 参数绑定（结构化对象：{ "<paramName>": {kind, nodeId?, outputName?, inputName?, value?} }） */
     html += '<div class="panel-section">';
     html += '<label class="ps-label">参数绑定</label>';
-    if (!draft.bindings || !draft.bindings.length) {
+    var bindNames = Object.keys(draft.bindings || {});
+    if (!bindNames.length) {
       html += '<div class="panel-hint">该节点无入参</div>';
     } else {
-      draft.bindings.forEach(function (b, idx) {
+      bindNames.forEach(function (pname) {
+        var b = draft.bindings[pname] || { kind: 'literal', value: '' };
         html += '<div class="binding-item">';
-        html += '<div class="bi-name">' + b.name + '</div>';
+        html += '<div class="bi-name">' + pname + '</div>';
         html += '<div class="bi-opts">';
 
         /* 前置节点出参 */
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'node_output' ? ' checked' : '') +
-                  ' onchange="setBindingKind(' + idx + ',\'node_output\')" />' +
+                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'node_output' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pname + '\',\'node_output\')" />' +
                   '<span>前置节点出参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingFrom(' + idx + ',this.value)">' +
+                  '<span class="bi-field"><select onchange="setBindingNodeOutput(\'' + pname + '\',this.value)">' +
                     buildNodeOutputOptions(id, b) +
                   '</select></span>' +
                 '</label>';
 
         /* Workflow 入参 */
-        var wfOptHtml = buildWorkflowInputOptions(b);
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
-                  ' onchange="setBindingKind(' + idx + ',\'workflow_input\')" />' +
+                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pname + '\',\'workflow_input\')" />' +
                   '<span>Workflow 入参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingFrom(' + idx + ',this.value)">' +
-                    wfOptHtml +
+                  '<span class="bi-field"><select onchange="setBindingInput(\'' + pname + '\',this.value)">' +
+                    buildWorkflowInputOptions(b) +
                   '</select></span>' +
                 '</label>';
 
         /* 字面量 */
-        var litVal = (b.kind === 'literal' ? (b.from || '') : '');
+        var litVal = (b.kind === 'literal' ? (b.value || '') : '');
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + idx + '"' + (b.kind === 'literal' ? ' checked' : '') +
-                  ' onchange="setBindingKind(' + idx + ',\'literal\')" />' +
+                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'literal' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pname + '\',\'literal\')" />' +
                   '<span>字面量</span>' +
                   '<span class="bi-field"><input type="text" value="' + escapeAttr(litVal) +
-                    '" placeholder="输入字面量" oninput="setBindingFrom(' + idx + ',this.value)" /></span>' +
+                    '" placeholder="输入字面量" oninput="setBindingLiteral(\'' + pname + '\',this.value)" /></span>' +
                 '</label>';
 
         html += '</div></div>';
@@ -1421,7 +1406,7 @@
       html += '</div>';
       html += '<button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="removeRetry()">删除重试</button>';
     }
-    html += '<div class="panel-note">ℹ 超时由 OP 定义（' + n.timeout +
+    html += '<div class="panel-note">ℹ 超时由 OP 定义（' + opTimeoutS +
             's），超时是终止信号，不参与重试</div>';
     html += '</div>';
 
@@ -1441,11 +1426,11 @@
       if (nid === currentId) return;
       var n = nodes[nid];
       if (n.kind !== 'op') return;
-      var def = findOpDef(n.op);
+      var def = OP_BY_ID[n.opId];
       var outs = def ? (def.outputs || []) : [];
       outs.forEach(function (out) {
-        var val = nid + '.' + out;
-        var sel = (binding.kind === 'node_output' && binding.from === val) ? ' selected' : '';
+        var val = nid + '.' + out.name;
+        var sel = (binding.kind === 'node_output' && binding.nodeId === nid && binding.outputName === out.name) ? ' selected' : '';
         html += '<option value="' + val + '"' + sel + '>' + val + '</option>';
       });
     });
@@ -1454,9 +1439,10 @@
   }
 
   function buildWorkflowInputOptions(binding) {
-    var wfInputs = ['target_env'];
+    var wf = WORKFLOW_BY_NAME[currentWf];
+    var wfInputs = ((wf && wf.inputs) || []).map(function (i) { return i.name; });
     return wfInputs.map(function (w) {
-      var sel = (binding.kind === 'workflow_input' && binding.from === w) ? ' selected' : '';
+      var sel = (binding.kind === 'workflow_input' && binding.inputName === w) ? ' selected' : '';
       return '<option value="' + w + '"' + sel + '>' + w + '</option>';
     }).join('');
   }
@@ -1464,22 +1450,37 @@
   /* ==================== 草稿修改函数 ==================== */
   function setNodeClient(val) {
     if (!editingDraft) return;
-    editingDraft.client = val;
+    editingDraft.clientId = val || null;
   }
 
-  function setBindingKind(idx, kind) {
+  function setBindingKind(pname, kind) {
     if (!editingDraft) return;
-    var b = editingDraft.bindings[idx];
-    b.kind = kind;
-    if (kind === 'workflow_input') b.from = 'target_env';
-    else if (kind === 'literal') b.from = '';
-    else b.from = '';
+    var b = editingDraft.bindings[pname] || {};
+    if (kind === 'node_output') {
+      editingDraft.bindings[pname] = { kind: 'node_output', nodeId: b.nodeId || '', outputName: b.outputName || '' };
+    } else if (kind === 'workflow_input') {
+      editingDraft.bindings[pname] = { kind: 'workflow_input', inputName: b.inputName || '' };
+    } else {
+      editingDraft.bindings[pname] = { kind: 'literal', value: b.value || '' };
+    }
     renderNodePanel(editingNodeId);
   }
 
-  function setBindingFrom(idx, val) {
+  /* 传入 "<nodeId>.<outputName>" */
+  function setBindingNodeOutput(pname, val) {
     if (!editingDraft) return;
-    editingDraft.bindings[idx].from = val;
+    var parts = String(val || '').split('.');
+    editingDraft.bindings[pname] = { kind: 'node_output', nodeId: parts[0] || '', outputName: parts[1] || '' };
+  }
+
+  function setBindingInput(pname, val) {
+    if (!editingDraft) return;
+    editingDraft.bindings[pname] = { kind: 'workflow_input', inputName: val || '' };
+  }
+
+  function setBindingLiteral(pname, val) {
+    if (!editingDraft) return;
+    editingDraft.bindings[pname] = { kind: 'literal', value: val || '' };
   }
 
   function addRetry() {
@@ -1541,9 +1542,16 @@
   }
 
   function doExecute() {
-    closeModal('confirmModal');
-    closeView();
-    window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+    // POST /api/workflows/{workflowId}/execute —— 单次执行（virtual Job）
+    var name = document.getElementById('execWfName').textContent;
+    var wf = WORKFLOW_BY_NAME[name];
+    var req = { method: 'POST', body: JSON.stringify({ inputs: {}, workspace: '/path/to/workspace' }) };
+    var p = wf ? mockFetch('/api/workflows/' + wf.workflowId + '/execute', req) : Promise.resolve(null);
+    p.then(function () {
+      closeModal('confirmModal');
+      closeView();
+      window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+    });
   }
 
   /* ==================== 保存版本确认 ==================== */
@@ -1568,8 +1576,61 @@
   }
 
   function doSave() {
-    closeModal('versionModal');
-    closeView();
+    var opt = document.querySelector('#versionModal input[name="versionOpt"]:checked');
+    var bump = opt && opt.value === 'update';
+    var existing = WORKFLOW_BY_NAME[currentWf] || null;
+    var ns = curNodes();
+    var payload = {
+      name: currentWf,
+      description: document.getElementById('wfDesc').value,
+      inputs: collectWfParams('#wfInputTable', true),
+      outputs: collectWfParams('#wfOutputTable', false),
+      nodes: Object.keys(ns).map(function (id) { return ns[id]; }),
+      edges: curEdges(),
+      versionBump: bump
+    };
+    var req = existing
+      ? mockFetch('/api/workflows/' + existing.workflowId, { method: 'PUT', body: JSON.stringify(payload) })
+      : (delete payload.versionBump, mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(payload) }));
+    req.then(function () {
+      closeModal('versionModal');
+      closeView();
+      renderWorkflowList();
+    });
+  }
+
+  /* 从工作流入参 / 出参表格收集参数（行结构与 OP 编辑器一致） */
+  function collectWfParams(sel, isInput) {
+    var out = [];
+    document.querySelectorAll(sel + ' .pt-row').forEach(function (r) {
+      var cells = r.querySelectorAll('input, select');
+      if (isInput) out.push({ name: cells[0].value, type: cells[1].value, required: cells[2].value === '是', default: cells[3].value || null, description: cells[4].value });
+      else out.push({ name: cells[0].value, type: cells[1].value, description: cells[2].value });
+    });
+    return out;
+  }
+
+  /* 复制 Workflow：深拷贝为 v1 新 Workflow（POST /api/workflows） */
+  function dupWf(name) {
+    var src = WORKFLOW_BY_NAME[name];
+    if (!src) return;
+    var copy = Object.assign({}, src, {
+      workflowId: __uid32(), name: name + '_copy', version: 1,
+      description: (src.description || '') + '（副本）',
+      createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+    });
+    mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(copy) }).then(function () { renderWorkflowList(); });
+  }
+
+  /* 删除 Workflow：确认后 DELETE /api/workflows/{workflowId} */
+  function delWf(name) {
+    var wf = WORKFLOW_BY_NAME[name];
+    if (!wf) return;
+    if (!confirm('确认删除 Workflow「' + name + '」？')) return;
+    mockFetch('/api/workflows/' + wf.workflowId, { method: 'DELETE' }).then(function (res) {
+      if (res && res.error) { alert(res.message || res.error); return; }
+      renderWorkflowList();
+    });
   }
 
   /* ==================== 导出（选择目录并下载 ZIP） ==================== */

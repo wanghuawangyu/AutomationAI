@@ -1095,7 +1095,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
 - **池满 = 任务留在 DB 排队**：`run_job` / `run_step` **总是**写 waiting 记录并返回，**不因“无空闲 Worker”而报错**；WorkerPool 调度线程扫到 waiting 且发现空闲 Worker 时才指派（`waiting → running` CAS）。重启后 waiting 任务继续调度、running 任务重跑，**不丢任务**。
 - **为何“执行体并发”（15）> “Job 级并发”（10）（U1）**：两者是**不同维度**的限制——一个 JobRun 内可**多个 step 并行**（如并行分支），故 Worker 池按 JobRun 上界的 1.5 倍预留；否则池太小会让大量 step 长时间停在 waiting，拖慢调度。
 - **超时计时起点（D1 拍板）**：`op.timeoutMs` 自**子进程实际启动（spawn）**起算（`waiting → running` 置位仅表示已指派，spawn 前的准备期**不计入**），**排队时长不计入**——step 在 `step_records` waiting（等池空或重试退避 `not_before_ms`）期间**不会超时**（也正是“唯一 kill = 自身 timeoutMs”指的是**已开始执行**的 OP）。
-- **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"。
+- **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"。**运维提示（C7）**：若界面长期出现大量 step 停在 `waiting（排队中）`（占比高或持续数分钟），说明 Worker 池相对并行度偏小——优先**调大 `job_queue_running_max`**（池大小 = `ceil(running_max × 1.5)` 随其联动，见 crud-05 4.6 / crud-06 一）；若受机器资源限制不能调大，则**调小 `workflow_max_nodes`**（限制单 Workflow 最大节点数）以压缩排队上界；单个 Workflow 内并行分支过多也可拆分为多个顺序 Workflow 降低单 Run 并行 step 峰值。
 - **可 cancel 范围**：waiting（排队中）的 step **可直接置 cancelled**；running 的 step **不可外部 cancel**（仅等其自然结束或自身超时 kill）。
 
 - **为何数据库排队而非内存队列**：内存有界队列在 **App 重启时队列内容丢失**；step_records 排队把任务
