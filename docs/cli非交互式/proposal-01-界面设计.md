@@ -2106,6 +2106,8 @@ Workflow deploy_workflow
 | 回跳 | ✅ | ❌ |
 | 最终状态 | failed | timeout |
 
+> **失败与走边（V11-B）**：失败时「走 DAG 边 / 回跳」的前提是**存在被激活的 `on_failure` / `always` 出边**；若失败节点的**所有出边均为 `on_success`（未激活）** → 不走边、**整个 Run 立即 failed**（`terminated_by=error`，不等其它分支）。
+
 ### 14.4 超时终止流程
 
 ```text
@@ -2719,7 +2721,8 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | **Start / End 节点** | **固定存在，不绑定 OP** | **明确标识 Workflow 起点和终点** |
 | **Start 锚点** | **仅右侧 🟢 出边锚点** | **Start 必然成功** |
 | **End 锚点** | **仅左侧入边锚点** | **End 是终点** |
-| **End 完成语义** | **所有入边均已决定（并行多边需全部结束）且至少一条 activated；互斥条件（on_success/on_failure）达到任一即完成** | **汇聚正确、互斥不互等** |
+| **End 完成语义** | **所有入边均已决定（并行多边需全部结束）且至少一条 activated** | **汇聚正确、互斥不互等** |
+| **失败传播** | **任一 op failed 且失败无出边路由（无 on_failure / always）→ 整体 failed** | **即使另一分支到 End；被 on_failure / always 边接住则不终结** |
 | 循环实现 | 重试 + 条件边 + 回跳 | 指向原节点 |
 | 循环终止 | min(max × 3, max_loop_multiplier) | 不依赖 Job / Workflow 时间 |
 | 超时归属 | 只在 OP 上 | OP 是原子执行单元 |
@@ -2812,7 +2815,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 - Start / End 不绑定 OP，不可删除。
 - Start 只有右侧 🟢 出边锚点。
 - End 只有左侧入边锚点。
-- End 完成：所有入边均已决定（并行多边需全部结束）且至少一条入边 activated（互斥条件下达到任一即可），Workflow 成功。
+- End 完成：所有入边均已决定（并行多边需全部结束）且至少一条入边 activated（互斥条件下达到任一即可），Workflow 成功；**另：未接住的 failed 节点（无 on_failure / always 出边）→ 整个 Run 立即 failed（失败传播，V11-B）**，即使另一分支已到 End。
 - Start / End 不产生 StepRecord，不进入步骤列表，不涉及版本。
 
 **新建默认值规范**：

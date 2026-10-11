@@ -397,19 +397,26 @@ impl Executor {
 
 /// 执行请求结构体 (最小原子执行: 只描述"执行什么、用什么执行、本次入参、在哪里执行、执行实例标识", 不包含步骤/编排概念)
 pub struct ExecuteRequest {
-    pub run_id:    String,                  // 本次执行实例唯一标识, 用于 main 文件 / 临时结果目录 / 日志命名 (避免多执行实例冲突):
-                                           //   - workflow/Job 场景: 由 <jobRunId>_<stepId> 组合而成 (同一 Job 内各步骤并发执行时仍全局唯一)
-                                           //   - 单次 OP / test 场景: 调用方生成的 runId
+    pub run_id:         String,                 // 所属运行 = job_runs.run_id（纯 jobRunId, 用于 DB 外键/关联）
+    pub step_id:        String,                 // 步骤标识: workflow 步骤 = workflow_node.node_id; 单次 OP / Job = run_id
+    pub activation_seq: u32,                    // 第几次激活（循环回跳重入 +1）; 单次 OP / Job = 1
+    pub retry_seq:      u32,                    // activation 内第几次尝试（apply_retry +1）; 首次 = 1
     pub client:    Client,                  // Client 实例 (或其执行所需配置快照): 依 type 选 run.xxx, 依 command/binaryPath/argsTemplate/inputMode 组装命令, 依 outputMode/outputJsonPath 解析出参
     pub op:        Op,                      // 操作定义: content / timeoutMs / inputs / outputs
     pub inputs:    HashMap<String, String>, // 本次运行入参 (已校验 required、应用 default)
     pub workspace: PathBuf,                 // 工作区绝对路径
 }
 
-/// 执行结果结构体 (最小原子执行的结果; 步骤归属由上层拿到结果后自行关联, ExecuteResult 本身不感知 step)
+// 命名 token（仅 Executor 内部使用, 不落库）:
+//   execution_id = "{run_id}_{step_id}_{activation_seq}_{retry_seq}"
+//   用于 main 文件 / 临时结果目录 / 日志命名, 避免多执行实例冲突。
+
+/// 执行结果结构体 (最小原子执行的结果; 步骤归属由结果显式携带, 不再从 run_id 拆分)
 pub struct ExecuteResult {
-    pub run_id:      String,                  // 回填自 ExecuteRequest.run_id: 本次执行实例唯一标识
-                                              //   (workflow/Job 场景 = <jobRunId>_<stepId>, 上层可从中拆出 stepId; 单次 OP / test = 调用方生成的 runId)
+    pub run_id:         String,               // 回填自 ExecuteRequest.run_id (纯 jobRunId)
+    pub step_id:        String,               // 回填自 ExecuteRequest.step_id
+    pub activation_seq: u32,                  // 回填自 ExecuteRequest.activation_seq
+    pub retry_seq:      u32,                  // 回填自 ExecuteRequest.retry_seq
     pub status:      ExecuteStatus,           // success | failed | timeout
     pub outputs:     HashMap<String, String>, // 出参 (脚本类: 读 OUTPUT_ARGS 回传; prompt 类: 主函数解析 stdout_file/outputs_file)
     pub raw_output:  String,                  // main/CLI 原始输出 (读 stdout_file)
@@ -420,7 +427,7 @@ pub struct ExecuteResult {
 }
 ```
 
-> **Executor 是最小原子执行单元**：只输入"执行什么（op）、用什么执行（client）、本次入参（inputs）、在哪里执行（workspace）、执行实例标识（run_id）"，返回一次执行的结果 `ExecuteResult`。**`run_id` 只是执行实例的全局唯一标识**（用于 main 文件/临时目录/日志命名），不是步骤编排信息：workflow/Job 场景由 `<jobRunId>_<stepId>` 组合（同一 Job 内不同步骤并发执行时标识仍唯一、文件不冲突），单次 OP / test 由调用方生成。**Executor 不感知 step / 步骤**——步骤归属、与 Workflow/Job 的关系由上层（编排层）在拿到 `ExecuteResult` 后自行关联。`test` 接口（3.1.6）、Job 执行、单次 OP 执行均封装这一入口。**`ExecuteResult` 回填 `run_id`**（= `ExecuteRequest.run_id`）：结果自带执行实例标识，上层无需另行携带定位信息；workflow 场景可从中拆出 stepId。**临时文件的创建归属 `execute` 内部**：调用方只保证 `run_id` 全局唯一即可——`.ai_auto_result-<runId>/` 临时目录、`<workspace>/.main-<runId>-<opId>.*` main 文件均由 `execute` 内部创建，运行结束由 `execute` 清理，调用方不参与创建与清理。
+> **Executor 是最小原子执行单元**：只输入"执行什么（op）、用什么执行（client）、本次入参（inputs）、在哪里执行（workspace）、执行实例标识（run_id + step_id + activation_seq + retry_seq）"，返回一次执行的结果 `ExecuteResult`。**`run_id` 是所属运行（纯 jobRunId），步骤归属由 `step_id` / `activation_seq` / `retry_seq` 显式携带**；避免多执行实例命名冲突所需的命名 token `execution_id = {run_id}_{step_id}_{activation_seq}_{retry_seq}` **仅由 Executor 内部生成**（用于 main 文件/临时目录/日志），**不落库、不回传**。**Executor 不感知 step 编排语义**——步骤归属、与 Workflow/Job 的关系由上层（编排层）用结果显式携带的字段关联。`test` 接口（3.1.6）、Job 执行、单次 OP 执行均封装这一入口。**`ExecuteResult` 原样回填这四个字段**：上层无需另行携带定位信息，也**不再从 run_id 拆 stepId**。**临时文件的创建归属 `execute` 内部**：调用方只需给出四元标识即可——`.ai_auto_result-<executionId>/` 临时目录、`<workspace>/.main-<executionId>-<opId>.*` main 文件均由 `execute` 内部创建，运行结束由 `execute` 清理，调用方不参与创建与清理。
 
 **运行目录约定**：Executor 运行所需文件统一放在 **APP 统一运行时目录**下，与前端生成的中间文件同处一个根目录：
 
@@ -431,7 +438,7 @@ pub struct ExecuteResult {
     ├── run.bash   run.py   run.ps1
     ├── run.prompt.ps1                # run.prompt 的 Windows 变体
     └── run.prompt.bash               # run.prompt 的 Linux 变体
-└── .ai_auto_result-<runId>/          # 单次运行临时结果目录 (以 .ai_auto_result 开头)
+└── .ai_auto_result-<executionId>/          # 单次运行临时结果目录 (以 .ai_auto_result 开头)
     ├── stdout          # stdout_file (main/CLI 原始输出)
     ├── stderr          # stderr_file (错误输出)
     ├── rc              # rc_file (退出码)
@@ -439,18 +446,18 @@ pub struct ExecuteResult {
 ```
 
 - **scripts 目录**：包装脚本 `run.xxx` 由 APP **在启动时临时生成**到 `<根>/scripts/` 目录。它与前端文件生成的目录同处统一根目录之下——只是专门放在 `scripts` 子目录。
-- **临时结果目录**：每次运行创建 `<根>/.ai_auto_result-<runId>/`，存放本次的 stdout_file / stderr_file / rc_file，以及（仅 prompt 类）出参结果 JSON 文件 `outputs.json`——即 `W_AI_AUTO_OP_OUTPUTS_FILE` 指向该路径。**程序启动时主动清理所有以 `.ai_auto_result` 开头的残留目录**，防止程序中断导致文件大量残留。
-  **创建归属**：临时目录与 main 文件由 `execute` 内部创建、运行结束由 `execute` 清理；调用方仅保证 `run_id` 唯一（workflow= `<jobRunId>_<stepId>`），不参与临时文件创建/清理。全局残留清理（启动时清 `.ai_auto_result*`）由 APP 启动流程负责。
+- **临时结果目录**：每次运行创建 `<根>/.ai_auto_result-<executionId>/`，存放本次的 stdout_file / stderr_file / rc_file，以及（仅 prompt 类）出参结果 JSON 文件 `outputs.json`——即 `W_AI_AUTO_OP_OUTPUTS_FILE` 指向该路径。**程序启动时主动清理所有以 `.ai_auto_result` 开头的残留目录**，防止程序中断导致文件大量残留。
+  **创建归属**：临时目录与 main 文件由 `execute` 内部创建、运行结束由 `execute` 清理；调用方仅保证四元标识（`run_id` + `step_id` + `activation_seq` + `retry_seq`）唯一，不参与临时文件创建/清理。全局残留清理（启动时清 `.ai_auto_result*`）由 APP 启动流程负责。
 
 ```text
-Executor.execute(req: ExecuteRequest)   # req = {run_id, client, op, inputs, workspace}
+Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq, retry_seq, client, op, inputs, workspace}
   │
   ├─ 1. 解析 OP 入参: 校验 required, 缺省项应用 default → 最终入参集 (见 5.3)
   │
   ├─ 2. 准备 main 文件: 把 OP.content 按脚本类型写入 workspace 根目录
-  │     .main-<runId>-<opId>.bash / .main-<runId>-<opId>.py
-  │     .main-<runId>-<opId>.ps1 / .main-<runId>-<opId>.prompt
-  │     (命名含 runId + opId, 避免多运行/多 OP 间 main 文件冲突)
+  │     .main-<executionId>-<opId>.bash / .main-<executionId>-<opId>.py
+  │     .main-<executionId>-<opId>.ps1 / .main-<executionId>-<opId>.prompt
+  │     (命名含 executionId + opId, 避免多运行/多 OP 间 main 文件冲突)
   │     运行完成后清理该 main 文件
   │
   ├─ 3. 选定包装脚本 run.xxx (见 5.5), 位于 <根>/scripts/:
@@ -459,7 +466,7 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, client, op, inputs, wor
   │
   ├─ 4. 构造子进程固定参数 (5 个):
   │     run.xxx <workspace> <main_file> <stdout_file> <stderr_file> <rc_file>
-  │     stdout_file / stderr_file / rc_file 位于本次临时目录 .ai_auto_result-<runId>/
+  │     stdout_file / stderr_file / rc_file 位于本次临时目录 .ai_auto_result-<executionId>/
   │     (临时目录以 .ai_auto_result 开头, 程序启动时清理所有此类残留)
   │
   ├─ 5. 注入执行上下文 (见 5.2 / 5.3):
@@ -496,7 +503,7 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, client, op, inputs, wor
 | 变量 | 说明 |
 |-|-|
 | `W_AI_AUTO_WORKSPACE` | 工作区绝对路径（也作为 run.xxx 的第 1 个参数传入） |
-| `W_AI_AUTO_RUN_ID` | 本次执行实例 `run_id`（= ExecuteRequest.run_id）：workflow/Job 场景为 `<jobRunId>_<stepId>`，单次 OP / test 为调用方生成的 runId |
+| `W_AI_AUTO_RUN_ID` | 本次执行实例的所属 run（= ExecuteRequest.run_id，**纯 jobRunId**）；命名 token `execution_id` 另由 Executor 内部拼接 |
 | `W_AI_AUTO_STEP_ID` | （可选，由上层透传）步骤上下文 id；Executor 最小执行不依赖它，仅透传给脚本供日志/命名参考 |
 | `W_AI_AUTO_OP_NAME` | OP 名称 |
 | `W_AI_AUTO_OP_VERSION` | OP 版本号 |
@@ -519,7 +526,7 @@ OUTPUT_NAMES: <name1>,<name2>,<name3>     # 仅当 W_AI_AUTO_OP_OUTPUT_COUNT > 0
 - run.xxx 从 stdin 读取 N 次（N = `W_AI_AUTO_OP_INPUT_COUNT`），逐行解析出 key 与 base64 值，反 base64 还原入参值，再**以用户定义的入参名作为变量名注入脚本执行的上下文**（不带 `W_AI_AUTO_` 前缀），供用户脚本直接按入参名使用。
 - 读完入参后，run.xxx 检查 `W_AI_AUTO_OP_OUTPUT_COUNT`：若为 0 则不再读 stdin；若非 0，则再读一行 `OUTPUT_NAMES: name1,name2,...`（逗号分隔的出参名列表），得到本次要提取的出参名。
 
-> **main_file 与工作目录**：`main` 文件 = 用户 OP.content 按类型写入 workspace 根目录的 `.main-<runId>-<opId>.{bash|py|ps1|prompt}`（命名含 runId+opId 避免冲突）；**prompt 类例外**：main_file 不是原始 OP.content，而是**主线程组装好的 final prompt**（用户模板 + meta 指令）。`run.xxx` 负责 `cd` 到 workspace 再执行（启动时虽已指定工作目录，脚本内仍会 cd——因为 run.xxx 可能位于固定位置，而非 workspace 内）。**运行完成后由 Executor 清理该 main 文件**。
+> **main_file 与工作目录**：`main` 文件 = 用户 OP.content 按类型写入 workspace 根目录的 `.main-<executionId>-<opId>.{bash|py|ps1|prompt}`（命名含 executionId + opId 避免冲突）；**prompt 类例外**：main_file 不是原始 OP.content，而是**主线程组装好的 final prompt**（用户模板 + meta 指令）。`run.xxx` 负责 `cd` 到 workspace 再执行（启动时虽已指定工作目录，脚本内仍会 cd——因为 run.xxx 可能位于固定位置，而非 workspace 内）。**运行完成后由 Executor 清理该 main 文件**。
 
 ### 5.3 入参定义与注入
 
@@ -538,7 +545,7 @@ OUTPUT_NAMES: <name1>,<name2>,<name3>     # 仅当 W_AI_AUTO_OP_OUTPUT_COUNT > 0
 | 通道                                       | 适用类型 | 说明                                                                                    |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------- |
 | stdin 协议 `INPUT_ARGS: <key>: <base64Value>` | 脚本类（bash/python/powershell） | 每个入参一行，共 `W_AI_AUTO_OP_INPUT_COUNT` 行；run.xxx 反 base64 后以用户入参名为变量名注入（不带前缀）；prompt 类照常写入但脚本内忽略，入参经 meta 指令进 final prompt |
-| prompt 文本 / stdin / 文件                 | prompt   | main_file（.main-<runId>-<opId>.prompt）的文本按 inputMode（arg/stdin/file）喂给外部 CLI |
+| prompt 文本 / stdin / 文件                 | prompt   | main_file（.main-<executionId>-<opId>.prompt）的文本按 inputMode（arg/stdin/file）喂给外部 CLI |
 
 **入参解析规则**：请求提供的 inputs 校验 required；缺省项取 default；仍缺必填项时报 400（运行时校验）。
 
@@ -592,7 +599,7 @@ OUTPUT_ARGS: <name2>: <base64Value2>
 > `run.xxx` 是 Executor **运行时自带**的固定包装脚本，非用户内容，由 APP 在启动时临时生成到 `<根>/scripts/` 目录（与前端文件生成同处统一根目录、位于 scripts 子目录）；四类脚本的**固定入参一致**（5 个）：
 > `workspace main_file stdout_file stderr_file rc_file`
 > - `workspace`：当前工作目录（脚本内 `cd` 到这里）
-> - `main_file`：用户 OP.content 按类型保存在 workspace 根目录的 `.main-<runId>-<opId>.{bash|py|ps1|prompt}` 路径（命名含 runId+opId 避免冲突；运行完成后清理）
+> - `main_file`：用户 OP.content 按类型保存在 workspace 根目录的 `.main-<executionId>-<opId>.{bash|py|ps1|prompt}` 路径（命名含 executionId + opId 避免冲突；运行完成后清理）
 > - `stdout_file` / `stderr_file`：main.xxx 运行的 stdout / stderr 记录文件
 > - `rc_file`：main.xxx 运行完成后的退出码记录文件
 
@@ -788,18 +795,18 @@ Remove-Item $innerPath -Force -ErrorAction SilentlyContinue
 >
 > run.prompt 要解决另一组问题，同时**复用与其他 run.xxx 一致的外层调用协议**（主进程照常把 INPUT_ARGS / OUTPUT_NAMES 写入 stdin、脚本内忽略不读取、写 rc_file），让用户用 prompt 时拥有与脚本一致的出入参与成功/失败体验；**出参不在脚本内回传**——prompt 类无变量作用域，脚本只执行命令，出参由主函数读 CLI 输出统一解析（见 5.5）。
 >
-> **核心：final prompt 由 Executor 主线程组装（非 run.prompt 内组装）**。入参值、出参定义（含 description）等大内容若经**环境变量 / stdin 中转会受长度限制**，因此**组装动作放到主线程（Executor）**：Executor 拥有 OP.content、本次运行入参、OP.outputs 定义，在启动 run.prompt 前把**最终 prompt 文本**组装好并写入 main_file（.main-<runId>-<opId>.prompt）。**run.prompt 不再读取 stdin 协议**（主进程仍按协议写入 INPUT_ARGS / OUTPUT_NAMES，脚本内忽略不使用），入参/出参信息不进 run.prompt 上下文——meta（含出参描述）由主线程拼进 final prompt 文件。
+> **核心：final prompt 由 Executor 主线程组装（非 run.prompt 内组装）**。入参值、出参定义（含 description）等大内容若经**环境变量 / stdin 中转会受长度限制**，因此**组装动作放到主线程（Executor）**：Executor 拥有 OP.content、本次运行入参、OP.outputs 定义，在启动 run.prompt 前把**最终 prompt 文本**组装好并写入 main_file（.main-<executionId>-<opId>.prompt）。**run.prompt 不再读取 stdin 协议**（主进程仍按协议写入 INPUT_ARGS / OUTPUT_NAMES，脚本内忽略不使用），入参/出参信息不进 run.prompt 上下文——meta（含出参描述）由主线程拼进 final prompt 文件。
 >
 > **主线程组装的 final prompt = 用户 `OP.content`（提示词模板）+ 追加的 meta 指令**，meta 指令约定：
 >
 > 1. **入参**：按 `K:V` 格式换行写出，每行一组——`key1: value1`、`key2: value2`……（值由主线程从本次运行入参填入）。
 > 2. **出参定义**：逐行列出**出参名与说明（description）**——`name: description`，来自 OP.outputs。**描述必须带上**——只给名字时 AI 无法理解该出参的含义，也就无法正确产出。
-> 3. **输出要求**：处理完成后，把出参值组装成一个 JSON 对象（字段名=出参名，值=结果），**保存到文件 `W_AI_AUTO_OP_OUTPUTS_FILE`**（= `<根>/.ai_auto_result-<runId>/outputs.json`，见 5.1 结果目录约定），并把该 JSON **原样打印到 stdout**。
+> 3. **输出要求**：处理完成后，把出参值组装成一个 JSON 对象（字段名=出参名，值=结果），**保存到文件 `W_AI_AUTO_OP_OUTPUTS_FILE`**（= `<根>/.ai_auto_result-<executionId>/outputs.json`，见 5.1 结果目录约定），并把该 JSON **原样打印到 stdout**。
 > 4. **main file 指引**：告知 AI 依据以上入参与出参要求，执行/参考 main file（给出路径）。
 >
 > **两个 main file（区分原始输入与组装产物）**：prompt 类在组装前后存在两个"main 文件"概念，不要混淆——
-> 1. **原始输入（用户 `OP.content`）**：用户编写的原始提示词文本（纯文本，不引用占位符；入参经 meta 指令【入参 K:V】注入），是 OP 定义的一部分，始终原样保存。运行时由 Executor 落盘为 **`.origin-<runId>-<opId>.prompt`**（workspace 根目录，`origin` 前缀标记"原始"，命名含 runId+opId 避免冲突；**仅主线程组装 final prompt 时读取，不传给 run.prompt**，运行完成后由 Executor 清理）。
-> 2. **组装产物（final prompt）**：主线程把原始输入与 meta 指令（入参 K:V、出参定义含描述、输出要求、main file 指引）拼装成的完整提示词，写入 **`.main-<runId>-<opId>.prompt`**（即 main_file；`main` 前缀与脚本类 `.main-<runId>-<opId>.bash` 统一——都表示"传给 run.xxx 的文件"；运行完成后由 Executor 清理）。
+> 1. **原始输入（用户 `OP.content`）**：用户编写的原始提示词文本（纯文本，不引用占位符；入参经 meta 指令【入参 K:V】注入），是 OP 定义的一部分，始终原样保存。运行时由 Executor 落盘为 **`.origin-<executionId>-<opId>.prompt`**（workspace 根目录，`origin` 前缀标记"原始"，命名含 executionId + opId 避免冲突；**仅主线程组装 final prompt 时读取，不传给 run.prompt**，运行完成后由 Executor 清理）。
+> 2. **组装产物（final prompt）**：主线程把原始输入与 meta 指令（入参 K:V、出参定义含描述、输出要求、main file 指引）拼装成的完整提示词，写入 **`.main-<executionId>-<opId>.prompt`**（即 main_file；`main` 前缀与脚本类 `.main-<executionId>-<opId>.bash` 统一——都表示"传给 run.xxx 的文件"；运行完成后由 Executor 清理）。
 >
 > 两者关系：**final prompt 包含原始输入**（原始模板为主体，meta 指令作为追加的任务说明）；**最终传给 run.prompt（进而交给外部 agent CLI）的是后者——组装后的 final prompt**。Executor 运行时先用 `OP.content` 组装出 final prompt 写入 main_file，再启动 run.prompt；run.prompt 读到的 main_file 即 final prompt（含原始输入 + meta 指令）。原始输入本身不再单独传给 run.prompt。
 >
@@ -848,7 +855,7 @@ Remove-Item $innerPath -Force -ErrorAction SilentlyContinue
 将该 JSON 保存到文件：<outputs_file>，并把该 JSON 原样打印到标准输出。
 ```
 
-拼接规则：**final prompt = 用户 `OP.content`（原始模板）+ `\n\n` + 上述 meta 指令**，写入 main_file（`.main-<runId>-<opId>.prompt`）后传给 run.prompt。
+拼接规则：**final prompt = 用户 `OP.content`（原始模板）+ `\n\n` + 上述 meta 指令**，写入 main_file（`.main-<executionId>-<opId>.prompt`）后传给 run.prompt。
 
 组装后的 final prompt 示例（含原始输入与 meta 指令）：
 
@@ -858,7 +865,7 @@ Remove-Item $innerPath -Force -ErrorAction SilentlyContinue
 本次运行的环境与任务要求如下：
 
 【工作目录】/workspace
-【main file】/workspace/.main-<runId>-<opId>.prompt：请阅读该文件内容，并依据下方入参与出参要求处理其内容。
+【main file】/workspace/.main-<executionId>-<opId>.prompt：请阅读该文件内容，并依据下方入参与出参要求处理其内容。
 
 【入参（K:V 格式，每行一组）】
 source_text: 你好，世界
@@ -868,7 +875,7 @@ translation: 翻译后的英文文本
 
 【输出要求】
 处理完成后，请将上述出参字段的值组装成一个 JSON 对象（字段名=出参名，值=结果），
-将该 JSON 保存到文件：/workspace/.ai_auto_result-<runId>/outputs.json，并把该 JSON 原样打印到标准输出。
+将该 JSON 保存到文件：/workspace/.ai_auto_result-<executionId>/outputs.json，并把该 JSON 原样打印到标准输出。
 ```
 
 `run.prompt.bash`（Linux）示例：
@@ -984,4 +991,4 @@ exit 0
 - Client 关联：目标 `type`（prompt/bash/python/powershell）及所需配置（`command`/`binaryPath`、`argsTemplate`、`inputMode`、`outputMode`、`outputJsonPath`、`exitCodeSuccess`）。
 - 关联 Client 的 ID 引用需在导入时校验或映射，避免执行时出现悬挂 Client。
 
-> 导入端据此即可重建 `.main-<runId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10）的设计依据。
+> 导入端据此即可重建 `.main-<executionId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10）的设计依据。

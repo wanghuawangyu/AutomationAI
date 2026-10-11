@@ -393,7 +393,9 @@ impl TaskRunner {
     pub fn add_workflow(req: WorkflowRunRequest) -> Result<String, TaskError>;
     /// 查询任务状态（对应内部 JobRun 状态）
     pub fn status(run_id: &str) -> TaskStatus;
-    /// 常驻轮询线程（App 启动 init() 时 start）：扫描 DB → 调度 waiting → running → 刷新界面状态
+    /// 常驻轮询线程（App 启动 init() 时 start）：扫描 DB → 调度 waiting → running → 刷新界面状态；
+    /// 并**顺带扫描 engine_events WHERE processed=0 且 run 仍 running，按序逐个 process_event（幂等）**（运行中处理失败兜底，见 crud-03 T26）；
+    /// 以及**运行中事件补齐**：扫描 running run 中“step_records 有终态但缺 step_completed 事件”的记录，补写并 process_event（见 crud-03 U13）
     pub fn start(&self);
 }
 ```
@@ -445,7 +447,7 @@ waiting(等待中) ──[① 调度开始]──> running(运行中) ──[②
 ```
 
 - **① waiting → running**：由 **Task Runner 的后台调度线程**完成——任务开始由当前实例的后台线程控制，调度取出任务时即时改写运行历史状态（并在并发配额内启动执行）。此迁移无需外部参与。
-- **② running → 终态**：WorkerPool 完成时**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event），Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等）。**不依赖内存回调传递业务**：Task Runner 是**常驻轮询后台线程**，按固定间隔（settings 可配）扫描 DB，发现 running 计数下降、存在 waiting 任务即调度下一个。
+- **② running → 终态**：WorkerPool 完成时**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、step_id / activation_seq / retry_seq 随结果携带，无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event），Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等）。**不依赖内存回调传递业务**：Task Runner 是**常驻轮询后台线程**，按固定间隔（settings 可配）扫描 DB，发现 running 计数下降、存在 waiting 任务即调度下一个。
 
 **执行流程**：
 
@@ -481,12 +483,11 @@ add_op / add_job / add_workflow(req)
 ```text
 POST /api/runs/{runId}/terminate
   │
-  ├─ 标记 job_run.status = cancelled
-  ├─ Engine 收到终止信号:
-  │     ├─ kill 正在运行的 Worker 子进程
-  │     ├─ 取消待调度的节点
-  │     └─ 写 job_run.finishedAtMs
-  └─ 当前 step_record.status = cancelled (或 timeout 如果是超时)
+  ├─ engine.notify(Terminate{run_id, reason})  → 写 terminate 事件 → process_event(terminate):
+  │     ├─ 逐个 abort 该 run 仍在飞（running）步骤（按 record_id 查 AbortRegistry，见 crud-03 4.4）
+  │     ├─ 标记 job_run.status = cancelled + finished_at_ms（落库）
+  │     └─ 被终止步骤终态 = cancelled（若因超时则 timeout）
+  └─ 之后到达的 step_completed（被 abort 的步骤完成）→ process_event 入口判 run 已终态 → 幂等忽略
 ```
 
 ### 4.8 重跑 vs 重试

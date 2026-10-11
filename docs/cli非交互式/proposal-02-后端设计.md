@@ -74,7 +74,7 @@
 2. **创建运行历史**：Task Runner 写入一条 JobRun（status=waiting）到 `job_runs` 并返回 runId，接口即结束；
 3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 waiting → running；**单次 OP 直接派发 WorkerPool**；**Job / Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})` 通知 Engine——EngineStart 作为 `engine_start` 事件写入 engine_events（落库，重启不丢）**；
 4. **执行**：Engine 按 DAG 顺序派发各 OP 给 WorkerPool；WorkerPool 同步执行（调 Executor）；
-5. **完成回调**：WorkerPool 完成后**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、stepId 从 run_id 拆出，结果直接可用、无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event）；Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） → **不依赖内存回调传递业务**：Task Runner 常驻轮询线程按固定间隔扫描 DB → 统计并发、调度下一个 waiting 任务 → 刷新界面状态。
+5. **完成回调**：WorkerPool 完成后**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、step_id / activation_seq / retry_seq 随结果携带，无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event）；Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） → **不依赖内存回调传递业务**：Task Runner 常驻轮询线程按固定间隔扫描 DB → 统计并发、调度下一个 waiting 任务 → 刷新界面状态。
 
 > 注：Task Runner 与 Engine 是两个并行的后台任务（同见 crud-05 4.6、crud-03 4.3 / 4.4）；WorkerPool 是执行资源池，与 Engine 并行接收派发。
 ```

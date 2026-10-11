@@ -104,6 +104,7 @@
 - 必须有且仅有一个 start 节点、一个 end 节点。
 - 从 start 出发可达 end。
 - **允许环路**：回跳边形成的环由 Engine 在运行时以计数终止（循环回跳上限 min(max × 3, max_loop_multiplier)，见 4.3.0），拓扑校验不拒绝环。
+- **Start 出边约束**：Start 无失败语义，不允许 `on_failure` 出边（恒 `on_success` / `always`；Start 仅 🟢 单出边锚点）。
 - 每个 op 节点必须绑定 opId + opVersion。
 - bindings 引用的前置节点出参必须存在。
 
@@ -498,12 +499,12 @@ POST /api/workflows/{workflowId}/execute {inputs, workspace}
 ### 4.3 Engine 机制（编排控制：事件驱动，写即处理，链式推进）
 
 **职责**：
-- 以**纯函数事件处理函数 `process_event`** 推进 workflow（engine_start / step_completed / walk_edge / workflow_done / terminate，见下方）
-- 加载 workflow definition；执行上下文（节点就绪判定、出参累积）**完全由 `engine_events` + `step_records` 推导**（无内存状态，见 4.3.0）
+- 以**事件处理函数 `process_event`（纯函数式推进）**推进 workflow（engine_start / step_completed / walk_edge / workflow_done / terminate，见下方）
+- 加载 workflow definition；执行上下文（节点就绪判定、出参累积）由**内存 `RunContext`** 承载，DB（`engine_events` + `step_records`）为唯一事实来源、缓存可随时重建（见 4.3.0 / 4.3.3）
 - 以**边状态机**（每条边的 activated / dropped）与 **activation（执行实例）**模型决定下一批可调度节点（见 4.3.0）
-- 处理 Start → End 的汇聚（op 节点 AND-join；End 所有入边均已决定且至少一条 activated、并等在飞步骤收敛）、循环回跳（该 step 执行总次数达上限 min(max × 3, max_loop_multiplier)）、超时终止（step 超时 → 立即终止整个 Run，不走边、不重试）
+- 处理 Start → End 的汇聚（op 节点 AND-join；End 所有入边均已决定且至少一条 activated、并等在飞步骤收敛）、循环回跳（该 step 执行总次数达上限 min(max × 3, max_loop_multiplier)）、超时终止（step 超时 → 立即终止整个 Run，不走边、不重试）、**未接住的失败立即整体失败（V11-B；job_run 终态 failed、terminated_by=error）**
 - 写入 job_run 的状态流转（终态经全局 `JobComplete` 落库）
-- **无任何循环、无内存信号、无内存状态**：无常驻事件循环线程、无 Inbox / 唤醒信号——**事件写库后立即同步处理（写即处理）**；多 workflow 并发 = 各触发方（Runner 调度线程 / 各 Worker 线程）交错调用 `process_event`，互不干扰
+- **无常驻循环、无内存信号**：无常驻事件循环线程、无 Inbox / 唤醒信号——**事件写库后立即同步处理（写即处理）**；运行态为**按 run 的内存缓存**（可重建，见 4.3.3）；多 workflow 并发 = 各触发方交错调用 `process_event`，互不干扰
 
 **链式推进（事件驱动，写即处理）**：
 
@@ -517,21 +518,22 @@ Engine 采用**事件驱动 + 调度事件流**：每次"节点完成 → 决定
 
 | event_type | 含义 | 产生者（写库后立即处理） |
 |-|-|-|
-| `engine_start` | Runner 通知 Engine 开始执行某 workflow（= notify(EngineStart) 持久化，payload 含 inputs/workspace） | Runner（调度线程）→ notify 写库后立即 process_event |
+| `engine_start` | Runner 通知 Engine 开始执行某 workflow（= notify(EngineStart) 持久化）；payload 基础含 inputs / workspace，**定义快照（workflow nodes/edges + op 定义）由 process_event 处理时 UPDATE 进 payload（与处理同事务）** | Runner（调度线程）→ notify 写库后立即 process_event |
 | `step_completed` | WorkerPool 回报某节点执行完成（payload 含 activation_seq / retry_seq / 结果） | WorkerPool（Worker 完成后经 StepComplete 钩子写，写后立即 process_event） |
-| `apply_retry` | 节点失败且配置了 retry，准备重试（payload 含 retry_seq） | Engine（process_event 内部写 + 处理） |
+| `apply_retry` | 节点失败/成功且命中 retry 条件，准备重试（payload 含 retry_seq）；**其处理即写 dispatch_step**（同一 activation，retry_seq+1） | Engine（process_event 内部写 + 处理） |
 | `walk_edge` | 按结果给各出边置 activated / dropped，推进 DAG（payload 含边状态） | Engine（process_event 内部写 + 处理） |
-| `dispatch_step` | 决定调度某节点，派发给 WorkerPool（payload 含 activation_seq / retry_seq / not_before_ms） | Engine（process_event 内部写，随后 worker.run_step） |
+| `dispatch_step` | 决定调度某节点，派发给 WorkerPool（pending=false 时 payload 含 activation_seq / retry_seq / not_before_ms；pending=true 时 payload **不含四元组**，仅回跳挂起登记） | Engine（process_event 内部写，随后 worker.run_step） |
 | `workflow_done` | workflow 结束（payload 含终态 success / failed）：End 所有入边均已决定且至少一条 activated（并等在飞收敛）→ success；无可就绪/挂起且 End 未 activated → failed | Engine（process_event 内部写 + 处理 → 全局 JobComplete） |
 | `terminate` | 异常终止（timeout / user terminate = notify(Terminate) 持久化，payload 含 reason） | Engine / 外部 → notify 写库后立即 process_event |
 
-#### 4.3.0 执行模型：activation、边状态机与纯函数 reducer
+#### 4.3.0 执行模型：activation、边状态机与 reducer（内存 RunContext）
 
-> Engine 全程**无内存状态、无常驻循环**。为保证「崩溃重放幂等」与「循环回跳可重入」同时成立，Engine 的状态完全由 **`step_records`（事实）+ `engine_events`（信号）** 推导，`process_event` 本质是一个**纯函数**：
+> Engine 全程**无常驻循环**。为保证「崩溃重放幂等」与「循环回跳可重入」同时成立：**DB（`step_records` 事实 + `engine_events` 信号）为唯一事实来源**；推进在**可重建的内存 `RunContext`** 上进行（读写缓存 + 落库，见 4.3.3），`process_event` 是**纯函数式推进**（相同状态 + 相同事件 → 相同结果）：
 >
 > ```text
-> advance(state, event) -> (state', [new_events])
-> state = derive(engine_events, step_records)   # 可完整重建，不依赖内存
+> process_event(event) -> Result<()>   # 按 run 串行；失败时事件保持 processed=0 可重放
+> state  = RunContext(run_id)          # 内存缓存，可由 DB(engine_events + step_records) 重放重建
+> state' = reduce(state, event); 落库(新事件 + 运行态)
 > ```
 >
 > 由此派生出两个核心概念（贯穿 4.3、4.4 与第 15 章循环场景）：
@@ -573,48 +575,68 @@ edge_state ∈ { pending, activated, dropped }
 - 边状态（当前 activation）在内存 `RunContext` 中推导（见 4.3.3）；`walk_edge` 事件 payload 同步落库（审计/重放来源），可据此重建，无需依赖运行态表。
 - **skipped 传播**：节点被判为 skipped（全部入边 dropped）时，其**所有出边也置为 dropped**，并继续评估其后继节点——否则下游节点会死等一条永远不会被决定的入边，甚至导致提前收敛。
 - **边状态生命周期**：边状态在**源节点每次完成**时重新决定（activated/dropped 覆盖旧值）；因此在循环回跳重入后，源节点的出边会重新计算，下游节点的就绪判定始终以各入边**最近一次决定**为准（从未被决定 = pending）。
+- **在飞计数**：RunContext 维护 `inflight_count`（running + waiting 步骤数）；**均在 process_event 内（持 run 锁）维护**：处理 `dispatch_step` 时 +1；处理 `step_completed`（读到终态）时 -1；End 的「所有在飞收敛」检查为 **O(1)**。
+- **Start 的出边**：Start 无失败语义 → 其出边**恒为 `on_success` / `always`**；`on_failure` 出边不允许（校验拒绝，见 3.3 校验规则）。
+- **到达语义（失败传播 + End 到达，V11-B）**：两条规则并行——
+  1. **未接住的失败即刻终结**：任一 op 节点 `failed` 且其**所有出边均未被激活**（无 `on_failure` / `always` 路由）→ **立即 terminate(failed) 整个 Run**（job_run 终态 failed、`terminated_by=error`），不走收敛、不等其它分支（即使另一分支稍后到 End 也判 failed）。
+  2. **End 到达 = success**：所有入边均已决定 + ≥1 activated（由规则 1 保证到达 End 时无未接住失败）。
+  → 因此「并行分支 A 失败且无失败出边、B 成功到 End」→ 整体 **failed**；若 A 的失败被 `on_failure`/`always` 边接住（路由到恢复路径），则不终结、按该边继续。
 
 **③ 回跳边（back edge）**
 
 walk_edge 对被激活边的目标节点判定：若该节点**在本次 Run 内已执行过**，则该边为**回跳边**，目标以 `activation_seq + 1` 重新激活（重试计数随之重置）；否则为普通过边，`activation_seq = 1`。无需在 `edges` 数据里额外标记回跳，由「目标节点是否已执行过」推导。
 
+**「已执行过」判定与并行约束**：存在该 `(run_id, step_id)` 的**任一 activation 记录**（含 waiting / running / done）即视为已执行过；且**回跳前必须等上一 activation 收敛**（无 running / waiting 记录），否则挂起——同一节点的多个 activation **串行，不并行**。
+
+**回跳挂起的唤醒机制（N1）**：挂起的回跳登记为 RunContext 的 `pending_reentry[N]`（对应一条 `dispatch_step{pending=true}` 事件，可重放重建）；当 **N 自身 step_completed 处理**时，先消费该登记并重入（activation_seq+1）。因此 walk_edge 不仅评估「完成节点的出边」，还需在**目标节点上有 pending_reentry 时由该节点自身的 step_completed 唤醒**——两者共同保证「N 收敛后重入 N 必被触发」，不会卡死。
+
+**多源回跳合并（Q4）**：`pending_reentry[N]` 为**布尔标记（合并）**——N 未收敛期间多条回跳边（A→N、B→N）合并为**一次**重入（一轮即可满足全部回跳边，AND-join 语义）。若需要「每条回跳边各重入一次」需改为计数——当前设计取合并。
+
 **Engine 事件处理函数 `process_event`（写即处理，同步）**：
 
 ```text
-process_event(event)  # 同步；事件已落库（processed=0），处理完成后置 processed=1
- # 纯函数：activation_seq / retry_seq / 重试次数 / 边状态 均从 step_records + engine_events 推导（见 4.3.0），
- # 不读写任何内存状态 —— 因此重放（recover）结果确定且幂等。
+process_event(event)  # 同步；按 run 串行（见 4.3.3）。
+ # 前置写：事件 append（processed=0）已提交；处理阶段（本函数）读写内存 RunContext + 落库，
+ # 成功后将本事件置 processed=1（与处理同事务）；失败则保持 processed=0 供 recover 重放。
+ # 同一状态 + 同一事件 → 相同结果（幂等），故重放安全。
   ├─ engine_start{run, workflow_id}                 ← notify(EngineStart) 写库后立即调用
-  │     → 加载 workflow definition (nodes, edges)
+  │     → **首次处理时**加载 **当前 workflow 定义**（定义快照在此刻冻结），将定义快照（nodes/edges + 各 op 节点 OP 定义含正文）**UPDATE 进 engine_start 事件 payload**（与处理同事务）冻结进 RunContext（此后定义 / OP 变更不影响本 Run）；若 `node.op_version != 当前 ops.version` → **正常路径置 Run failed**（写 failed 事件、processed=1，不返回 Err，见 Q5）；**重放 engine_start 时直接用 payload 快照，不再重新加载 / 校验**（Q1）；**若 payload 不含定义快照（崩溃落在 INSERT 与 UPDATE 之间，S1）→ 回退首次处理路径（加载定义 + 校验 + UPDATE payload）**，该 run 尚无步骤执行、等价于从头启动
+  │       ※ **target_version 口径（S2）**：`workflows` 表无版本历史，`job_runs.target_version` 仅用于 execute 校验与运行历史展示；定义以 **engine_start 处理时加载的当前定义**为准，并在事件 payload 记录 `actual_workflow_version`（不静默）；触发→engine_start 窗口极小（调度延迟）
+  │       ※ **加载定义失败的区分（V4，同 U8 口径）**：瞬时 DB 错误 → 返回 Err（交 T26 重试 / 重放）；**定义损坏 / JSON 解析失败 / workflow 不存在等确定性错误 → 写 terminate/failed 事件（processed=1）走正常失败路径**，不返回 Err（避免永久卡 running）
   │     → 直接推进第一步：对 Start 的出边置 activated → 走就绪规则 dispatch 后继节点
   │       （写 dispatch_step{node, activation_seq=1, retry_seq=1} → worker.run_step，只入队不阻塞）
   ├─ step_completed{run, step, activation_seq, retry_seq, result}   ← StepComplete 钩子写库后立即调用
-  │     → 定位并更新 step_records 终态（按 run_id+step_id+activation_seq+retry_seq）
-  │     → 进入固定决策链（次序不可换，见下方「step_completed 决策链」）：
+  │     → 读取 step_records 该次执行终态（**终态由 Worker 执行完写入**；此处据此推进；缺失时补写，**纯防御**：正常终态由 Worker 写、recover 补齐的是“终态已有、事件缺失”）
+  │     → **若存在 `pending_reentry[step]`**：消费之（**消费前先查执行总次数上限 min(max×3, max_loop_multiplier)：已达则不再重入、整个 Run 失败**）→ activation_seq+1, retry_seq=1 → dispatch 重入 N；**本次完成不再走决策链**（不 retry、不走边；N 的出边留待重入的那次完成时再走，见 4.3.0 ③ / P2）
+  │     → **否则**进入固定决策链（次序不可换，见下方「step_completed 决策链」）：
   │           ① 超时 / 用户终止 → 写 terminate（不走边、不重试）
   │           ② 若将再次执行同一节点（重试/回跳）且该步执行总次数达上限 min(max×3, max_loop_multiplier) → 写 terminate（整个 Run 失败，循环上限）
-  │           ③ 命中重试条件（见 4.3.2）→ 写 apply_retry + dispatch_step（同一 activation，retry_seq+1）
+  │           ③ 命中重试条件（见 4.3.2）→ 写 apply_retry（**其处理即写 dispatch_step**，同一 activation，retry_seq+1）
   │           ④ 否则 → 写 walk_edge → 继续处理 walk_edge
   ├─ walk_edge{run, step, result}
   │     → 对**该 step 的每条出边**判定 condition → 置边状态 activated / dropped（见 4.3.1、4.3.0 ②）
   │     → 对每个 activated 边的目标节点 N:
   │           if N 的所有入边均已「决定」(activated|dropped):
   │                 if 存在 activated 入边:
-  │                       若 N 已执行过 → 回跳边: activation_seq(N)+1, retry_seq=1（若 N 执行总次数已达上限 min(max×3, max_loop_multiplier) → 不重入, 整个 Run 失败）
+  │                       若 N 为 End（kind=end）→ **不 dispatch**（End 不产生执行、不落 step_record），直接进入「到达 End → 收敛判定」
+  │                       若 N 已执行过 → 回跳边: 若 N 上一 activation **未收敛**（存在 running/waiting）→ 记 `pending_reentry[N]`（**先查执行总次数上限：已达则不登记、整个 Run 失败**；否则写 dispatch_step{pending=true}，不 run_step，挂起）；否则 activation_seq(N)+1, retry_seq=1 → dispatch（若 N 执行总次数已达上限 min(max×3, max_loop_multiplier) → 不重入, 整个 Run 失败）
   │                       否则          → activation_seq(N)=1, retry_seq=1
   │                       写 dispatch_step{N, activation_seq} → worker.run_step（只入队，不阻塞）
   │                 else: N 无 activated 入边 → 视为 skipped（不产生 step_record）
   │           else:
   │                 挂起: 等 N 其余入边的源节点 step_completed 到达后再判（AND-join 依赖就绪）
-  │     → 到达 End（所有入边均已决定且至少一条 activated，且所有 running/waiting 步骤已收敛）→ workflow_done(success); 无就绪节点且无挂起候选但 End 未 activated（含 End 入边全 dropped）→ workflow_done(failed)
-  ├─ dispatch_step
-  │     → worker.run_step（见 4.4）→ 完成后经 StepComplete 钩子写 step_completed 并立即 process_event
+  │     → 到达 End（所有入边均已决定且至少一条 activated，且所有 running/waiting 步骤已收敛）→ workflow_done(success); 无就绪节点且无挂起候选但 End 未 activated（含 End 入边全 dropped）→ workflow_done(failed)（**挂起候选含 pending_reentry 回跳登记**：存在 pending_reentry 时不得判 failed）
+  │     → **未接住的失败（V11-B）**：若本步结果=failed 且无任何 activated 出边（无 on_failure / always 路由）→ 写 terminate(failed)（整个 Run 立即失败，不等其它分支）
+  ├─ dispatch_step{pending?}
+  │     → 若 `pending=true`（回跳挂起登记）：**不参与查重、不 run_step**（payload **不含四元组**，登记时 N 下一 activation 未定）；仅登记 `RunContext.pending_reentry[node]`；**重建时恒登记（布尔标记，重复登记无害）**（T13）
+  │     → 否则（pending=false）：**先按 (run_id, step_id, activation_seq, retry_seq) 查重 step_records：已存在任何状态（含 waiting/running）的记录 → 跳过（仅置 processed=1）**——防重放重复入队（S8）；否则 worker.run_step（见 4.4）→ 完成后经 StepComplete 钩子写 step_completed 并立即 process_event
   ├─ workflow_done{run, status}
   │     → 调用全局 JobComplete（更新 job_runs 终态，落库）:
   │           → 更新 job_run 终态 (success / failed) + duration（落库），刷新界面
   │           → Runner 常驻轮询自动感知并调度下一个
   └─ terminate{run, reason}                         ← notify(Terminate) 写库后立即调用
-        → 终止调度
+        → 逐个 abort 该 run 仍在飞（running）步骤（经全局 `WORKER_POOL.abort_run(run_id)` → AbortRegistry，见 4.4）
+        → 将该 run 仍在 waiting 的步骤置 cancelled（**条件更新 `UPDATE … SET status='cancelled' WHERE run_id=? AND status='waiting'`**；WorkerPool 置 running 时用 CAS，见 4.4）
         → 调用全局 JobComplete（更新 job_runs 终态，落库）:
               → 更新 job_run 终态 (failed / timeout / cancelled)（落库）
               → Runner 常驻轮询自动感知并调度下一个
@@ -626,13 +648,20 @@ process_event(event)  # 同步；事件已落库（processed=0），处理完成
 异常路径:
   ├─ timeout: status=timeout
   ├─ user terminate: kill 进程, status=cancelled
-  └─ 节点失败且无失败边可达 End: failed
+  └─ 节点失败且无失败边可达 End: failed（**V11-B：任一 op failed 且无任何 activated 出边 → 立即整体 failed，不等其它分支**）
 更新 job_run 终态 + duration, 刷新界面状态
 ※ 处理中产生的后续事件（apply_retry / walk_edge / dispatch_step / workflow_done）在同一调用栈内
      **写一条、处理一条**（同步链式），不回队列、不等待；
      workflow_done / terminate 终态经全局 JobComplete 落库（事件持久化 + 单例重启重建，重放幂等），
      job_run 不会卡在 running。
 ```
+
+**process_event 入口规则（幂等）**：
+- **无缓存 run（R3）**：process_event 首次接触某 run 且内存 RunContext 不存在时，**按需从 DB（`engine_events` + `step_records`）重建**再做处理——因此 init 顺序（`WorkerPool.recover_running` → `Engine.recover` → `Runner.start`）下，重跑步骤完成触发的 StepComplete 回调也自洽（即便 `Engine.recover` 尚未执行，按需重建即可）。
+- 若该 run 的 `job_runs.status` 已是终态（success / failed / cancelled / timeout）→ **直接置本事件 processed=1 返回**，不再进决策链（避免终止后被终止步骤的 `step_completed` 再次触发 terminate / JobComplete）。
+- 处理阶段内产生的后续事件（apply_retry / walk_edge / dispatch_step / workflow_done）在本调用栈内继续 process_event；**其中 apply_retry 的处理即写 dispatch_step**（见事件表）。
+
+**派发前组装 ExecuteRequest（Engine）**：`dispatch_step` 前由 Engine 构造 ExecuteRequest：遍历 `node.bindings` 解析 `inputs`（`node_output` → 上游节点出参（RunContext / step_records.outputs）；`workflow_input` → RunContext 入参；`literal` → 值）；`clientId` 取 `node.clientId`（空则回退 `Job.clientId`，仍空则报错）；`op` **取 RunContext 中该节点已快照的 OP 定义**（engine_start 时按 `node.op_version` 快照，含正文），正文写 `step_records.body_snapshot`；连同 `run_id` / `step_id` / `activation_seq` / `retry_seq` / `workspace` 组成 ExecuteRequest（见 crud-01 5.1）。**Engine 不另建 OP 历史版本表**：op 定义随 workflow 定义在 engine_start 一并快照冻结，运行期 OP 更新 / 删除不影响本 Run。**组装失败属确定性数据错误（clientId 缺失 / op 快照缺失 / 定义非法）→ 走正常失败路径（写 terminate/failed 事件，processed=1），不返回 Err**（U8）。
 
 **状态机**：
 - 节点级（`step_records.status`）：`waiting → running → success/failed/timeout/cancelled`（cancelled = 被终止/取消）。同一节点**重试**重入 running（同 activation，`retry_seq+1`）；**循环回跳**开启新 activation（`activation_seq+1`，`retry_seq` 重置为 1）。
@@ -659,7 +688,7 @@ Runner 与 Engine 是并行的后台任务。**notify 不投内存 inbox、不�
 Task Runner 调度线程（生产者）:
   └─ 取出 workflow 任务 → job_run 置 running
         └─ engine.notify(EngineStart{run_id, workflow_id, inputs, workspace})   # 实例方法 &self
-              ├─ 1. INSERT engine_events(event_type=engine_start, run_id, payload={inputs, workspace}, processed=0)   # 先落库
+              ├─ 1. INSERT engine_events(event_type=engine_start, run_id, payload={inputs, workspace}, processed=0)   # 先落库（基础 payload；定义快照由 process_event 处理时 UPDATE 进 payload，同事务）
               ├─ 2. 立即 process_event(engine_start)（同步，当前线程）
               │       → 找第一个就绪节点 → 写 dispatch_step → worker.run_step → 触发首个 OP 执行
               │       （若只落库不处理，engine_start 无人消费、调度不起来——所以必须写后立即处理）
@@ -668,6 +697,14 @@ Task Runner 调度线程（生产者）:
       ※ Terminate 同理: 终止接口 → engine.notify(Terminate{run_id, reason})
            → INSERT engine_events(event_type=terminate, payload={reason}) → 立即 process_event(terminate) → 返回
 ```
+
+> **处理失败语义（两阶段）**：事件先提交（processed=0）再处理（处理阶段单事务，含后续事件 + 运行态 + 置本事件 processed=1）。处理阶段失败 → 本事件**保持 processed=0**、可被 `recover` 重放（幂等）；调用方据此兜底：`notify` 返回 Err → Runner 置 job_run failed / 回滚；`StepComplete` 失败 → 留 processed=0 待 recover。**内存一致性**：处理失败 → **丢弃该 run 的内存 `RunContext`**（下次从 DB 重建），杜绝脏缓存。
+>
+> **运行中兜底（T26）**：`recover` 只在 App 启动跑一次；为避免运行中 process_event 失败后卡到重启——**处理失败后调用方立即重试一次**（幂等）；仍失败则事件保持 processed=0，由 **Runner 常驻轮询线程**（已存在，固定间隔）**顺带扫描 `engine_events WHERE processed=0 且所属 run 仍 running`，按序逐个 process_event（幂等）**——不依赖重启 recover，run 不会卡死。
+>
+> **确定性失败 vs 瞬时失败（U8）**：仅**瞬时 DB 错误**返回 Err（交 T26 重试 / 重放）；**确定性数据错误**（组装 ExecuteRequest 时 clientId 缺失、op 快照缺失、定义非法等）→ **走正常失败路径：写 terminate / failed 事件（processed=1）**，避免被无限重放（与 Q5 版本漂移口径一致）。
+>
+> **StepComplete 写事件失败的兜底（U13）**：Worker 已写终态但 `StepComplete` **INSERT step_completed 失败**（事件未落库、无 processed=0 可扫）→ **立即重试一次**（幂等）；仍失败则交由 **Runner 常驻轮询的「运行中事件补齐」**：扫描 running run 的 `step_records` 中「已有终态但缺对应 step_completed 事件」的记录，**补写并 process_event**（与 recover 的事件补齐同内核、幂等）。
 
 **Engine 收到通知后怎么跑起来**：
 - Engine **没有常驻线程**：不依赖内存 inbox、不靠消息在内存传递、无唤醒信号。`notify` 在**调用方线程内**完成「写事件 + 立即处理」——`engine_start` 被同步处理：找第一个就绪节点、写 dispatch_step、调 `worker.run_step(req, inst)`（只插 step_records waiting 记录、不阻塞），然后返回，Runner 继续调度下一个任务。
@@ -679,14 +716,16 @@ Task Runner 调度线程（生产者）:
 | 对象 | 形态 | 持久化方式 | 重启后如何恢复 |
 |-|-|-|-|
 | **notify 投递的消息**（EngineStart / Terminate） | 事件写库 | `notify(msg)` = **INSERT engine_events**（engine_start / terminate，payload 承载 inputs / workspace / reason，processed=0）→ **立即同步 process_event 处理** → 返回；内存不存消息本体 | 事件在 `engine_events` 中（processed=0），启动时由 `Engine::recover` 一次性处理——**投递不丢** |
-| **推进中的事件**（dispatch_step / walk_edge / apply_retry / workflow_done） | 事件写库 | process_event 内**写一条、处理一条**（processed=0 → 处理完置 processed=1）；崩溃窗口 = 事件已写库、尚未处理 | 残留 processed=0 事件由 recover 按序逐个 process_event（dispatch_step 重派、walk_edge 重走，**幂等**——当前 activation 已有终态记录则不重复执行） |
+| **推进中的事件**（dispatch_step / walk_edge / apply_retry / workflow_done） | 事件写库 | 两阶段：① 事件 append（processed=0）提交；② 处理（单事务：后续事件 + 运行态 + 置本事件 processed=1）。**处理失败 → 本事件保持 processed=0**，可重放；崩溃窗口 = ①已提交、②未完成 | 残留 processed=0 事件由 recover 按序逐个 process_event（dispatch_step 重派、walk_edge 重走，**幂等**——当前 activation 已有终态记录则不重复执行） |
 | **事件循环 / 唤醒信号** | **已取消** | 无——推进 = 事件写库后立即同步处理（写即处理），不依赖任何内存状态 | 无需重建——没有需要恢复的线程 / 信号 |
 | **per-run 调度循环** | **已取消**（无内存执行体） | 当前推进到哪 = `engine_events` 未消费事件 + `step_records` 已完成节点，天然可重建 | recover 一次性处理残留事件即恢复，之后无任何常驻循环 |
 
 - **恢复闭环（workflow 执行中 App 重启）**：
+  0. **重建 RunContext**：`Engine::recover` 对每个 running run，优先读可选 checkpoint 快照（`run_edge_state` / `run_node_state`），缺失则**重放该 run 的全部 `engine_events` + `step_records`** 重建内存 RunContext（可重复、确定）；**engine_start 重放若 payload 已含定义快照则直接用（不再重新加载 / 校验）；若不含（S1 窗口）则回退首次处理路径（加载定义 + 校验 + UPDATE payload，等价从头启动）**；
+  0b. **缺失 engine_start 的处理（Q2）**：若某 running run 在 `engine_events` 中**无 engine_start 事件**（崩溃落在「Runner 置 running」与「notify 写 engine_start」之间）→ recover **用当前定义补写 engine_start（含定义快照）并处理**（该 run 尚无 step 执行，等于从头启动）；**不会永久卡在 running**；
   1. Runner（常驻轮询）重启后扫 DB：该 job_run 仍 running，且 `engine_events` 中该 run 的事件（engine_start / step_completed 等）一条未丢；
   2. **事件补齐（以 step_records 终态为准）**：`Engine::recover` 启动时扫描该 run 的 step_records，若存在"已有终态（success/failed/timeout）但缺少对应 step_completed 事件"的节点——即崩溃恰好落在"WorkerPool 已写终态、事件尚未写入"的窗口——则**补写该 step_completed 事件**（写前按 run_id + step_id + activation_seq + retry_seq 查重，幂等），确保"事实（step_records）与信号（engine_events）"在任何崩溃窗口下都对齐；
-  3. `Engine::recover` **按序逐个调用 process_event 处理残留的 processed=0 事件**（一次性，处理完即结束、不启动任何循环线程；dispatch_step 重派、walk_edge 重走，**幂等**——当前 activation（run_id + step_id + activation_seq）已有终态记录则不重复执行）；
+  3. `Engine::recover` **按序逐个调用 process_event 处理残留的 processed=0 事件**（一次性，处理完即结束、不启动任何循环线程；dispatch_step 重派、walk_edge 重走，**幂等**——当前 activation（run_id + step_id + activation_seq + retry_seq）**已有任何状态记录（含 waiting/running）则不重复 dispatch**（S8））；
   4. 终态（workflow_done / terminate）事件同样在库里：处理时调全局 `JobComplete` 落库终态（全局单例重启后重建，仍可用）。**job_run 不会卡在 running**。
 - **与 WorkerPool 排队的区别**：WorkerPool 侧任务本体在 `step_records`（waiting 队列，由 WorkerPool 调度线程常驻消费，见 4.4）；Engine 侧推进信号在 `engine_events`——**写即处理**（生产线程同步处理），仅崩溃残留由 recover 一次性处理。两边都落库持久化，App 重启后不丢、无需内存队列。
 
@@ -767,7 +806,7 @@ pub enum EngineMessage {
 WorkerPool 与 Engine 的"完成后做什么"由**全局实现**决定（不再作为实例属性注入）：`JobComplete`（更新 job_runs 终态）、`StepComplete`（写 step_completed 事件后直接调全局 ENGINE.process_event 推进）。
 
 ```rust
-/// 完成回调 trait：入参统一为 ExecuteResult（含 run_id；stepId 由实现方从 run_id 拆出）。
+/// 完成回调 trait：入参统一为 ExecuteResult（含 run_id / step_id / activation_seq / retry_seq；无需再查库拆 stepId）。
 /// 实现为**全局可访问**（static 单例），App 启动 init() 时创建，不再注入实例字段
 pub trait OnComplete: Send {
     fn on_complete(&self, result: ExecuteResult);
@@ -782,17 +821,14 @@ impl OnComplete for JobComplete {
     }
 }
 
-/// 全局实现（static STEP_COMPLETE）：workflow 步骤完成 → 从 result.run_id 拆出 stepId，
+/// 全局实现（static STEP_COMPLETE）：workflow 步骤完成 → 直接用 result 携带的 step_id / activation_seq / retry_seq，
 /// 写 engine_events: step_completed{run_id, step_id, result}（processed=0），
 /// **写后立即同步调用全局 ENGINE.process_event(step_completed) 推进 DAG**（无事件循环，写即处理）。
 /// 全局单例天然可互引，无需 Weak / 回填。
 pub struct StepComplete;
 impl OnComplete for StepComplete {
     fn on_complete(&self, result: ExecuteResult) {
-        let step_id = split_step_id(&result.run_id);   // run_id = <jobRunId>_<stepId>
-        // 取该 (run_id, step_id) 最新一条 step_records（Worker 已在同一调用栈写完终态）
-        // 得到本次执行的 activation_seq / retry_seq（ExecuteResult 本身不携带步骤轮次）
-        let (activation_seq, retry_seq) = latest_step_record(run_id, step_id);
+        // ExecuteResult 直接携带 run_id / step_id / activation_seq / retry_seq（无需再查库）
         // 1. 写 step_completed{run_id, step_id, activation_seq, retry_seq, result} 事件（落库，processed=0）
         // 2. ENGINE.get().unwrap().process_event(step_completed{...});
     }
@@ -849,7 +885,8 @@ Runner 调度线程 / Engine                             WorkerPool (执行器)
 for 每条 activated 边的目标节点 N:
     if N 的所有入边均已决定 (activated|dropped):
         if 存在 activated 入边:
-            若 N 已执行过 → 回跳边: activation_seq(N)+1, retry_seq=1（若 N 执行总次数已达上限 min(max×3, max_loop_multiplier) → 不重入, 整个 Run 失败）
+            若 N 为 End（kind=end）→ **不 dispatch**（End 不产生执行），进入「到达 End → 收敛判定」
+            若 N 已执行过 → 回跳边: 若 N 上一 activation 未收敛（存在 running/waiting）→ 记 `pending_reentry[N]`（**先查执行总次数上限：已达则不登记、整个 Run 失败**；否则写 dispatch_step{pending=true}，不 run_step）；否则 activation_seq(N)+1, retry_seq=1 → dispatch（若执行总次数已达上限 min(max×3, max_loop_multiplier) → 不重入, 整个 Run 失败）
             否则          → activation_seq(N)=1, retry_seq=1
             写 dispatch_step{N, activation_seq} → worker.run_step   # 只入队, 不阻塞
         else:
@@ -858,8 +895,17 @@ for 每条 activated 边的目标节点 N:
     else:
         挂起: 等 N 其余入边的源节点 step_completed 到达后再判   # AND-join 依赖就绪
  到达 End: 所有入边均已决定 (activated|dropped) 且至少一条 activated 且无在飞 (running/waiting) 步骤 → 写 workflow_done(success)
- 无可就绪节点且无挂起候选但 End 未 activated → 写 workflow_done(failed)（收敛为失败）
+ 无可就绪节点且无挂起候选但 End 未 activated → 写 workflow_done(failed)（收敛为失败；**挂起候选含 pending_reentry，存在时不得判 failed**）
 ```
+
+**第三步：未接住的失败 → 立即整体失败（V11-B）**
+
+```text
+若 完成节点结果 = failed 且 该节点没有任何 activated 出边（无 on_failure / always 路由）：
+    → 写 terminate{reason: "unhandled_failure", status: failed}（整个 Run 立即失败，不走收敛、不等其它分支）
+```
+
+> `workflow_done(failed)` 为**真实可达**（非仅防御性）：例如 End 仅经某节点的 `on_success` 边可达，而该节点失败、其失败又无通往 End 的路径 → 该节点所有出边 dropped → skipped 传播至 End 全部入边 dropped → 收敛为 failed。
 
 #### 4.3.2 apply_retry 重试判定
 
@@ -876,7 +922,7 @@ for 每条 activated 边的目标节点 N:
         ├─ 即将重试且该 (run_id, step_id) 的执行总次数 >= 上限 min(max*3, max_loop_multiplier) → 不再重试, 整个 Run 失败（循环上限）
         ├─ on 与结果不匹配（如 on=success）→ 不重试, 走边
         ├─ 本 activation 的尝试已达 max（同 (run,step,activation_seq) 记录数-1 >= max）→ 不重试, 走边
-        └─ 按 backoff 计算退避间隔 → 写 apply_retry + dispatch_step（同一 activation, retry_seq+1; not_before_ms = now + interval, 不阻塞）
+        └─ 按 backoff 计算退避间隔 → 写 apply_retry（**处理即写 dispatch_step**）（同一 activation, retry_seq+1; not_before_ms = now + interval, 不阻塞）
               ├─ constant: 固定 interval
               ├─ linear:   interval * retry_count        # retry_count = retry_seq - 1
               └─ exponential: interval * 2^retry_count
@@ -922,11 +968,16 @@ for 每条 activated 边的目标节点 N:
 
 同一 run 的 `process_event` 会由**多个线程**（Runner 调度线程 + 各 Worker 线程）交错调用，因此：
 
-- 每个 `RunContext` **按 run 加锁**（或把事件投递到该 run 的单一处理队列，actor 化）；
-- 不同 run 的 context 相互独立，天然并行；
-- 锁粒度 = run，不阻塞其它 run。
+- 实现：Engine 内 `HashMap<run_id, Arc<Mutex<RunContext>>>`（或 DashMap），每个 run 一把锁；
+- **临界区仅「处理阶段」**（读缓存 + 落库，毫米级，不做子进程 / 长 IO）；
+- 调用方（`notify` / `StepComplete`）在锁上等待至处理完成（同步返回）；
+- 不同 run 的 context 相互独立，天然并行；锁粒度 = run，不阻塞其它 run；
+- LRU 驱逐只针对**无锁且空闲**的 context。
 
 **内存上界**
+
+
+
 
 - 并发 run 多 / N 大时，用 **LRU 驱逐空闲 run 的 context**（被驱逐者靠重放恢复，无损）；
 - context 只在 run 进行期间存活，终态后释放。
@@ -968,9 +1019,8 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
   **step_records 插入一条 status=waiting 记录**（run_id / step_id / activation_seq / retry_seq / op 快照 / client_id / inputs /
   workspace / timeout_ms / source=job|step / not_before_ms）后立即返回——**任务本体入 DB，App 重启不丢失**；
   调用方（Runner 调度线程 / Engine.process_event 调用方）不被阻塞；
-- **调度（WorkerPool 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序；**跳过 `not_before_ms` 未到点者**，即重试退避尚未到期），
-  查询 Worker 忙闲（busy 标志），发现空闲即**指派**（push 到该 Worker 的小队列）并将任务
-  **waiting → running（落库）**；
+- **调度（WorkerPool 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序；**跳过 `not_before_ms` 未到点者**，即重试退避尚未到期；**并跳过所属 run 已终态的 waiting 任务**），
+  查询 Worker 忙闲（busy 标志），发现空闲即**指派**（push 到该 Worker 的小队列）：**置 running 用 CAS —— `UPDATE step_records SET status='running' WHERE record_id=? AND status='waiting'`**；`affected=0` 表示已被 terminate 置 `cancelled`（或已被处理），**跳过不执行**——消除与 terminate 的竞态（P4）；
 - **执行（Worker 池）**：池大小 = **ceil(运行历史"运行中任务并发数" × 1.5)**；
   每个 Worker 一个**常驻执行循环 + 小队列**（WorkerPool 经小队列触发执行），**数量固定、运行期不新增**，
   内存有上界；收任务 → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
@@ -979,7 +1029,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
         │     → 更新 job_runs 终态（落库）并供运行历史界面展示结果（run_id 取自 result）
         │     → Runner 常驻轮询自动感知并调度下一个 waiting 任务
         └─ source=step → 全局 StepComplete:
-              → 从 result.run_id 拆出 stepId（<jobRunId>_<stepId>）
+              → 用 result 携带的 step_id / activation_seq / retry_seq（无需拆 run_id）
               → 写 engine_events: step_completed{run_id, step_id, activation_seq, retry_seq, result}
               → 立即调全局 ENGINE.process_event 同步推进（写即处理）: 标记步骤结束 → walk_edge → 派发下一节点 → 直至 End
 - **崩溃恢复（启动时）**：WorkerPool 初始化时扫描 step_records 中 **status=running** 的任务（上次中断残留），
@@ -993,8 +1043,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
   source=step → `StepComplete`）——不转异步投递、不产生事件；实现内操作（更新状态 / 写事件记录）同步完成；
 - **为何 trait 即可、不需要事件**：完成后处理（更新终态 / 回报 Engine）是全局实现自己的业务，天然用
   `OnComplete` trait 表达（入参统一为 ExecuteResult）；WorkerPool / Engine 无需知道发给谁、什么类型。
-  run_id 已在结果内（回填自请求）；workflow 场景 stepId 由 StepComplete 从 run_id 拆出
-  （`<jobRunId>_<stepId>`）。**实现为全局可访问**（static 单例，App 启动 init() 时创建、重启后重建）。
+  run_id / step_id / activation_seq / retry_seq 均已在结果内（回填自请求）——**无需从 run_id 拆 stepId**。**实现为全局可访问**（static 单例，App 启动 init() 时创建、重启后重建）。
   持久化保障：JobComplete 同步写终态（落库）；StepComplete 写持久化事件（`engine_events`，崩溃可重放）并立即 `process_event` 推进；
   全局 ENGINE + `workflow_done` / `terminate` 事件持久化双保险——重放 processed=0
   事件时全局实现仍可访问，幂等重做终态动作。
@@ -1034,7 +1083,7 @@ impl WorkerPool {
 
     /// workflow 步骤执行（Engine 调用，**实例方法 &self**）：除 req 外携带 `inst`
     /// （activation_seq / retry_seq，由 Engine 的 dispatch_step 决定），据此写入 waiting 记录；source=step；
-    /// 完成后由 Worker 按 source=step 同步调全局 StepComplete（从 result.run_id 拆出 stepId 回报 Engine）
+    /// 完成后由 Worker 按 source=step 同步调全局 StepComplete（用 result 携带的 step_id / activation_seq / retry_seq 回报 Engine）
     pub fn run_step(&self, req: ExecuteRequest, inst: StepInstance) -> WorkerHandle;
 
     /// WorkerPool 调度线程（常驻）：定期扫描 step_records 中 waiting 任务（按 created_at 顺序），
@@ -1044,6 +1093,11 @@ impl WorkerPool {
     /// 启动恢复：App 启动时扫描 step_records 中 status=running 的任务（上次中断残留），
     /// 重新指派给空闲 Worker 重新执行（复用 record_id，完成后覆盖终态与结果）
     fn recover_running(&self);
+
+    /// 终止某 run 的全部在飞步骤（Engine 的 terminate 调用，实例方法 &self）：
+    /// 按 run_id 查该 run 的 running 记录 → 逐个经 AbortRegistry 按 record_id 查杀子进程；
+    /// 并可将该 run 仍在 waiting 的任务置 cancelled（跳过执行）。
+    pub fn abort_run(&self, run_id: &str);
 }
 
 /// Worker：WorkerPool内的一个常驻执行体（数量固定，不随任务数增长）。
