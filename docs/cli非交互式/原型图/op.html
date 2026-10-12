@@ -942,7 +942,7 @@
   function openExport(name, version) {
     exportTargetName = name;
     exportTargetVersion = version;
-    document.getElementById('exportFileName').value = name + '-' + version + '.yaml';
+    document.getElementById('exportFileName').value = 'op-' + name + '-' + version + '.yaml';   // D4：默认名带 op- 前缀（crud-02 3.2.7）
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
@@ -963,6 +963,7 @@
     var fileName = document.getElementById('exportFileName').value.trim();
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
     if (!fileName) { alert('请填写导出文件名'); return; }
+    if (/[/\\]|\.\./.test(fileName)) { alert('文件名不能包含 /、\\ 或 ..'); return; }   // D5：全部导出统一校验
     var op = OP_BY_NAME[exportTargetName];
     // crud-02 3.2.7：POST /api/ops/{opId}/export 返回 {yaml}，由前端写入所选目录
     mockFetch('/api/ops/' + (op ? op.opId : exportTargetName) + '/export', { method: 'POST' })
@@ -1021,8 +1022,14 @@
   }
   function confirmImport() {
     var name = document.getElementById('importFileName').textContent;
-    alert('已导入：' + name + '（模拟）');
-    closeModal('importModal');
+    // crud-02 3.2.8：POST /api/ops/import {yaml} —— 同名 409
+    mockFetch('/api/ops/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.ya?ml$/, '') + '\ntype: prompt\n' }) })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        alert('已导入：' + (res.name || '') + '（导入成功）');
+        closeModal('importModal');
+      })
+      .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   /* ---------- 初始化 ---------- */

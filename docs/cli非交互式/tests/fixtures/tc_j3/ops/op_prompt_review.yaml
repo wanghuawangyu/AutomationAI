@@ -1,0 +1,10 @@
+name: op_prompt_review
+version: 1
+type: prompt
+description: 代码审查
+content: 审查代码并给出结论
+timeoutMs: 300000
+inputs:
+  - {name: code, type: string, required: true, default: null, description: 待审查代码}
+outputs:
+  - {name: approved, type: string, description: 是否通过}

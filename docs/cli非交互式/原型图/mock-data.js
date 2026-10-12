@@ -1159,8 +1159,39 @@ function mockFetch(path, options) {
 
       /* ---------- Client 子资源 ---------- */
       if (parts[1] === 'clients' && parts[2]) {
+        // crud-01 3.1.8：POST /api/clients/import —— 从 YAML 导入 Client（须先于 {clientId} 判断，parts[2]='import'）
+        if (parts[2] === 'import' && method === 'POST') {
+          var icYaml = (body && body.yaml) || '';
+          var icName = (icYaml.match(/^name:\s*(.+)$/m) || [])[1] || 'imported_client';
+          var icType = (icYaml.match(/^type:\s*(.+)$/m) || [])[1] || 'prompt';
+          if (CLIENT_BY_NAME[icName]) return resolve({ error: 'CLIENT_NAME_EXISTS', message: '同名 Client 已存在（导入冲突）: ' + icName });   // crud-01 3.1.8
+          var ic = {
+            clientId: __uid32(), name: icName, type: icType, description: '',
+            command: null, argsTemplate: null, inputMode: null, outputMode: null, outputJsonPath: null,
+            exitCodeSuccess: null, binaryPath: null,
+            createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
+          };
+          CLIENTS.push(ic); CLIENT_BY_ID[ic.clientId] = ic; CLIENT_BY_NAME[ic.name] = ic;
+          return resolve(ic);   // crud-01 3.1.8：返回导入创建的 Client 对象
+        }
         var cid = parts[2], cl = CLIENT_BY_ID[cid];
         if (parts[3] === 'test') return resolve({ success: true, exitCode: 0, rawOutput: 'ok', error: null, durationMs: 23 });
+        if (parts[3] === 'export' && cl) {
+          // crud-01 3.1.7：导出 Client 为 YAML（clientId/createdAtMs/updatedAtMs 不入 YAML）
+          var cy = 'name: ' + cl.name + '\ntype: ' + cl.type + '\n';
+          if (cl.description) cy += 'description: ' + cl.description + '\n';
+          if (cl.type === 'prompt') {
+            if (cl.command) cy += 'command: ' + cl.command + '\n';
+            if (cl.argsTemplate) cy += 'argsTemplate: ' + JSON.stringify(cl.argsTemplate) + '\n';
+            if (cl.inputMode) cy += 'inputMode: ' + cl.inputMode + '\n';
+          } else if (cl.binaryPath) {
+            cy += 'binaryPath: ' + cl.binaryPath + '\n';
+          }
+          if (cl.outputMode) cy += 'outputMode: ' + cl.outputMode + '\n';
+          if (cl.outputJsonPath) cy += 'outputJsonPath: ' + cl.outputJsonPath + '\n';
+          if (cl.exitCodeSuccess) cy += 'exitCodeSuccess: ' + JSON.stringify(cl.exitCodeSuccess) + '\n';
+          return resolve({ yaml: cy });
+        }
         if (method === 'DELETE') {
           // crud-01 3.1.5：被 Job（target.kind=op 的 target.clientId）引用 → 409
           var cRefJob = JOBS.find(function (j) { return j.target && j.target.clientId === cid; });
@@ -1333,7 +1364,7 @@ function mockFetch(path, options) {
           XLSX.utils.book_append_sheet(efWb, XLSX.utils.aoa_to_sheet(historyRows), '运行历史');
           XLSX.utils.book_append_sheet(efWb, XLSX.utils.aoa_to_sheet(detailRows), '运行明细');
           var efB64 = XLSX.write(efWb, { bookType: 'xlsx', type: 'base64' });
-          return resolve({ xlsx: efB64 });
+          return resolve({ xlsx: efB64, count: efRuns.length });   // D3：count = 本次导出运行历史条数（Sheet1 行数），由后端计算返回
         }
         var run = RUN_BY_ID[parts[2]];
         if (!run) return resolve(null);

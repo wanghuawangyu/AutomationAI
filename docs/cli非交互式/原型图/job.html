@@ -954,9 +954,9 @@
     exportTargetName = name;
     exportTargetVersion = version;
     exportTargetType = type;
-    document.getElementById('exportFileName').value = name + '-' + version + '.zip';
+    document.getElementById('exportFileName').value = 'job-' + name + '-' + version + '.zip';   // D4：默认名带 job- 前缀（crud-04 3.4.9）
 
-    var tree = name + '-' + version + '.zip\n' +
+    var tree = 'job-' + name + '-' + version + '.zip\n' +
       '├── manifest.json\n' +
       '├── job.yaml\n';
 
@@ -998,6 +998,7 @@
     var fileName = document.getElementById('exportFileName').value.trim();
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
     if (!fileName) { alert('请填写导出文件名'); return; }
+    if (/[/\\]|\.\./.test(fileName)) { alert('文件名不能包含 /、\\ 或 ..'); return; }   // D5：全部导出统一校验
     var job = JOB_BY_NAME[exportTargetName];
     // crud-04 3.4.9：POST /api/jobs/{jobId}/export 返回 {zip: base64}，由前端写入所选目录
     mockFetch('/api/jobs/' + (job ? job.jobId : exportTargetName) + '/export', { method: 'POST' })
@@ -1050,8 +1051,14 @@
   }
   function confirmImport() {
     var name = document.getElementById('importFileName').textContent;
-    alert('已导入：' + name + '（模拟）');
-    closeModal('importModal');
+    // crud-04 3.4.10：POST /api/jobs/import {yaml} —— 同名 409
+    mockFetch('/api/jobs/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.zip$/, '') + '\n' }) })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        alert('已导入：' + (res.name || '') + '（导入成功）');
+        closeModal('importModal');
+      })
+      .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   /* ==================== 初始化 ==================== */

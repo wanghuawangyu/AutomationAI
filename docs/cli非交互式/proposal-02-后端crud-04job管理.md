@@ -356,6 +356,8 @@
 ```
 
 > ZIP 结构：`manifest.json` + `job.yaml` + `workflows/*.yaml` + `ops/*.yaml`。
+
+**默认文件名（前端预填，允许用户自定义）**：`job-<name>-v<version>.zip`（name 为 Job 名称、version 为当前版本号；如 `job-hourly_check-v1.zip`）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
 >
 > 其中 `workflows/*.yaml` 与 3.3.8 Workflow 导出的 `workflow.yaml` **同一格式**（见 crud-03 3.3.8）。**两种表达方式并存（#1）**：`workflows/*.yaml` **内部引用**（节点 OP/Client）以**名称**表达（`opName`/`clientName`）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`），导入时由 `manifest.json` 的**名称锚**解析并重映射为新 uuid（见 3.4.10）。
 

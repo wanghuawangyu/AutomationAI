@@ -19,7 +19,7 @@
 | POST | `/api/runs/{runId}/rerun` | — | `{runId}` | 重跑 (用最新版本) |
 | POST | `/api/runs/{runId}/retry` | — | `{runId}` | 从失败 step 重试 |
 | GET | `/api/runs/{runId}/can-retry` | — | `{canRetry:bool, reason:string}` | 检查前提条件 |
-| POST | `/api/runs/export` | `{filters}` | `{xlsx: base64}` | 生成运行历史 Excel（前端解码后落盘） |
+| POST | `/api/runs/export` | `{filters}` | `{xlsx: base64, count}` | 生成运行历史 Excel（前端解码后落盘；count=本次导出运行历史条数） |
 
 **JobRun 对象**：
 ```json
@@ -79,8 +79,8 @@
 **导出 Excel（`POST /api/runs/export` 生成，前端落盘）**：
 - Sheet1 "运行历史"：runId, name, jobId, jobKind, jobVersion, triggeredBy, workspace, status, terminatedBy, startedAtMs, finishedAtMs, durationMs（name 为 JobRun 名称快照，见字段说明）
 - Sheet2 "运行明细"：recordId, jobId, stepId, activationSeq, retrySeq, opId, opVersion, opName, clientId, status, exitCode, inputs(JSON), bodySnapshot, outputs(JSON), rawOutput, timedOut, startedAtMs, finishedAtMs, durationMs
-- 文件名：`job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`；时间戳在前（便于按导出时序排序）、`jobResultCount` = 本次导出的运行历史条数（Sheet1 行数）
-- **`POST /api/runs/export` 由后端按上述两 Sheet 生成 `.xlsx`，以 base64 二进制返回（`{xlsx: base64}`），不落盘**；前端解码后写入用户所选目录（详见 3.5.10）。
+- 文件名：`job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`；时间戳在前（便于按导出时序排序）、`jobResultCount` = 接口返回的 `count`（本次导出的运行历史条数 = Sheet1 行数，见 3.5.10）
+- **`POST /api/runs/export` 由后端按上述两 Sheet 生成 `.xlsx`，以 base64 二进制返回（`{xlsx, count}`），不落盘**；前端解码后写入用户所选目录（详见 3.5.10）。
 
 **JobRun 对象字段说明**：
 
@@ -398,18 +398,19 @@
 **成功响应 `200 OK`**：
 
 ```json
-{ "xlsx": "UEsDBBQACAgI..." }
+{ "xlsx": "UEsDBBQACAgI...", "count": 128 }
 ```
 
 | 字段 | 类型 | 说明 |
 |-|-|-|
 | xlsx | string (base64) | 生成的 `.xlsx` 文件二进制内容（base64 编码）。两个 Sheet：运行历史（每个 Run 一行）+ 运行明细（每个 step 一行），列定义见 3.5「导出 Excel」。前端解码后原样写入用户所选目录 |
+| count | integer | 本次导出的**运行历史条数**（= Sheet1 行数），**由后端按本次实际导出范围计算**并返回；前端默认文件名 `-{jobResultCount}` 段取此值（**D3 定稿**：计数单一来源在后端，避免前后端筛选口径不一致导致文件名与内容不符） |
 
 **文件名与落盘规则（D5/D7，前端侧）**：
 
 | 项目 | 规则 |
 |-|-|
-| 文件名 | UI 前端预填默认名 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前、便于按导出时序排序；`jobResultCount` = 本次导出条数 = Sheet1 行数），**允许用户自定义（D7）**；文件名**不经过本接口**，由前端落盘时使用 |
+| 文件名 | UI 前端预填默认名 `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前、便于按导出时序排序；`jobResultCount` = 接口返回的 `count`，即本次导出条数 = Sheet1 行数），**允许用户自定义（D7）**；文件名**不经过本接口**，由前端落盘时使用 |
 | 校验 | 前端落盘前**仅拒绝含路径分隔符（`/`、`\`）或 `..` 的文件名**（D5）；**除此外不校验任何字符或扩展名**，其余非法字符交由写入时浏览器的 OS/IO 决定成败 |
 | 写入 | 前端以 `showDirectoryPicker()` 选择目录 → `getFileHandle(name, {create:true})` → `createWritable()` 写字节流（**同名覆盖**） |
 | 并发与失败 | 多次导出互相独立；写失败由浏览器抛出、前端提示，用户可重新导出 |

@@ -27,8 +27,11 @@ CLI 入口通过 `-c` 指定运行目录；未指定时默认 `~/.ai-automation`
 | 应用日志 | `{run}/logs/app-{date}.log` | 同左 | 随运行目录平移 |
 | Run 日志 | `{run}/logs/runs/{runId}.log` | 同左 | 随运行目录平移 |
 | 工作区根 | `{run}/workspaces` | 同左 | 默认值，只读展示 |
+| 实例信息 | `{run}/daemon.json` | 同左 | daemon 运行时写入 `{pid, host, port, startedAtMs, version}`、退出时删除；供 CLI 子命令发现实例（见 proposal-02 §9.3） |
 
 > `db_path`、`workspace_root` 由运行目录推导，**只读**，不作为可修改配置项。
+>
+> **服务态默认运行目录**：注册为 Windows 系统服务（proposal-02 §9.8）时服务账户无 `~` 语义，`-c` 必须为绝对路径；未指定时默认 `C:\ProgramData\ai-automation`（区别于非服务态的 `~/.ai-automation`）。
 
 ### 配置读写机制
 

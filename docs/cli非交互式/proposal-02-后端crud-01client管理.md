@@ -16,6 +16,8 @@
 | PUT    | `/api/clients/{clientId}`      | Client    | Client                                     | 更新                         |
 | DELETE | `/api/clients/{clientId}`      | —         | `{ok:true}`                                | 删除                         |
 | POST   | `/api/clients/{clientId}/test` | —         | `{success, exitCode, rawOutput, error, durationMs}` | 测试 Client 执行能力（封装 Executor::execute） |
+| POST   | `/api/clients/{clientId}/export` | —         | `{yaml}`                                   | 导出 Client 为 YAML（后端返回内容，前端落盘） |
+| POST   | `/api/clients/import`    | `{yaml}`  | Client                                     | 从 YAML 导入 Client（同名 409） |
 
 **Client 对象**：
 ```json
@@ -365,6 +367,71 @@
 | 400    | `VALIDATION_ERROR` | clientId 格式非法              |
 | 404    | `CLIENT_NOT_FOUND` | clientId 不存在                |
 | 500    | `INTERNAL_ERROR`   | 执行测试进程发生内部错误 |
+
+---
+
+### 3.1.7 POST /api/clients/{clientId}/export —— 导出 Client 为 YAML
+
+**功能说明**：导出 Client 为 YAML 文本并返回，前端将内容写入所选目录，用于 Client 的备份与迁移。**导出范围**：单个 Client 的定义（字段见 3.1「Client 对象」；`clientId` / `createdAtMs` / `updatedAtMs` 不入 YAML）。
+
+**路径参数**：`clientId`（32 位 UUID，必填）
+
+**查询参数**：无　**请求体**：无
+
+**成功响应 `200 OK`**：
+
+```json
+{ "yaml": "name: my-bash\ntype: bash\nbinaryPath: /bin/bash\n..." }
+```
+
+| 响应字段 | 类型 | 说明 |
+|-|-|-|
+| yaml | string | YAML 文本内容（前端写入所选目录） |
+
+**默认文件名（前端预填，允许用户自定义）**：`client-<name>.yaml`（name 为 Client 名称的 slug 形式；Client 无版本字段，文件名不含版本号）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
+
+**错误响应**：404 `CLIENT_NOT_FOUND`（clientId 不存在）。
+
+---
+
+### 3.1.8 POST /api/clients/import —— 从 YAML 导入 Client
+
+**功能说明**：从 YAML 文本解析并创建 Client，用于从外部迁移导入；若同名 Client 已存在返回 409（导入冲突）。
+
+**路径参数**：无　**查询参数**：无
+
+**请求体**：
+
+```json
+{ "yaml": "name: my-bash\ntype: bash\nbinaryPath: /bin/bash\n..." }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|-|-|-|-|
+| yaml | string | 是 | YAML 文本内容 |
+
+**成功响应 `200 OK`**：返回导入创建的 Client 对象（`clientId` 由后端重新生成；`createdAtMs` / `updatedAtMs` 由后端生成）。
+
+**错误响应**：
+
+| 状态码 | code | 场景 |
+|-|-|-|
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command 等） |
+| 409 | `CLIENT_NAME_EXISTS` | 同名 Client 已存在（导入冲突） |
+
+**YAML 字段规范（Client 导入 / 导出共用的字段全集，以 3.1「Client 对象」为准）**：
+
+| 字段 | 必填 | 说明 |
+|-|-|-|
+| name | 是 | 全局唯一 |
+| type | 是 | `prompt` / `bash` / `python` / `powershell` |
+| description | 否 | 描述 |
+| command | 条件 | prompt 类型专用：可执行命令 |
+| argsTemplate / inputMode / outputMode / outputJsonPath | 否 | prompt 类型专用（输出解析配置见 5.4/5.5）；脚本类恒为空 |
+| exitCodeSuccess | 否 | 视为成功的退出码集合，如 `[0]` |
+| binaryPath | 条件 | bash / python / powershell 类型专用：可执行文件路径 |
+
+> `clientId` / `createdAtMs` / `updatedAtMs` 不入 YAML——导入时后端重新生成，导出时后端剔除（与 OP/Workflow/Job 导出同口径，见 crud-02 3.2.7、crud-03 3.3.8、crud-04 3.4.9）。
 
 ---
 
@@ -991,4 +1058,4 @@ exit 0
 - Client 关联：目标 `type`（prompt/bash/python/powershell）及所需配置（`command`/`binaryPath`、`argsTemplate`、`inputMode`、`outputMode`、`outputJsonPath`、`exitCodeSuccess`）。
 - 关联 Client 的 ID 引用需在导入时校验或映射，避免执行时出现悬挂 Client。
 
-> 导入端据此即可重建 `.main-<executionId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10）的设计依据。
+> 导入端据此即可重建 `.main-<executionId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job/Client` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10、3.1.7–3.1.8）的设计依据。

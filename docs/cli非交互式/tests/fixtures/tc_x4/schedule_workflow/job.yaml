@@ -1,0 +1,14 @@
+name: tc_x4_schedule_workflow
+version: 1
+description: TC-X4 schedule Workflow Job
+target:
+  kind: workflow
+  workflowId: f0001
+  workflowVersion: 1
+workspace: /path/to/workspace
+inputs: {target_env: staging}
+trigger:
+  kind: schedule
+  cron: "* *"
+concurrency: skip
+enabled: true

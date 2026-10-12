@@ -1,0 +1,12 @@
+name: wf_deploy_stage
+version: 1
+description: 预发部署
+inputs: []
+outputs: []
+nodes:
+  - {nodeId: 02020202020202020202020202020200, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {nodeId: 02020202020202020202020202020201, label: node_op, kind: op, opName: op_prompt_review, opVersion: 2, position: {x: 240, y: 120}}
+  - {nodeId: 02020202020202020202020202020202, label: node_end, kind: end, position: {x: 440, y: 120}}
+edges:
+  - {from: 02020202020202020202020202020200, to: 02020202020202020202020202020201, condition: on_success}
+  - {from: 02020202020202020202020202020201, to: 02020202020202020202020202020202, condition: on_success}

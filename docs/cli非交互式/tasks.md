@@ -40,8 +40,8 @@ T1 项目骨架
 |-|-|-|-|
 | T1.1 | 初始化普通 Rust 二进制工程（bin crate，含 HTTP 服务与静态资源目录） | proposal-02 §1.1 | `cargo run -- start` 可启动 HTTP 服务 |
 | T1.2 | 规划并冻结项目目录结构 | proposal-02 §2 | 目录树落盘并在 README 固化（见下方"目录约定"） |
-| T1.3 | 选定依赖并锁定版本 | proposal-02 §1.1 | `Cargo.toml`：`axum`、`tokio`、`sqlx`(或 rusqlite)、`serde`/`serde_json`、`serde_yaml`、`clap`、`tokio-cron-scheduler`、`tracing`/`tracing-subscriber`、`zip`、`rust_xlsxwriter`、`uuid`、**`rust-embed`（或 include_dir，内嵌前端静态资源）** |
-| T1.4 | CLI 入口骨架（clap）：`start/run/export/import/version/-c` | proposal-02 §9 | `ai-automation --help` 输出全部子命令 |
+| T1.3 | 选定依赖并锁定版本 | proposal-02 §1.1 | `Cargo.toml`：`axum`、`tokio`、`sqlx`(或 rusqlite)、`serde`/`serde_json`、`serde_yaml`、`clap`、`tokio-cron-scheduler`、`tracing`/`tracing-subscriber`、`zip`、`rust_xlsxwriter`、`uuid`、**`rust-embed`（或 include_dir，内嵌前端静态资源）**、**`windows-service`（Windows 系统服务，T1.4 `install-service`）** |
+| T1.4 | CLI 入口骨架（clap）：`start / run / export / import / version / install-service / uninstall-service / service`，全局 `-c/--config-dir`；`start` 默认端口 `7878`、默认不开浏览器 | proposal-02 §9 | `ai-automation --help` 输出全部子命令；`install-service` 可注册为 Windows 服务 |
 | T1.5 | 运行目录初始化（`{run}/ai-automation.json`、`data/`、`logs/`、`logs/runs/`、`workspaces/`、`scripts/`） | crud-06 〇 | 首次启动自动建目录；`-c` 生效 |
 | T1.6 | axum HTTP 骨架：`/api` 前缀、统一 JSON、CORS、健康探测；**静态资源路由**（`/` → 释放出的 `ui/`） | proposal-02 §3/§10 | `curl /api/system/version` 返回 `{version}`；浏览器可打开首页 |
 | T1.7 | 统一错误响应与错误码基座（`{error:{code,message}}`） | proposal-02 §10 | 400/404/409/500 结构一致 |

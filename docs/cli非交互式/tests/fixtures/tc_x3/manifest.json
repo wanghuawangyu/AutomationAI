@@ -1,0 +1,13 @@
+{
+  "kind": "workflow",
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "exportedAtMs": "0",
+  "workflow": { "name": "wf_tc_x3_multi", "version": 1 },
+  "clients": [],
+  "workflows": [ { "name": "wf_tc_x3_multi", "version": 1, "file": "workflow.yaml" } ],
+  "ops": [
+    { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" },
+    { "name": "op_bash_build", "version": 1, "file": "ops/op_bash_build.yaml" }
+  ]
+}

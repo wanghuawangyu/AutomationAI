@@ -1,0 +1,10 @@
+{
+  "kind": "job",
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "exportedAtMs": "0",
+  "job": { "name": "tc_x4_schedule_workflow", "version": 1 },
+  "clients": [],
+  "workflows": [ { "name": "wf_deploy_prod", "version": 1, "file": "workflows/wf_deploy_prod.yaml" } ],
+  "ops": [ { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" } ]
+}

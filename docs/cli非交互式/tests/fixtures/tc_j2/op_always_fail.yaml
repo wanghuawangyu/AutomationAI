@@ -1,0 +1,10 @@
+name: op_always_fail
+version: 1
+type: bash
+description: 恒定失败（用于制造失败运行记录）
+content: |
+  #!/usr/bin/env bash
+  exit 1
+timeoutMs: 30000
+inputs: []
+outputs: []

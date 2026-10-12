@@ -547,14 +547,14 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 
 | 步骤 | 行为 |
 |-|-|
-| 1 | 点击 [导出] → 弹出导出对话框，文件名自动填充（如 `claude_code.yaml`） |
+| 1 | 点击 [导出] → 弹出导出对话框，文件名自动填充（如 `client-claude_code.yaml`，默认名规则 `client-<name>.yaml` 见 crud-01 3.1.7，允许自定义） |
 | 2 | 点击 [选择] → 弹出系统文件夹选择框，选中后目录名回填到导出目录输入框 |
-| 3 | [导出] 按钮从禁用变为可用；点击后直接将 YAML 文件写入所选目录，成功后提示完整路径 |
+| 3 | [导出] 按钮从禁用变为可用；点击后调 `POST /api/clients/{clientId}/export` 取回 `{yaml}`，由前端写入所选目录，成功后提示完整路径 |
 | 4 | 未选择目录时 [导出] 按钮置灰，不可点击；不回退到浏览器下载 |
 
-> Client 导出为 YAML 文本文件；导出格式与 OP 导出一致。
+> Client 导出为 YAML 文本文件；内容由后端按 crud-01 3.1.7 生成（字段规范见 crud-01 3.1.8），前端仅落盘。
 
-> **导出实现口径（Z5）**：程序为非 Tauri 的普通 Rust 服务端 + HTTP + 浏览器前端，**文件落盘一律由前端完成**；后端只负责生成内容。运行历史导出（12.11）为 `.xlsx`：`POST /api/runs/export` **由后端生成 `.xlsx` 并以 base64 返回**（`{xlsx: base64}`），前端解码为字节流后写入所选目录（目录用 `showDirectoryPicker`）。实体导出（OP / Workflow / Job / Client）同为此模式：[选择] 目录使用**浏览器文件系统目录选择器**（`showDirectoryPicker`，写入 FileSystem 目录句柄），[导出] 时 **OP / Workflow / Job 先调 `POST /api/ops|workflows|jobs/{id}/export` 取回内容**（分别 `{yaml}` / `{zip: base64}` / `{zip: base64}`），再由**前端**写入所选目录；Client 未定义导出接口（crud-01），YAML 由前端拼装后写入。运行历史与四类实体的目录选择与写文件逻辑完全一致，区别仅在内容来源（xlsx 由接口生成，客户端只解码落盘）。
+> **导出实现口径（Z5）——通用导出约定（适用于运行历史与 OP / Workflow / Job / Client 全部导出）**：程序为非 Tauri 的普通 Rust 服务端 + HTTP + 浏览器前端，**文件落盘一律由前端完成**；后端只负责生成内容。运行历史导出（12.11）为 `.xlsx`：`POST /api/runs/export` **由后端生成 `.xlsx` 并以 base64 返回**（`{xlsx, count}`），前端解码为字节流后写入所选目录（目录用 `showDirectoryPicker`）。实体导出（OP / Workflow / Job / Client）同为此模式：[选择] 目录使用**浏览器文件系统目录选择器**（`showDirectoryPicker`，写入 FileSystem 目录句柄），[导出] 时 **先调 `POST /api/ops|workflows|jobs|clients/{id}/export` 取回内容**（分别 `{yaml}` / `{zip: base64}` / `{zip: base64}` / `{yaml}`，见 crud-02 3.2.7 / crud-03 3.3.8 / crud-04 3.4.9 / crud-01 3.1.7），再由**前端**写入所选目录。运行历史与四类实体的目录选择与写文件逻辑完全一致，区别仅在内容来源（xlsx 由接口生成，客户端只解码落盘）。各导出小节（8.9 / 9.x / 10.x / 11.x / 12.11）不再重复展开本口径，仅回链本段。
 
 ---
 
@@ -762,7 +762,7 @@ interface OpOutput {
 | 操作 | 说明 |
 |-|-|
 | 点击 [导出] | 弹出导出对话框 |
-| 文件名 | 自动带入 `{op-name}-v{version}.yaml`，可修改 |
+| 文件名 | 自动带入 `op-{op-name}-v{version}.yaml`（如 `op-check_tests-v2.yaml`；默认名规则见 crud-02 3.2.7），可修改 |
 | 导出目录 | 点击 [选择] 弹出系统目录选择框，选中目标目录后回填 |
 | 导出内容 | OP 为 YAML 文件，写入所选目录 |
 | 导出按钮 | 未选目录时禁用；选完目录后可用 |
@@ -771,7 +771,7 @@ interface OpOutput {
 ┌──────────────────────────────────────┐
 │  导出 OP: check_tests                 │
 ├──────────────────────────────────────┤
-│  文件名: [check_tests-v2.yaml]        │
+│  文件名: [op-check_tests-v2.yaml]      │
 │  导出目录: [未选择目录      ] [选择]   │
 │           [取消]  [导出（未选目录禁用）] │
 └──────────────────────────────────────┘
@@ -1285,7 +1285,7 @@ interface NodeRetry {
 **ZIP 结构**：
 
 ```text
-deploy_workflow-v2.zip
+workflow-deploy_workflow-v2.zip
 ├── manifest.json
 ├── workflow.yaml
 └── ops/
@@ -1299,7 +1299,7 @@ deploy_workflow-v2.zip
 
 | 步骤 | 行为 |
 |-|-|
-| 1 | 点击 [导出] → 弹出导出对话框，文件名自动填充（如 `deploy_workflow-v2.zip`） |
+| 1 | 点击 [导出] → 弹出导出对话框，文件名自动填充（如 `workflow-deploy_workflow-v2.zip`；默认名规则见 crud-03 3.3.8） |
 | 2 | 点击 [选择] → 弹出系统文件夹选择框，选中后目录名回填到导出目录输入框 |
 | 3 | [导出] 按钮从禁用变为可用；点击后直接将 ZIP 文件写入所选目录，成功后提示完整路径 |
 | 4 | 未选择目录时 [导出] 按钮置灰，不可点击；不回退到浏览器下载 |
@@ -1532,7 +1532,7 @@ Cron 触发 → 检查并发策略 → 检查交互性 → 创建 Job Run → �
 **Job 导出 ZIP 结构**：
 
 ```text
-manual_deploy-v2.zip
+job-manual_deploy-v2.zip
 ├── manifest.json
 ├── job.yaml
 ├── workflows/
@@ -2000,11 +2000,11 @@ interface StepRecord {
 |-|-|
 | 导出范围 | 当前筛选条件下的所有条目 |
 | 文件格式 | Excel（`.xlsx`），首行为表头 |
-| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；jobResultCount = 本次导出的运行历史条数，见 crud-05 3.5.10）——**默认名预填且允许用户自定义**（D7），输入框可编辑，自定义值由**前端**用于落盘文件名；**前端落盘前仅拒绝含 `/`、`\`、`..` 的取值**（D5，见 crud-05「文件名与落盘规则」） |
+| 文件名模板 | `job_result-{yyyyMMddHHmmssSSS}-{jobResultCount}.xlsx`（时间戳在前便于按导出时序排序；`jobResultCount` = 接口返回的 `count` = 本次导出的运行历史条数，见 crud-05 3.5.10）——**默认名预填且允许用户自定义**（D7），输入框可编辑，自定义值由**前端**用于落盘文件名；**前端落盘前仅拒绝含 `/`、`\`、`..` 的取值**（D5，适用范围=全部导出，见 crud-05「文件名与落盘规则」） |
 | 导出弹窗 | 展示文件名、导出条数（运行历史数 + 运行明细数）、导出目录选择 |
 | 导出位置 | 弹窗内点击 [选择] 弹出系统文件夹选择框，选中后启用 [导出] 按钮；点击 [导出] 调 `POST /api/runs/export` 取回**base64 编码的 `.xlsx` 内容**，由**前端**解码为字节流并写入所选目录（见 crud-05 3.5.10） |
 
-> **P3（原型调用 `POST /api/runs/export`）**：运行历史导出为 `.xlsx`，**由后端生成、以 base64 二进制返回，落盘由前端完成**——点击 [导出] 调 `POST /api/runs/export`（mock 返回 `{xlsx: base64}`），[选择] 使用浏览器文件系统目录选择器（`showDirectoryPicker`），前端将 base64 解码后写入所选目录（与实体导出的前端写文件口径一致；OP/Workflow/Job 导出同样由后端提供内容）。导出条数（运行历史数 + 运行明细数）与文件名 `-{jobResultCount}` 段均取自**当前筛选结果**，与导出范围联动。
+> **P3（原型调用 `POST /api/runs/export`）**：运行历史导出为 `.xlsx`，**由后端生成、以 base64 二进制返回，落盘由前端完成**——点击 [导出] 调 `POST /api/runs/export`（mock 返回 `{xlsx, count}`），[选择] 使用浏览器文件系统目录选择器（`showDirectoryPicker`），前端将 base64 解码后写入所选目录（与实体导出的前端写文件口径一致，通用导出约定见 §8.9 导出实现口径；OP/Workflow/Job/Client 导出同样由后端提供内容）。导出条数（运行历史数 + 运行明细数）取自**当前筛选结果**用于弹窗展示；文件名 `-{jobResultCount}` 段取自**接口返回的 `count`**（D3：计数单一来源在后端），与导出范围联动。
 
 **Sheet 1：运行历史**（每个 Job Run 一行）
 
@@ -2467,6 +2467,8 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | PUT | `/api/clients/{clientId}` | 更新 Client |
 | DELETE | `/api/clients/{clientId}` | 删除 Client |
 | POST | `/api/clients/{clientId}/test` | 测试 Client 命令或路径 |
+| POST | `/api/clients/{clientId}/export` | 导出 Client 为 YAML（后端返回内容，前端落盘） |
+| POST | `/api/clients/import` | 从 YAML 导入 Client（同名 409） |
 
 ### 16.2 OP 相关
 
@@ -2524,6 +2526,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | POST | `/api/runs/{runId}/rerun` | 重跑 Run |
 | POST | `/api/runs/{runId}/retry` | 重试 Run（从失败 step 开始） |
 | GET | `/api/runs/{runId}/can-retry` | 检查 Run 是否可重试 |
+| POST | `/api/runs/export` | 生成运行历史 Excel（`{xlsx, count}`，前端落盘） |
 
 ### 16.6 版本与更新相关
 
@@ -2541,11 +2544,11 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | GET | `/api/system/version` | 获取 APP 版本 |
 | GET | `/api/settings` | 获取设置 |
 | PUT | `/api/settings` | 更新设置 |
+| POST | `/api/settings/reset` | 恢复设置默认值 |
 | GET | `/api/workspaces` | 获取工作区列表 |
-| POST | `/api/workspaces/browse` | 浏览文件系统选择工作区 |
 
-> **说明**：OP 导出（YAML）与 Workflow / Job 导出（ZIP）的目录选择由前端浏览器 File System Access API（`showDirectoryPicker`）完成，选完目录后文件直接写入该目录（`getFileHandle` + `createWritable`），不经过后端接口，不触发浏览器下载；未选目录时导出按钮置灰，不回退到下载方式。
-> **运行历史「全部导出」Excel**：同属「后端供内容、前端落盘」——`POST /api/runs/export` 由后端生成 `.xlsx` 并以 base64 返回（`{xlsx: base64}`），前端解码后写入所选目录（见 crud-05 3.5.10）。
+> **说明**：实体导出（OP / Workflow / Job / Client）的**目录选择由前端浏览器 File System Access API（`showDirectoryPicker`）完成**，选完目录后文件直接写入该目录（`getFileHandle` + `createWritable`），不经过后端接口，不触发浏览器下载；未选目录时导出按钮置灰，不回退到下载方式。**不提供「浏览文件系统选择工作区」的后端接口**（原 `/api/workspaces/browse` 已移除）——在非 Tauri 架构下，工作区/导出目录选择一律为**前端浏览器能力**（`showDirectoryPicker`），后端只提供内容（详见 §8.9 通用导出约定）。
+> **运行历史「全部导出」Excel**：同属「后端供内容、前端落盘」——`POST /api/runs/export` 由后端生成 `.xlsx` 并以 base64 返回（`{xlsx, count}`），前端解码后写入所选目录（见 crud-05 3.5.10）。
 
 **说明**：**不涉及**事件与流式相关接口（无 SSE，无 WebSocket）。
 

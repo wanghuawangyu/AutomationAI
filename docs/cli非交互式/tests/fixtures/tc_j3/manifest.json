@@ -1,0 +1,10 @@
+{
+  "kind": "job",
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "exportedAtMs": "0",
+  "job": { "name": "tc_j3_schedule", "version": 1 },
+  "clients": [ { "name": "Claude Code", "clientId": "a1b2c3d4e5f60718293a4b5c6d7e8f90" } ],
+  "workflows": [],
+  "ops": [ { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" } ]
+}

@@ -1643,9 +1643,9 @@
   function openExport(name, version) {
     exportTargetName = name;
     exportTargetVersion = version;
-    document.getElementById('exportFileName').value = name + '-' + version + '.zip';
+    document.getElementById('exportFileName').value = 'workflow-' + name + '-' + version + '.zip';   // D4：默认名带 workflow- 前缀（crud-03 3.3.8）
     document.getElementById('exportTree').textContent =
-      name + '-' + version + '.zip\n' +
+      'workflow-' + name + '-' + version + '.zip\n' +
       '├── manifest.json\n' +
       '├── workflow.yaml\n' +
       '└── ops/\n' +
@@ -1678,6 +1678,7 @@
     var fileName = document.getElementById('exportFileName').value.trim();
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
     if (!fileName) { alert('请填写导出文件名'); return; }
+    if (/[/\\]|\.\./.test(fileName)) { alert('文件名不能包含 /、\\ 或 ..'); return; }   // D5：全部导出统一校验
     var wf = WORKFLOW_BY_NAME[exportTargetName];
     // crud-03 3.3.8：POST /api/workflows/{workflowId}/export 返回 {zip: base64}，由前端写入所选目录
     mockFetch('/api/workflows/' + (wf ? wf.workflowId : exportTargetName) + '/export', { method: 'POST' })
@@ -1726,8 +1727,14 @@
   }
   function confirmImport() {
     var name = document.getElementById('importFileName').textContent;
-    alert('已导入：' + name + '（模拟）');
-    closeModal('importModal');
+    // crud-03 3.3.9：POST /api/workflows/import {yaml} —— 同名 409
+    mockFetch('/api/workflows/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.zip$/, '') + '\n' }) })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        alert('已导入：' + (res.name || '') + '（导入成功）');
+        closeModal('importModal');
+      })
+      .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   /* ==================== 初始化 ==================== */

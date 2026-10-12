@@ -521,7 +521,7 @@
         '<td style="padding:10px 8px">' + (c.outputMode || '-') + '</td>' +
         '<td style="padding:10px 8px">' +
           '<button class="btn btn-sm" onclick="editClient(\'' + c.clientId + '\',\'' + c.type + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + c.clientId + '\',\'' + c.type + '\')">导出</button>' +
+          '<button class="btn btn-sm" onclick="openExport(\'' + c.name + '\',\'' + c.type + '\',\'' + c.clientId + '\')">导出</button>' +
           '<button class="btn btn-sm" onclick="dupClient(\'' + c.clientId + '\')">复制</button>' +
           '<button class="btn btn-sm btn-danger" onclick="delClient(\'' + c.clientId + '\')">删除</button>' +
         '</td>' +
@@ -803,7 +803,9 @@
   });
 
   // ---------- 导入文件选择 ----------
+  var importFileText = '';
   function openImportModal() {
+    importFileText = '';
     document.getElementById('importFileName').textContent = '未选择文件';
     document.getElementById('importFile').value = '';
     document.getElementById('confirmImportBtn').disabled = true;
@@ -823,25 +825,33 @@
     tree.style.display = 'block';
     if (/\.ya?ml$/.test(file.name)) {
       var reader = new FileReader();
-      reader.onload = function (e) { tree.textContent = file.name + '\n' + e.target.result; };
+      reader.onload = function (e) { importFileText = e.target.result; tree.textContent = file.name + '\n' + importFileText; };
       reader.readAsText(file);
     } else {
+      importFileText = 'name: ' + file.name.replace(/\.ya?ml$/, '') + '\ntype: prompt\n';
       tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
     }
   }
   function confirmImport() {
-    var name = document.getElementById('importFileName').textContent;
-    alert('已导入：' + name + '（模拟）');
-    closeModal('importModal');
+    // crud-01 3.1.8：POST /api/clients/import {yaml} —— 同名 409
+    mockFetch('/api/clients/import', { method: 'POST', body: JSON.stringify({ yaml: importFileText }) })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        alert('已导入：' + (res.name || '') + '（导入成功）');
+        closeModal('importModal');
+      })
+      .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
-  // ---------- 导出（Client 无导出接口，前端拼装 YAML 并写入所选目录） ----------
+  // ---------- 导出（crud-01 3.1.7：后端返回 {yaml}，前端选择目录并写入文件） ----------
   var exportTargetName = '';
   var exportTargetType = '';
+  var exportTargetId = '';
 
-  function openExport(name, type) {
+  function openExport(name, type, clientId) {
     exportTargetName = name;
     exportTargetType = type;
+    exportTargetId = clientId;
     var fileNameMap = {
       'Claude Code': 'claude_code',
       'Codex CLI': 'codex_cli',
@@ -849,7 +859,7 @@
       '本地 Python': 'local_python',
       '本地 PowerShell': 'local_powershell'
     };
-    document.getElementById('exportFileName').value = (fileNameMap[name] || 'client') + '.yaml';
+    document.getElementById('exportFileName').value = 'client-' + (fileNameMap[name] || 'client') + '.yaml';
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
@@ -866,39 +876,24 @@
       alert('当前浏览器不支持直接写入目录，请使用 Chrome 或 Edge 浏览器');
     }
   }
-  function buildClientYaml(name, type) {
-    var c = CLIENT_BY_ID[name] || CLIENT_BY_NAME[name] || { name: name, type: type };
-    var yaml = 'name: ' + c.name + '\n';
-    yaml += 'type: ' + c.type + '\n';
-    yaml += 'description: ' + (c.description || '') + '\n';
-    if (c.type === 'prompt') {
-      yaml += 'command: ' + c.command + '\n';
-      if (c.argsTemplate) yaml += 'argsTemplate: ' + JSON.stringify(c.argsTemplate) + '\n';
-      yaml += 'inputMode: ' + c.inputMode + '\n';
-    } else {
-      yaml += 'binaryPath: ' + c.binaryPath + '\n';
-    }
-    if (c.outputMode) yaml += 'outputMode: ' + (c.outputMode || 'text') + '\n';
-    if (c.outputJsonPath) yaml += 'outputJsonPath: ' + c.outputJsonPath + '\n';
-    if (c.exitCodeSuccess) yaml += 'exitCodeSuccess: ' + JSON.stringify(c.exitCodeSuccess) + '\n';
-    return yaml;
-  }
   function confirmExport() {
     var fileName = document.getElementById('exportFileName').value.trim();
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
     if (!fileName) { alert('请填写导出文件名'); return; }
-    var yaml = buildClientYaml(exportTargetName, exportTargetType);
-    exportDirHandle.getFileHandle(fileName, { create: true }).then(function (fileHandle) {
-      return fileHandle.createWritable();
-    }).then(function (writable) {
-      writable.write(yaml);
-      return writable.close();
-    }).then(function () {
-      alert('已导出：' + exportDirHandle.name + '\\' + fileName);
-      closeModal('exportModal');
-    }).catch(function (err) {
-      alert('导出失败：' + err.message);
-    });
+    if (/[/\\]|\.\./.test(fileName)) { alert('文件名不能包含 /、\\ 或 ..'); return; }   // D5：全部导出统一校验
+    // crud-01 3.1.7：POST /api/clients/{clientId}/export 返回 {yaml}，由前端写入所选目录
+    mockFetch('/api/clients/' + exportTargetId + '/export', { method: 'POST' })
+      .then(function (res) {
+        if (res && res.error) throw new Error(res.message || res.error);
+        return exportDirHandle.getFileHandle(fileName, { create: true })
+          .then(function (fileHandle) { return fileHandle.createWritable(); })
+          .then(function (writable) { writable.write(res.yaml || ''); return writable.close(); });
+      })
+      .then(function () {
+        alert('已导出：' + exportDirHandle.name + '\\' + fileName);
+        closeModal('exportModal');
+      })
+      .catch(function (err) { alert('导出失败：' + (err && err.message ? err.message : '未知错误')); });
   }
 
   // 初始化
