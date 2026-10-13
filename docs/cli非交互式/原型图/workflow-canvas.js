@@ -6,7 +6,7 @@
  * 用法：
  *   WFCanvas.render(canvasEl, nodes, edges, opts)
  *
- *   nodes: { nodeId: { nodeId, label, kind:'start'|'op'|'end', position:{x,y},
+ *   nodes: { workflowNodeId: { workflowNodeId, label, kind:'start'|'op'|'end', position:{x,y},
  *                     opId?, opVersion?, clientId?, bindings?, retry?, outdated? } }
  *          （与后端 API 的 WorkflowNode 一致；无 op / params / client / timeout 等旧字段）
  *   edges: [{from, to, condition:'on_success'|'on_failure'|'always'}]（API 结构；兼容旧的 [from,to,cond] 三元组）

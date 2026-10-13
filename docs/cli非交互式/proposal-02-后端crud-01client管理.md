@@ -48,7 +48,7 @@
 | 字段            | 类型               | 说明                                                                    |
 | --------------- | ------------------ | ----------------------------------------------------------------------- |
 | clientId | string(32 位 UUID) | 系统生成，创建时由后端生成，不随请求传入                                |
-| name            | string             | 全局唯一，界面展示                                                      |
+| name            | string             | 全局唯一，界面展示；**边界：长度 ≤ 512 字符，字符集不限（任意 UTF-8 字符）** |
 | description     | string \| null     | 描述                                                                    |
 | type            | enum               | `prompt` / `bash` / `python` / `powershell`                             |
 | command         | string \| null     | prompt 类型专用：可执行命令                                             |
@@ -72,11 +72,21 @@
 > - 列表分页参数 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
 
-**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case）：
+**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` §1 clients 全列对齐）：
 
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
 | `Client.clientId` | `clients.client_id` | 主键，32 位 UUID |
+| `Client.name` | `clients.name` | 全局唯一；长度 ≤ 512 字符，任意 UTF-8 字符 |
+| `Client.description` | `clients.description` | 可空 |
+| `Client.type` | `clients.type` | prompt/bash/python/powershell |
+| `Client.command` | `clients.command` | prompt 类型专用 |
+| `Client.argsTemplate` | `clients.args_template` | prompt 类型专用：参数模板字符串 |
+| `Client.inputMode` | `clients.input_mode` | prompt 类型专用：arg/stdin/file |
+| `Client.outputMode` | `clients.output_mode` | prompt 类型专用：text/json/jsonl |
+| `Client.outputJsonPath` | `clients.output_json_path` | prompt 类型专用 |
+| `Client.exitCodeSuccess` | `clients.exit_code_success` | JSON 数组（如 `[0]`），通用可选配置 |
+| `Client.binaryPath` | `clients.binary_path` | bash/python/powershell 专用 |
 | `Client.createdAtMs` | `clients.created_at_ms` | 毫秒时间戳 |
 | `Client.updatedAtMs` | `clients.updated_at_ms` | 毫秒时间戳 |
 
@@ -211,7 +221,7 @@
 
 | 状态码 | code                 | 场景                                                                                    |
 | ------ | -------------------- | --------------------------------------------------------------------------------------- |
-| 400    | `VALIDATION_ERROR`   | name 为空、type 非法、type=prompt 缺 command、type=bash/python/powershell 缺 binaryPath |
+| 400    | `VALIDATION_ERROR`   | name 为空或超 512 字符、type 非法、type=prompt 缺 command、type=bash/python/powershell 缺 binaryPath |
 | 409    | `CLIENT_NAME_EXISTS` | name 已存在（唯一约束冲突）                                                             |
 
 ---
@@ -327,7 +337,7 @@
 
 **查询参数**：无　**请求体**：无
 
-**后端实现**：本接口**直接同步调用 `Executor::execute`**——test 已具备该 `client` 的全部执行能力，**无需异步队列、也无需一个正式 OP**：按 `client.type` **自组装一个测试用最小执行描述**（结构类似 OP，仅含测试所需字段：`content`=下方最小测试内容、默认 `timeoutMs`、空 `inputs`、空 `outputs`），连同该 Client 实例组装成 `ExecuteRequest`（`run_id` 由后端生成）同步调用 `Executor::execute`，返回其 `ExecuteResult`。**不重复实现执行细节**（写 main 文件、选 run.xxx、注入上下文、启动子进程、重定向、回收出参与退出码，均由 Executor 内部完成）。
+**后端实现**：本接口**直接同步调用 `Executor::execute`**——test 已具备该 `client` 的全部执行能力，**无需异步队列、也无需一个正式 OP**：按 `client.type` **自组装一个测试用最小执行描述**（结构类似 OP，仅含测试所需字段：`content`=下方最小测试内容、默认 `timeoutSeconds`、空 `inputs`、空 `outputs`），连同该 Client 实例组装成 `ExecuteRequest`（`run_id` 由后端生成）同步调用 `Executor::execute`，返回其 `ExecuteResult`。**不重复实现执行细节**（写 main 文件、选 run.xxx、注入上下文、启动子进程、重定向、回收出参与退出码，均由 Executor 内部完成）。
 
 测试用例最小化（仅用于验证 Executor 流程跑通）：
 
@@ -416,7 +426,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command 等） |
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command、**name 超 512 字符**等） |
 | 409 | `CLIENT_NAME_EXISTS` | 同名 Client 已存在（导入冲突） |
 
 **YAML 字段规范（Client 导入 / 导出共用的字段全集，以 3.1「Client 对象」为准）**：
@@ -427,7 +437,8 @@
 | type | 是 | `prompt` / `bash` / `python` / `powershell` |
 | description | 否 | 描述 |
 | command | 条件 | prompt 类型专用：可执行命令 |
-| argsTemplate / inputMode / outputMode / outputJsonPath | 否 | prompt 类型专用（输出解析配置见 5.4/5.5）；脚本类恒为空 |
+| argsTemplate | 否 | prompt 类型专用：**参数模板字符串**（按 inputMode 使用占位符：arg=`{{prompt}}` / file=`{{prompt-file}}` / stdin=无；DB 直接存字符串，见 schema.sql `clients.args_template`）；脚本类恒为空 |
+| inputMode / outputMode / outputJsonPath | 否 | prompt 类型专用（输出解析配置见 5.4/5.5）；脚本类恒为空 |
 | exitCodeSuccess | 否 | 视为成功的退出码集合，如 `[0]` |
 | binaryPath | 条件 | bash / python / powershell 类型专用：可执行文件路径 |
 
@@ -465,11 +476,11 @@ impl Executor {
 /// 执行请求结构体 (最小原子执行: 只描述"执行什么、用什么执行、本次入参、在哪里执行、执行实例标识", 不包含步骤/编排概念)
 pub struct ExecuteRequest {
     pub run_id:         String,                 // 所属运行 = job_runs.run_id（纯 jobRunId, 用于 DB 外键/关联）
-    pub step_id:        String,                 // 步骤标识: workflow 步骤 = workflow_node.node_id; 单次 OP / Job = run_id
+    pub step_id:        String,                 // 步骤标识: workflow 步骤 = workflow_node.workflow_node_id; 单次 OP / Job = run_id
     pub activation_seq: u32,                    // 第几次激活（循环回跳重入 +1）; 单次 OP / Job = 1
     pub retry_seq:      u32,                    // activation 内第几次尝试（apply_retry +1）; 首次 = 1
     pub client:    Client,                  // Client 实例 (或其执行所需配置快照): 依 type 选 run.xxx, 依 command/binaryPath/argsTemplate/inputMode 组装命令, 依 outputMode/outputJsonPath 解析出参
-    pub op:        Op,                      // 操作定义: content / timeoutMs / inputs / outputs
+    pub op:        Op,                      // 操作定义: content / timeoutSeconds / inputs / outputs
     pub inputs:    HashMap<String, String>, // 本次运行入参 (已校验 required、应用 default)
     pub workspace: PathBuf,                 // 工作区绝对路径
 }
@@ -547,12 +558,12 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq
   │     - 创建独立进程组 (process_group=0 / setsid): 子进程成为新进程组 leader
   │       → 该组包含 run.xxx 及其派生的 main.xxx / 外部 CLI 整棵进程树
   │
-  ├─ 7. 超时控制 (op.timeoutMs): **计时起点 = 子进程实际启动（spawn）**；`waiting → running` 置位仅表示已指派、仍属准备期（Worker 从队列取出、组装 ExecuteRequest、spawn 子进程），**spawn 前的准备期与等待池空闲的排队时长（step_records=waiting）均不计入** timeoutMs。超时则按进程组查杀整棵进程树, timedOut=true
+  ├─ 7. 超时控制 (op.timeoutSeconds): **计时起点 = 子进程实际启动（spawn）**；`waiting → running` 置位仅表示已指派、仍属准备期（Worker 从队列取出、组装 ExecuteRequest、spawn 子进程），**spawn 前的准备期与等待池空闲的排队时长（step_records=waiting）均不计入** timeoutSeconds。超时则按进程组查杀整棵进程树, timedOut=true
   │
   ├─ 8. 子进程结束后, 主进程回收结果:
   │     - 脚本类: 读子进程 stdout → 取以 "OUTPUT_ARGS:" 开头的行, 反 base64 → outputs (见 5.4)
   │     - prompt 类: 由主函数读 stdout_file (CLI 输出) + outputs_file (AI 写出参 JSON),
-  │       按 outputMode/jsonPath 统一解析出参 (见 5.5)
+  │       按 outputMode/jsonPath 统一解析出参——优先级判定（outputs 权威 / jsonPath 失败回退 stdout 原文 / outputs 缺失全空）见 5.5「prompt 类出参解析优先级」
   │     - 读 stdout_file → rawOutput (main 原始输出)
   │     - 读 stderr_file → error
   │     - 读 rc_file    → 用户/CLI 退出码, 结合 exitCodeSuccess 判定 status
@@ -868,7 +879,7 @@ Remove-Item $innerPath -Force -ErrorAction SilentlyContinue
 >
 > 1. **入参**：按 `K:V` 格式换行写出，每行一组——`key1: value1`、`key2: value2`……（值由主线程从本次运行入参填入）。
 > 2. **出参定义**：逐行列出**出参名与说明（description）**——`name: description`，来自 OP.outputs。**描述必须带上**——只给名字时 AI 无法理解该出参的含义，也就无法正确产出。
-> 3. **输出要求**：处理完成后，把出参值组装成一个 JSON 对象（字段名=出参名，值=结果），**保存到文件 `W_AI_AUTO_OP_OUTPUTS_FILE`**（= `<根>/.ai_auto_result-<executionId>/outputs.json`，见 5.1 结果目录约定），并把该 JSON **原样打印到 stdout**。
+> 3. **输出要求**：处理完成后，把出参值组装成一个 JSON 对象（字段名=出参名，值=结果），**保存到文件 `W_AI_AUTO_OP_OUTPUTS_FILE`**（= `<根>/.ai_auto_result-<executionId>/outputs.json`，见 5.1 结果目录约定），并把该 JSON **原样打印到 stdout**。**若 AI 未写出该文件（outputs 缺失）→ 视为无出参值，所有出参值置空字符串 `""`**（解析优先级见 5.5「prompt 类出参解析优先级」）。
 > 4. **main file 指引**：告知 AI 依据以上入参与出参要求，执行/参考 main file（给出路径）。
 >
 > **两个 main file（区分原始输入与组装产物）**：prompt 类在组装前后存在两个"main 文件"概念，不要混淆——
@@ -888,6 +899,17 @@ Remove-Item $innerPath -Force -ErrorAction SilentlyContinue
 | text | 不结构化，outputs 为空 |
 | json | 解析 CLI 输出为 JSON，按 `outputJsonPath` 提取出参节点 |
 | jsonl | 逐行解析（每行一个 JSON 对象） |
+
+**prompt 类出参解析优先级（`outputs_file` 与 stdout 解析并存时的判定；Executor 主函数在脚本退出后统一执行）**：
+
+解析输入：`stdout_file`（CLI 原始输出）、`outputs_file`（AI 写出的出参结果 JSON，可选，键=出参名；见下方 final prompt 组装指令）。判定规则：
+
+1. **先解析 stdout**：`rawOutput` = `stdout_file` 全文（展示用）；按 `outputMode` + `outputJsonPath` 从 stdout 定位结果节点（`text`=整段文本；`json`/`jsonl` 按 jsonPath 提取）。
+   - **jsonPath 提取失败**（stdout 非合法 JSON / 路径不存在）→ **将 stdout 原始值作为该出参的值**（兜底：jsonPath 提取不到时，出参直接取 stdout 原文）。
+2. **再通过 outputs 解析出参（优先级高于步骤 1 的结果）**：`outputs_file` **存在** → 按出参名逐项从该 JSON 取值作为**最终出参值**（键=出参名）；某出参名在 JSON 中缺失 → 该出参值回退取步骤 1 的 stdout 解析结果（jsonPath 失败则为其兜底值 stdout 原文；无结果 → 空字符串）。
+3. **outputs 缺失（`outputs_file` 不存在）** → **认为没有出参值，所有出参值置空字符串 `""`**（此时 stdout 解析结果仅保留为 `rawOutput` 展示，不作为出参值）。
+
+> 一句话口径：**`outputs_file` 存在 → 以它为出参权威（缺失键回退 stdout 解析值，jsonPath 失败回退 stdout 原文）；`outputs_file` 缺失 → 无出参值，全部为空字符串。**
 
 **argsTemplate 占位符约定（prompt 类，按 inputMode 区分）**：
 
@@ -1052,7 +1074,7 @@ exit 0
 
 `run.xxx` 为 Executor 运行时自带模板，**不属于导出内容**。导出的是可重建执行所需的**定义**：
 
-- OP 定义：`content`、`timeoutMs`、`version`。
+- OP 定义：`content`、`timeoutSeconds`、`version`。
 - 入参定义：`inputs`（name/type/required/default/description）。
 - 出参定义：`outputs`（name/type/description）。
 - Client 关联：目标 `type`（prompt/bash/python/powershell）及所需配置（`command`/`binaryPath`、`argsTemplate`、`inputMode`、`outputMode`、`outputJsonPath`、`exitCodeSuccess`）。

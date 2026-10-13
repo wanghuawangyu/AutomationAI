@@ -4,7 +4,7 @@
 -- 字符集: UTF-8
 -- 说明:
 --   主键统一命名为业务属性 id (如 client_id / op_id / workflow_id / job_id /
---     run_id / event_id / node_id / record_id), 值均为 32 位无连字符
+--     run_id / event_id / workflow_node_id / record_id), 值均为 32 位无连字符
 --     UUID; 子表 (nodes/step_records) 主键亦为 UUID, 由应用层 INSERT 时生成
 --     (不使用 AUTOINCREMENT); edges 随 Workflow 整体存于 workflows.edges JSON 字段
 --  配置 (settings) 不再落库: 存于运行目录下 ai-automation.json (见 crud-06 〇);
@@ -19,13 +19,13 @@ PRAGMA journal_mode = WAL;
 -- ============================================================
 CREATE TABLE IF NOT EXISTS clients (
     client_id       TEXT PRIMARY KEY,                    -- 32 位 UUID
-    name            TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL UNIQUE,                 -- 全局唯一; 边界: 长度 ≤ 512 字符, 字符集不限(任意 UTF-8 字符)
     description     TEXT,
     type            TEXT NOT NULL CHECK (type IN ('prompt','bash','python','powershell')),
 
     -- prompt 类型专用; bash/python/powershell 仅用 binary_path
     command         TEXT,
-    args_template   TEXT,                                -- JSON 数组, 如 ["--prompt","{{prompt}}","--workspace","{{workspace}}"]
+    args_template   TEXT,                                -- 参数模板字符串（prompt 类型；按 input_mode 使用占位符: arg={{prompt}} / file={{prompt-file}} / stdin=无，可选）, 如 '--print --output-format json --model sonnet'
     input_mode      TEXT CHECK (input_mode IN ('arg','stdin','file')),
     output_mode     TEXT CHECK (output_mode IN ('text','json','jsonl')),
     output_json_path TEXT,
@@ -45,11 +45,11 @@ CREATE INDEX IF NOT EXISTS idx_clients_type ON clients(type);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ops (
     op_id           TEXT PRIMARY KEY,                    -- 32 位 UUID, 界面不感知
-    name            TEXT NOT NULL UNIQUE,                -- 全局唯一, 界面展示
+    name            TEXT NOT NULL UNIQUE,                 -- 全局唯一, 界面展示; 边界: 长度 ≤ 512 字符, 字符集不限(任意 UTF-8 字符)
     type            TEXT NOT NULL CHECK (type IN ('prompt','bash','python','powershell')),
     description     TEXT,
     content         TEXT NOT NULL,                       -- OP 正文 (脚本/prompt 内容)
-    timeout_ms      INTEGER NOT NULL DEFAULT 60000,      -- 超时毫秒, 只属于 OP
+    timeout_seconds  INTEGER NOT NULL DEFAULT 60,         -- 超时秒数, 只属于 OP
     interactive     INTEGER NOT NULL DEFAULT 0,          -- 占位, 默认 false
     version         INTEGER NOT NULL DEFAULT 1,
 
@@ -71,12 +71,12 @@ CREATE INDEX IF NOT EXISTS idx_ops_name ON ops(name);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflows (
     workflow_id     TEXT PRIMARY KEY,                    -- 32 位 UUID
-    name            TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL UNIQUE,                 -- 全局唯一; 边界: 长度 ≤ 512 字符, 字符集不限(任意 UTF-8 字符)
     description     TEXT,
     version         INTEGER NOT NULL DEFAULT 1,
 
     -- inputs:  WorkflowInput[]  JSON
-    -- outputs: WorkflowOutput[] JSON (含 from.nodeId / from.outputName)
+    -- outputs: WorkflowOutput[] JSON (含 from.workflowNodeId / from.outputName)
     inputs          TEXT NOT NULL DEFAULT '[]',
     outputs         TEXT NOT NULL DEFAULT '[]',
     -- edges: WorkflowEdge[] JSON ({from,to,condition}), 随 workflow 整体读写
@@ -90,11 +90,11 @@ CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows(name);
 
 -- ============================================================
 -- 4. workflow_nodes —— Workflow 节点 (1:N)
---    主键 node_id 为 32 位 UUID (全局唯一, 应用层生成); label 为画布展示名
+--    主键 workflow_node_id 为 32 位 UUID (全局唯一, 应用层生成); label 为画布展示名
 --    position: 创建 API 必填 (缺失 400), 导入 API 可空 (后端默认排布并持久化)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_nodes (
-    node_id         TEXT PRIMARY KEY,                    -- 32 位 UUID, 全局唯一 (原自增 id 已移除)
+    workflow_node_id         TEXT PRIMARY KEY,                    -- 32 位 UUID, 全局唯一 (原自增 id 已移除)
     label           TEXT NOT NULL,                       -- 画布展示名 (node_start 等, 前端生成, 非唯一标识)
     workflow_id     TEXT NOT NULL,                       -- 所属 workflow (workflows.workflow_id)
     kind            TEXT NOT NULL CHECK (kind IN ('start','op','end')),
@@ -122,7 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_wf_nodes_wf ON workflow_nodes(workflow_id);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS jobs (
     job_id          TEXT PRIMARY KEY,                    -- 32 位 UUID
-    name            TEXT NOT NULL UNIQUE,
+    name            TEXT NOT NULL UNIQUE,                 -- 全局唯一; 边界: 长度 ≤ 512 字符, 字符集不限(任意 UTF-8 字符)
     description     TEXT,
     kind            TEXT NOT NULL DEFAULT 'persistent' CHECK (kind IN ('persistent','virtual')),
     version         INTEGER NOT NULL DEFAULT 1,
@@ -197,6 +197,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON job_runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_job ON job_runs(job_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON job_runs(started_at_ms);
 CREATE INDEX IF NOT EXISTS idx_runs_triggered ON job_runs(triggered_by);
+CREATE INDEX IF NOT EXISTS idx_runs_updated ON job_runs(updated_at_ms);  -- 状态最后更新时间（3.5.3 status 轮询 / 按更新时间排序与时间过滤）
 
 -- ============================================================
 -- 7. step_records —— 步骤执行记录 (StepRecord) / WorkerPool 任务排队表
@@ -215,7 +216,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_triggered ON job_runs(triggered_by);
 CREATE TABLE IF NOT EXISTS step_records (
     record_id       TEXT PRIMARY KEY,                    -- 32 位 UUID (原自增 id 已移除)
     run_id          TEXT NOT NULL,                       -- 所属运行 (job_runs.run_id)
-    step_id         TEXT NOT NULL,                       -- 等于 workflow_node.node_id; 单次 OP/Job 执行时为 run_id
+    step_id         TEXT NOT NULL,                       -- 等于 workflow_node.workflow_node_id; 单次 OP/Job 执行时为 run_id
     activation_seq  INTEGER NOT NULL DEFAULT 1,          -- 该 step 的第几次激活(activation): 首次=1, 循环回跳重入 +1 (重试不递增)
     retry_seq       INTEGER NOT NULL DEFAULT 1,          -- 同一 activation 内的第几次尝试(含首次): 首次=1, 每次 apply_retry +1
     op_id           TEXT NOT NULL,
@@ -279,7 +280,7 @@ CREATE TABLE IF NOT EXISTS engine_events (
     event_type      TEXT NOT NULL CHECK (event_type IN
                     ('engine_start','dispatch_step','step_completed','apply_retry','walk_edge','workflow_done','terminate')),
 
-    step_id         TEXT,                                -- 相关节点 (workflow_node.node_id)
+    step_id         TEXT,                                -- 相关节点 (workflow_node.workflow_node_id)
     step_status     TEXT CHECK (step_status IN ('success','failed','timeout')),
 
     payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照 / EngineStart 的 inputs+workspace / Terminate 的 reason
@@ -302,12 +303,12 @@ CREATE INDEX IF NOT EXISTS idx_evts_created   ON engine_events(created_at_ms);
 --      (2) 运维/诊断: 直接 SQL 观察某 run 的边状态。
 --    可选存当前 activation 的边状态（pending/activated/dropped）;
 --    engine_events 仍为唯一事实来源。数据生命周期同 engine_events。
---    edges 无独立 id，edge_key = "<from_node_id>|<to_node_id>|<condition>"。
+--    edges 无独立 id，edge_key = "<from_workflow_node_id>|<to_workflow_node_id>|<condition>"。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS run_edge_state (
     run_id        TEXT NOT NULL,                        -- job_runs.run_id
-    edge_key      TEXT NOT NULL,                        -- <from_node_id>|<to_node_id>|<condition>
-    from_node_id  TEXT NOT NULL,                        -- 源节点 (便于按节点批量更新其出边)
+    edge_key      TEXT NOT NULL,                        -- <from_workflow_node_id>|<to_workflow_node_id>|<condition>
+    from_workflow_node_id  TEXT NOT NULL,                        -- 源节点 (便于按节点批量更新其出边)
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','activated','dropped')),
     updated_at_ms TEXT NOT NULL,
@@ -317,7 +318,7 @@ CREATE TABLE IF NOT EXISTS run_edge_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_run_edge_state_run  ON run_edge_state(run_id);
-CREATE INDEX IF NOT EXISTS idx_run_edge_state_from ON run_edge_state(run_id, from_node_id);
+CREATE INDEX IF NOT EXISTS idx_run_edge_state_from ON run_edge_state(run_id, from_workflow_node_id);
 
 -- ============================================================
 -- 10. run_node_state —— Engine 运行态“节点就绪”可选 checkpoint 表 (见 crud-03 4.3.3)
@@ -328,7 +329,7 @@ CREATE INDEX IF NOT EXISTS idx_run_edge_state_from ON run_edge_state(run_id, fro
 -- ============================================================
 CREATE TABLE IF NOT EXISTS run_node_state (
     run_id            TEXT NOT NULL,                    -- job_runs.run_id
-    node_id           TEXT NOT NULL,                    -- workflow_nodes.node_id (start/op/end)
+    workflow_node_id           TEXT NOT NULL,                    -- workflow_nodes.workflow_node_id (start/op/end)
     activation_seq    INTEGER NOT NULL DEFAULT 1,       -- 当前 activation（回跳重入时 +1 并重置计数）
     pending_in_edges  INTEGER NOT NULL,                 -- 尚未决定的入边数（0 = 已全部决定）
     activated_in_edges INTEGER NOT NULL DEFAULT 0,      -- 已 activated 的入边数（>=1 且 pending=0 即就绪）
@@ -336,7 +337,7 @@ CREATE TABLE IF NOT EXISTS run_node_state (
                       CHECK (status IN ('pending','running','done','skipped')),
     updated_at_ms     TEXT NOT NULL,
 
-    PRIMARY KEY (run_id, node_id),
+    PRIMARY KEY (run_id, workflow_node_id),
     FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE
 );
 

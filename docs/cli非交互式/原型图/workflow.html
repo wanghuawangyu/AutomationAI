@@ -608,10 +608,10 @@
 
   /* ==================== Workflow 数据 ==================== */
 
-  function makeStartNode(nodeId) { return { nodeId: nodeId, label: 'node_start', kind: 'start', position: { x: 20, y: 175 } }; }
-  function makeEndNode(nodeId)   { return { nodeId: nodeId, label: 'node_end',   kind: 'end',   position: { x: 850, y: 175 } }; }
+  function makeStartNode(workflowNodeId) { return { workflowNodeId: workflowNodeId, label: 'node_start', kind: 'start', position: { x: 20, y: 175 } }; }
+  function makeEndNode(workflowNodeId)   { return { workflowNodeId: workflowNodeId, label: 'node_end',   kind: 'end',   position: { x: 850, y: 175 } }; }
 
-  /* 空 Workflow：仅 Start + End（nodeId 为 32 位 UUID，与后端一致） */
+  /* 空 Workflow：仅 Start + End（workflowNodeId 为 32 位 UUID，与后端一致） */
   function makeEmptyNodes() {
     var nodes = {};
     var sid = genNodeId(), eid = genNodeId();
@@ -626,7 +626,7 @@
     var wf = WORKFLOW_BY_NAME[wfName];
     var nodes = {};
     (wf.nodes || []).forEach(function (n) {
-      var id = n.nodeId;
+      var id = n.workflowNodeId;
       if (n.kind === 'start') {
         nodes[id] = makeStartNode(id);
         if (n.position) { nodes[id].position.x = n.position.x; nodes[id].position.y = n.position.y; }
@@ -636,7 +636,7 @@
       } else {
         // OP 节点：直接使用 API 字段（opId / opVersion / clientId / bindings 结构化对象 / retry）
         nodes[id] = {
-          nodeId: id,
+          workflowNodeId: id,
           label: n.label,
           kind: 'op',
           opId: n.opId,
@@ -669,7 +669,7 @@
     };
   });
 
-  /* 新节点 nodeId 生成：32 位 UUID（前端 mock 生成，与后端一致） */
+  /* 新节点 workflowNodeId 生成：32 位 UUID（前端 mock 生成，与后端一致） */
   function genNodeId() {
     var chars = '0123456789abcdef';
     var s = '';
@@ -865,8 +865,8 @@
 
     var nodes = {};
     (wf.nodes || []).forEach(function (n) {
-      nodes[n.nodeId] = {
-        nodeId: n.nodeId,
+      nodes[n.workflowNodeId] = {
+        workflowNodeId: n.workflowNodeId,
         kind: n.kind,
         label: n.label,
         position: { x: (n.position ? n.position.x : 0) || 0, y: (n.position ? n.position.y : 0) || 0 },
@@ -896,7 +896,7 @@
     var n = null;
     if (wf) {
       for (var i = 0; i < (wf.nodes || []).length; i++) {
-        if (wf.nodes[i].nodeId === id) { n = wf.nodes[i]; break; }
+        if (wf.nodes[i].workflowNodeId === id) { n = wf.nodes[i]; break; }
       }
     }
     if (!n) return;
@@ -918,7 +918,7 @@
     } else {
       bindKeys.forEach(function(k) {
         var b = bindings[k] || {};
-        var desc = b.kind === 'node_output' ? ('前置出参 ' + (b.nodeId || '') + '.' + (b.outputName || ''))
+        var desc = b.kind === 'node_output' ? ('前置出参 ' + (b.workflowNodeId || '') + '.' + (b.outputName || ''))
           : b.kind === 'workflow_input' ? ('Workflow 入参 ' + (b.inputName || ''))
           : ('字面量 ' + (b.value || ''));
         html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + desc + '</span></div>';
@@ -983,7 +983,7 @@
     var outputTable = document.getElementById('wfOutputTable');
 
     var inputHead = '<div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>';
-    var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from (nodeId.outputName)</span><span>description</span><span></span></div>';
+    var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from (workflowNodeId.outputName)</span><span>description</span><span></span></div>';
 
     if (isNew) {
       inputTable.innerHTML = inputHead;
@@ -1028,7 +1028,7 @@
     row.className = 'pt-row pt-out';
     row.innerHTML =
       '<input type="text" placeholder="name" />' +
-      '<input type="text" placeholder="nodeId.outputName" />' +
+      '<input type="text" placeholder="workflowNodeId.outputName" />' +
       '<input type="text" placeholder="description" />' +
       '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>';
     table.appendChild(row);
@@ -1181,7 +1181,7 @@
     });
 
     curNodes()[id] = {
-      nodeId: id,
+      workflowNodeId: id,
       label: 'node_' + (++nodeSeq),
       kind: 'op',
       opId: op.opId,
@@ -1333,7 +1333,7 @@
     html += '</select>';
     html += '</div>';
 
-    /* 参数绑定（结构化对象：{ "<paramName>": {kind, nodeId?, outputName?, inputName?, value?} }） */
+    /* 参数绑定（结构化对象：{ "<paramName>": {kind, workflowNodeId?, outputName?, inputName?, value?} }） */
     html += '<div class="panel-section">';
     html += '<label class="ps-label">参数绑定</label>';
     var bindNames = Object.keys(draft.bindings || {});
@@ -1429,7 +1429,7 @@
       var outs = def ? (def.outputs || []) : [];
       outs.forEach(function (out) {
         var val = nid + '.' + out.name;
-        var sel = (binding.kind === 'node_output' && binding.nodeId === nid && binding.outputName === out.name) ? ' selected' : '';
+        var sel = (binding.kind === 'node_output' && binding.workflowNodeId === nid && binding.outputName === out.name) ? ' selected' : '';
         html += '<option value="' + val + '"' + sel + '>' + val + '</option>';
       });
     });
@@ -1456,7 +1456,7 @@
     if (!editingDraft) return;
     var b = editingDraft.bindings[pname] || {};
     if (kind === 'node_output') {
-      editingDraft.bindings[pname] = { kind: 'node_output', nodeId: b.nodeId || '', outputName: b.outputName || '' };
+      editingDraft.bindings[pname] = { kind: 'node_output', workflowNodeId: b.workflowNodeId || '', outputName: b.outputName || '' };
     } else if (kind === 'workflow_input') {
       editingDraft.bindings[pname] = { kind: 'workflow_input', inputName: b.inputName || '' };
     } else {
@@ -1465,11 +1465,11 @@
     renderNodePanel(editingNodeId);
   }
 
-  /* 传入 "<nodeId>.<outputName>" */
+  /* 传入 "<workflowNodeId>.<outputName>" */
   function setBindingNodeOutput(pname, val) {
     if (!editingDraft) return;
     var parts = String(val || '').split('.');
-    editingDraft.bindings[pname] = { kind: 'node_output', nodeId: parts[0] || '', outputName: parts[1] || '' };
+    editingDraft.bindings[pname] = { kind: 'node_output', workflowNodeId: parts[0] || '', outputName: parts[1] || '' };
   }
 
   function setBindingInput(pname, val) {

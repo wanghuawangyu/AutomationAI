@@ -57,10 +57,10 @@
 | Client | clientId |
 | OP | opId（写入 DB 时生成，界面不感知） |
 | Workflow | workflowId |
-| WorkflowNode | nodeId |
+| WorkflowNode | workflowNodeId |
 | Job | jobId |
 | JobRun | runId |
-| StepRecord | stepId（等于对应 nodeId） |
+| StepRecord | stepId（等于对应 workflowNodeId） |
 
 ### 2.3 命名与 ID 分离
 
@@ -75,6 +75,7 @@
 - 内部引用使用各实体的业务 id（xxxId）。
 - **OP 的 name 全局唯一**。
 - **OP 的 opId 界面不感知**。
+- **name 统一边界（Client / OP / Workflow / Job 适用）**：**长度 ≤ 512 字符，字符集不限（任意 UTF-8 字符）**——输入框设置 `maxlength=512`，超出时前端提示「名称长度不能超过 512 字符」并阻止提交；后端同样校验（400 `VALIDATION_ERROR`，见各 crud 对象字段说明与导入校验）。
 
 ---
 
@@ -257,7 +258,7 @@ Client ←（执行时下拉选择）← OP ← Workflow
 |-|-|
 | CliProfile 只配置非交互式参数 | 使用 headless 参数 |
 | 强制 stdin 关闭 | 防止 CLI 进入交互等待 |
-| 超时保护 | OP 必须配置 timeout |
+| 超时保护 | OP 必须配置 timeoutSeconds |
 
 ### 7.5 交互性传播链（保留占位，当前恒 false）
 
@@ -288,7 +289,7 @@ interface NodeRetry {
 
 ### 7.7 超时模型
 
-> **超时只属于 OP。任何引用该 OP 的执行，单次执行超时 = OP.timeout。**
+> **超时只属于 OP。任何引用该 OP 的执行，单次执行超时 = OP.timeoutSeconds（秒）。**
 
 | 层级 | 是否有 timeout |
 |-|-|
@@ -351,11 +352,9 @@ interface CliProfile {
   command?: string;
   argsTemplate?: string;                  // 参数模板字符串；占位符按输入方式区分: arg={{prompt}}(提示词文本) / file={{prompt-file}}(提示词文件路径) / stdin=无占位符
   inputMode?: "arg" | "stdin" | "file";   // 内容源统一来自 OP.content
-  outputParser?: {
-    mode: "text" | "json" | "jsonl";
-    jsonPath?: string;
-  };
-  exitCodeMap?: { success: number[] };
+  outputMode?: "text" | "json" | "jsonl"; // 输出解析方式（扁平字段，与 crud-01 3.1 对象一致）
+  outputJsonPath?: string;                // 输出解析 JSON 路径（outputMode=json 时生效）
+  exitCodeSuccess?: number[];             // 判定成功退出的码集合（如 [0]；JSON 数组语义，与 crud-01 一致）
 
   // bash / python / powershell 类型专用
   binaryPath?: string;
@@ -572,7 +571,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 4. OP 的 **name 全局唯一**。
 5. OpInput / OpOutput 的 **type 只支持 string**。
 6. OP 有 **版本概念**，默认 v1。
-7. **OP 是唯一有 timeout 字段的层级。**
+7. **OP 是唯一有 timeoutSeconds 字段的层级。**
 
 ### 9.2 数据结构
 
@@ -586,7 +585,7 @@ interface OpDefinition {
   inputs: OpInput[];
   outputs: OpOutput[];
   interactive: boolean;   // 字段占位，默认 false，界面不暴露
-  timeout?: number;
+  timeoutSeconds?: number; // 超时秒数（只属于 OP，默认 60，字段名与 crud-02 3.2 一致）
   version: number;
   createdAtMs: bigint;
   updatedAtMs: bigint;
@@ -833,14 +832,14 @@ interface WorkflowInput {
 
 interface WorkflowOutput {
   name: string;
-  from: { nodeId: string; outputName: string };
+  from: { workflowNodeId: string; outputName: string };
   description?: string;
 }
 
 type WorkflowNodeKind = "start" | "op" | "end";
 
 interface WorkflowNode {
-  nodeId: string;                   // 32 位 UUID，系统生成，Workflow 内唯一
+  workflowNodeId: string;                   // 32 位 UUID，系统生成，Workflow 内唯一
   label: string;                    // 画布展示名（如 node_start / node_check），前端生成，非唯一标识
   kind: WorkflowNodeKind;           // 节点类型
 
@@ -858,7 +857,7 @@ interface WorkflowNode {
 }
 
 type ParamBinding =
-  | { kind: "node_output"; nodeId: string; outputName: string }   // 取上游节点出参
+  | { kind: "node_output"; workflowNodeId: string; outputName: string }   // 取上游节点出参
   | { kind: "workflow_input"; inputName: string }                // 取 Workflow 入参
   | { kind: "literal"; value: string };                          // 固定值
 
@@ -1074,7 +1073,7 @@ interface NodeRetry {
 │                                                                                          │
 │  Workflow 出参:  [＋ 添加]                                                                │
 │  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ name          from (nodeId.outputName)            description                       │  │
+│  │ name          from (workflowNodeId.outputName)            description                       │  │
 │  │ deploy_url    node_deploy.url                    部署后的 URL                       │  │
 │  └────────────────────────────────────────────────────────────────────────────────────┘  │
 ├──────────────────┬───────────────────────────────────────────┬───────────────────────────┤
@@ -1210,10 +1209,10 @@ interface NodeRetry {
 
 | 字段 | 说明 |
 |-|-|
-| 节点 ID | nodeId（32 位 UUID，内部使用，界面不直接展示；参数绑定中以 `nodeId.outputName` 形式引用） |
+| 节点 ID | workflowNodeId（32 位 UUID，内部使用，界面不直接展示；参数绑定中以 `workflowNodeId.outputName` 形式引用） |
 | OP | 引用的 OP 名称（界面展示用），含超时时间，只读 |
 | Client | 下拉列表选择 |
-| 参数绑定 | 每个入参的绑定来源，**可编辑**（前置节点出参下拉选 `nodeId.outputName`、Workflow 入参下拉选、字面量输入框） |
+| 参数绑定 | 每个入参的绑定来源，**可编辑**（前置节点出参下拉选 `workflowNodeId.outputName`、Workflow 入参下拉选、字面量输入框） |
 | 重试策略 | on / max / backoff / interval |
 | ⚠ 提示 | 若 OP 已更新，显示提示条 |
 | **底部按钮** | **[保存] [取消]** |
@@ -1529,17 +1528,17 @@ Cron 触发 → 检查并发策略 → 检查交互性 → 创建 Job Run → �
 | Workflow | ZIP |
 | Job | ZIP |
 
-**Job 导出 ZIP 结构**：
+**Job 导出 ZIP 结构**（Job 为单一目标的封装，按 `target.kind` 二选一，见 crud-04 3.4.9）：
 
 ```text
-job-manual_deploy-v2.zip
+job-manual_deploy-v2.zip        # target.kind=workflow 形态
 ├── manifest.json
 ├── job.yaml
-├── workflows/
-│   └── deploy_workflow.yaml
-└── ops/
+├── workflow.yaml               # 关联 Workflow 定义（= crud-03 3.3.8 同格式）
+└── ops/                        # workflow 节点引用的 OP 定义（= crud-02 3.2.7 同格式）
     ├── check_tests.yaml
     └── ...
+# target.kind=op 形态：workflow.yaml + ops/ 替换为单个 op.yaml（= crud-02 3.2.7 同格式）
 ```
 
 **交互流程**：
@@ -1633,7 +1632,6 @@ interface StepRecord {
   error?: string;
   timeoutMs?: number;
   timedOut?: boolean;
-  processRecord?: ProcessRecord;
   startedAtMs: bigint;
   finishedAtMs?: bigint;
   durationMs?: number;     // 耗时（毫秒）
@@ -1754,7 +1752,7 @@ interface StepRecord {
 
 **布局**：执行信息 + 入参/出参（本次执行值）+ 画布（只读执行状态）。**无 OP 库，无右侧节点详情面板。**
 
-> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录快照中的 `target.workflowId`（**嵌套于 `run.target`，无顶层 `workflowId` 字段**，见 §12.3 JobRun 结构）调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 nodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
+> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录快照中的 `target.workflowId`（**嵌套于 `run.target`，无顶层 `workflowId` 字段**，见 §12.3 JobRun 结构）调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 workflowNodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -2142,9 +2140,9 @@ Job.needsUpdate（target 为 Workflow）=
 
 ### 14.1 核心原则
 
-> **超时只属于 OP。任何引用该 OP 的执行，单次执行超时 = OP.timeout。**
+> **超时只属于 OP。任何引用该 OP 的执行，单次执行超时 = OP.timeoutSeconds（秒）。**
 
-| 层级 | 是否有 timeout 字段 |
+| 层级 | 是否有 timeoutSeconds 字段 |
 |-|-|
 | OP | ✅ |
 | Client | ❌ |
@@ -2221,7 +2219,7 @@ Workflow deploy_workflow
 
 | 字段 | 说明 |
 |-|-|
-| max | 每轮重试次数（来自 NodeRetry） |
+| max | 每轮重试次数（来自 NodeRetry）；**节点未配置 retry 时取 1**（无重试配置即按单次执行计，与 crud-03 4.3.0 ① 口径一致） |
 | max_loop_multiplier | 执行总次数绝对上限（settings 可配，见 crud-06；`0`=不限制，否则与 max×3 取较小值） |
 | 执行上限 | min(max × 3, max_loop_multiplier) |
 
@@ -2480,7 +2478,7 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | PUT | `/api/ops/{opId}` | 更新 OP |
 | DELETE | `/api/ops/{opId}` | 删除 OP |
 | POST | `/api/ops/{opId}/execute` | 单次执行 OP |
-| POST | `/api/ops/{opId}/export` | 导出 OP 为 YAML（指定目标目录） |
+| POST | `/api/ops/{opId}/export` | 导出 OP 为 YAML（返回 `{yaml}` 内容，前端落盘） |
 | POST | `/api/ops/import` | 从 YAML 导入 OP |
 
 ### 16.3 Workflow 相关

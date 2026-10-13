@@ -27,7 +27,7 @@
   "type": "prompt",
   "description": "运行测试并报告结果",
   "content": "在当前工作区运行测试...",
-  "timeoutMs": 300000,
+  "timeoutSeconds": 300,
   "interactive": false,
   "version": 2,
   "inputs": [{"name":"cmd","type":"string","required":true,"default":null,"description":"测试命令"}],
@@ -47,11 +47,11 @@
 | 字段 | 类型 | 说明 |
 |-|-|-|
 | opId | string(32 位 UUID) | 系统生成，界面不感知 |
-| name | string | 全局唯一，界面展示 |
+| name | string | 全局唯一，界面展示；**边界：长度 ≤ 512 字符，字符集不限（任意 UTF-8 字符）** |
 | type | enum | `prompt` / `bash` / `python` / `powershell` |
 | description | string \| null | 描述 |
 | content | string | OP 正文（脚本 / prompt 内容） |
-| timeoutMs | integer | 超时毫秒，只属于 OP，默认 60000 |
+| timeoutSeconds | integer | 超时秒数，只属于 OP，默认 60 |
 | interactive | boolean | 占位，恒为 false，界面不暴露 |
 | version | integer | 版本号，默认 1 |
 | inputs | OpInput[] | 入参定义：`[{name, type:"string", required, default, description}]` |
@@ -69,11 +69,20 @@
 > - 列表分页 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
 
-**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case）：
+**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` §2 ops 全列对齐）：
 
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
 | `Op.opId` | `ops.op_id` | 主键，32 位 UUID |
+| `Op.name` | `ops.name` | 全局唯一；长度 ≤ 512 字符，任意 UTF-8 字符 |
+| `Op.type` | `ops.type` | prompt/bash/python/powershell |
+| `Op.description` | `ops.description` | 可空 |
+| `Op.content` | `ops.content` | OP 正文（脚本/prompt 内容） |
+| `Op.timeoutSeconds` | `ops.timeout_seconds` | 超时秒数，只属于 OP，默认 60 |
+| `Op.interactive` | `ops.interactive` | 占位字段，默认 false，界面不暴露 |
+| `Op.version` | `ops.version` | 版本号，默认 1 |
+| `Op.inputs` | `ops.inputs` | 入参定义，JSON 数组 |
+| `Op.outputs` | `ops.outputs` | 出参定义，JSON 数组 |
 | `Op.createdAtMs` | `ops.created_at_ms` | 毫秒时间戳 |
 | `Op.updatedAtMs` | `ops.updated_at_ms` | 毫秒时间戳 |
 
@@ -140,7 +149,7 @@
   "type": "prompt",
   "description": "运行测试并报告结果",
   "content": "在当前工作区运行测试...",
-  "timeoutMs": 300000,
+  "timeoutSeconds": 300,
   "inputs": [{"name":"cmd","type":"string","required":true,"default":null,"description":"测试命令"}],
   "outputs": [{"name":"passed","type":"string","description":"是否通过"}]
 }
@@ -152,7 +161,7 @@
 | type | enum | 是 | prompt/bash/python/powershell |
 | content | string | 是 | OP 正文 |
 | description | string \| null | 否 | 描述 |
-| timeoutMs | integer | 否 | 默认 60000 |
+| timeoutSeconds | integer | 否 | 默认 60（秒） |
 | inputs | OpInput[] | 否 | 默认 `[]` |
 | outputs | OpOutput[] | 否 | 默认 `[]` |
 
@@ -162,7 +171,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | name/content 为空、type 非法、inputs/outputs 结构非法 |
+| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、content 为空、type 非法、inputs/outputs 结构非法 |
 | 409 | `OP_NAME_EXISTS` | name 已存在 |
 
 ---
@@ -185,7 +194,7 @@
     "type": "prompt",
     "description": "运行测试并报告结果",
     "content": "修改后的正文...",
-    "timeoutMs": 300000,
+    "timeoutSeconds": 300,
     "inputs": [{"name":"cmd","type":"string","required":true,"default":null,"description":"测试命令"}],
     "outputs": [{"name":"passed","type":"string","description":"是否通过"}]
   }
@@ -249,7 +258,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| clientId | string(32 位 UUID) | 是 | 执行所用 Client（按 OP 类型过滤） |
+| clientId | string(32 位 UUID) | 是 | 执行所用 Client；**须与 OP.type 匹配**（如 bash 类 OP 须由 bash 类 Client 执行；prompt 类 OP 须由 prompt 类 Client 执行）；不匹配 → 400 `CLIENT_TYPE_MISMATCH` |
 | inputs | object | 否 | 入参名值对，name 须匹配 OP.inputs |
 | workspace | string | 是 | 工作区路径 |
 
@@ -266,6 +275,7 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | clientId/workspace 缺失、inputs 含未定义参数、id 非法 |
+| 400 | `CLIENT_TYPE_MISMATCH` | **client.type 与 op.type 不匹配**（bash/python/powershell/prompt 须同类对应；如 bash 类 OP 指定了 prompt 类 Client） |
 | 404 | `OP_NOT_FOUND` / `CLIENT_NOT_FOUND` | OP 或 Client 不存在 |
 | 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
 
@@ -291,13 +301,53 @@
 
 **默认文件名（前端预填，允许用户自定义）**：`op-<name>-v<version>.yaml`（name 为 OP 名称、version 为当前版本号；如 `op-check_tests-v2.yaml`）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
 
+**OP YAML 格式规范（导出 / 导入共用，字段以 3.2「OP 对象」为准）**：
+
+| YAML 字段 | 类型 | 必填 | 说明 |
+|-|-|-|-|
+| name | string | 是 | 全局唯一 |
+| type | enum | 是 | `prompt` / `bash` / `python` / `powershell` |
+| description | string | 否 | 描述 |
+| content | string | 是 | OP 正文（脚本 / prompt 内容）；多行文本以 YAML 块标量（`\|`）表示 |
+| timeoutSeconds | integer | 否 | 超时秒数，缺省 60 |
+| interactive | boolean | 否 | 占位，恒为 false |
+| version | integer | 是 | 当前版本号（导出时快照；导入时沿用） |
+| inputs | list | 否 | 入参定义 `[{name, type:"string", required, default, description}]` |
+| outputs | list | 否 | 出参定义 `[{name, type:"string", description}]` |
+
+> **不入 YAML**：`opId` / `createdAtMs` / `updatedAtMs`——导入时由后端重新生成 / 创建（`opId` 由名称锚重映射，见 3.2.8 / crud-03 3.3.9）。`content` 多行时导出为块标量（`\|`），导入解析后还原为 `OP.content`。
+
+**完整样例**：
+
+```yaml
+name: check_tests
+type: bash
+description: 运行测试并报告结果
+version: 2
+timeoutSeconds: 300
+interactive: false
+content: |
+  echo "running tests"
+  pytest --quiet
+inputs:
+  - name: cmd
+    type: string
+    required: true
+    default: null
+    description: 测试命令
+outputs:
+  - name: passed
+    type: string
+    description: 是否通过
+```
+
 **错误响应**：404 `OP_NOT_FOUND`。
 
 ---
 
 ### 3.2.8 POST /api/ops/import —— 从 YAML 导入 OP
 
-**功能说明**：从 YAML 文本解析并创建 OP，用于 OP 从外部迁移导入；若同名 OP 已存在返回 409（导入冲突）。
+**功能说明**：从 YAML 文本解析并创建 OP，用于 OP 从外部迁移导入；若同名 OP 已存在返回 409（导入冲突）。YAML 字段按 3.2.7「OP YAML 格式规范」解析——`type` / `content` 缺失或 `inputs` / `outputs` 结构非法 → 400 `VALIDATION_ERROR`；导入的 OP `version` **沿用包内值**（保真还原，`needsUpdate` 快照比对基准）。
 
 **路径参数**：无　**查询参数**：无
 
@@ -317,7 +367,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法 |
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（**name 超 512 字符**等） |
 | 409 | `OP_NAME_EXISTS` | 同名 OP 已存在（导入冲突） |
 
 ---
@@ -331,7 +381,7 @@ POST /api/ops/{opId}/execute {clientId, inputs, workspace}
   │
   ├─ 1. 按 clientId 查询 Client 实例
   │     - 不存在 → 404 CLIENT_NOT_FOUND
-  │     - Client.type 与 OP.type 不匹配 → 400 VALIDATION_ERROR
+  │     - Client.type 与 OP.type 不匹配 → 400 CLIENT_TYPE_MISMATCH (见 3.2.6 错误表)
   ├─ 2. 解析 OP 入参: 校验 required, 缺省项应用 default → 最终入参集
   ├─ 3. 组装 OpRunRequest (结构见 crud-05 4.6 Task Runner):
   │     run_id    = 后端生成的 runId (单次 OP 场景, virtual JobRun)

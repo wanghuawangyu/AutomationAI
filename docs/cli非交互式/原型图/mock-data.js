@@ -271,42 +271,42 @@ var WORKFLOWS = [
     description: '部署工作流',
     inputs: [{ name: 'target_env', type: 'string', required: true, description: '目标环境' }],
     outputs: [
-      { name: 'deploy_url', from: { nodeId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', outputName: 'url' }, description: '部署后的访问地址' },
-      { name: 'status', from: { nodeId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', outputName: 'approved' }, description: '最终状态' }
+      { name: 'deploy_url', from: { workflowNodeId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', outputName: 'url' }, description: '部署后的访问地址' },
+      { name: 'status', from: { workflowNodeId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', outputName: 'approved' }, description: '最终状态' }
     ],
     nodes: [
-      { nodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8f9', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      { workflowNodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8f9', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
       {
-        nodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', label: 'node_check', kind: 'op', position: { x: 180, y: 50 },
+        workflowNodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', label: 'node_check', kind: 'op', position: { x: 180, y: 50 },
         opId: '10000000000000000000000000000001', opVersion: 2, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         bindings: { test_cmd: { kind: 'literal', value: 'pytest' } },
         retry: null
       },
       {
-        nodeId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', label: 'node_review', kind: 'op', position: { x: 360, y: 50 },
+        workflowNodeId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', label: 'node_review', kind: 'op', position: { x: 360, y: 50 },
         opId: '10000000000000000000000000000002', opVersion: 2, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
-        bindings: { test_result: { kind: 'node_output', nodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', outputName: 'passed' } },
+        bindings: { test_result: { kind: 'node_output', workflowNodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', outputName: 'passed' } },
         retry: { on: 'failure', max: 3, backoff: 'exponential', interval: 1000 }
       },
       {
-        nodeId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', label: 'node_deploy', kind: 'op', position: { x: 540, y: 50 },
+        workflowNodeId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', label: 'node_deploy', kind: 'op', position: { x: 540, y: 50 },
         opId: '10000000000000000000000000000003', opVersion: 2, clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
         bindings: { target_env: { kind: 'workflow_input', inputName: 'target_env' } },
         retry: { on: 'failure', max: 2, backoff: 'linear', interval: 2000 }
       },
       {
-        nodeId: '5f60718293a4b5c6d7e8f9a1b2c3d4e5', label: 'node_notify', kind: 'op', position: { x: 720, y: 50 },
+        workflowNodeId: '5f60718293a4b5c6d7e8f9a1b2c3d4e5', label: 'node_notify', kind: 'op', position: { x: 720, y: 50 },
         opId: '10000000000000000000000000000004', opVersion: 1, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         bindings: { message: { kind: 'literal', value: '部署成功' } },
         retry: null
       },
       {
-        nodeId: '60718293a4b5c6d7e8f9a1b2c3d4e5f6', label: 'node_notify_fail', kind: 'op', position: { x: 360, y: 230 },
+        workflowNodeId: '60718293a4b5c6d7e8f9a1b2c3d4e5f6', label: 'node_notify_fail', kind: 'op', position: { x: 360, y: 230 },
         opId: '10000000000000000000000000000005', opVersion: 1, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
-        bindings: { error: { kind: 'node_output', nodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', outputName: 'result' } },
+        bindings: { error: { kind: 'node_output', workflowNodeId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', outputName: 'result' } },
         retry: null
       },
-      { nodeId: '2c3d4e5f60718293a4b5c6d7e8f9a1b2', label: 'node_end', kind: 'end', position: { x: 940, y: 155 } }
+      { workflowNodeId: '2c3d4e5f60718293a4b5c6d7e8f9a1b2', label: 'node_end', kind: 'end', position: { x: 940, y: 155 } }
     ],
     edges: [
       { from: '0a1b2c3d4e5f60718293a4b5c6d7e8f9', to: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', condition: 'on_success' },
@@ -327,22 +327,22 @@ var WORKFLOWS = [
     description: '日志分析工作流',
     needsUpdate: true,
     inputs: [{ name: 'log_source', type: 'string', required: true, description: '日志来源' }],
-    outputs: [{ name: 'report', from: { nodeId: '93a4b5c6d7e8f9a1b2c3d4e5f6071829', outputName: 'count' }, description: '分析报告' }],
+    outputs: [{ name: 'report', from: { workflowNodeId: '93a4b5c6d7e8f9a1b2c3d4e5f6071829', outputName: 'count' }, description: '分析报告' }],
     nodes: [
-      { nodeId: '718293a4b5c6d7e8f9a1b2c3d4e5f607', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      { workflowNodeId: '718293a4b5c6d7e8f9a1b2c3d4e5f607', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
       {
-        nodeId: '8293a4b5c6d7e8f9a1b2c3d4e5f60718', label: 'node_collect', kind: 'op', position: { x: 180, y: 50 },
+        workflowNodeId: '8293a4b5c6d7e8f9a1b2c3d4e5f60718', label: 'node_collect', kind: 'op', position: { x: 180, y: 50 },
         opId: '10000000000000000000000000000009', opVersion: 1, clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
         bindings: { endpoint: { kind: 'workflow_input', inputName: 'log_source' } },
         retry: null
       },
       {
-        nodeId: '93a4b5c6d7e8f9a1b2c3d4e5f6071829', label: 'node_process', kind: 'op', position: { x: 360, y: 50 },
+        workflowNodeId: '93a4b5c6d7e8f9a1b2c3d4e5f6071829', label: 'node_process', kind: 'op', position: { x: 360, y: 50 },
         opId: '10000000000000000000000000000007', opVersion: 3, clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
-        bindings: { source: { kind: 'node_output', nodeId: '8293a4b5c6d7e8f9a1b2c3d4e5f60718', outputName: 'metrics' } },
+        bindings: { source: { kind: 'node_output', workflowNodeId: '8293a4b5c6d7e8f9a1b2c3d4e5f60718', outputName: 'metrics' } },
         retry: null
       },
-      { nodeId: 'a4b5c6d7e8f9a1b2c3d4e5f60718293a', label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
+      { workflowNodeId: 'a4b5c6d7e8f9a1b2c3d4e5f60718293a', label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
     ],
     edges: [
       { from: '718293a4b5c6d7e8f9a1b2c3d4e5f607', to: '8293a4b5c6d7e8f9a1b2c3d4e5f60718', condition: 'always' },
@@ -358,22 +358,22 @@ var WORKFLOWS = [
     version: 3,
     description: '代码审查工作流',
     inputs: [{ name: 'repo', type: 'string', required: true, description: '仓库地址' }],
-    outputs: [{ name: 'result', from: { nodeId: 'd7e8f9a1b2c3d4e5f60718293a4b5c6d', outputName: 'approved' }, description: '审查结果' }],
+    outputs: [{ name: 'result', from: { workflowNodeId: 'd7e8f9a1b2c3d4e5f60718293a4b5c6d', outputName: 'approved' }, description: '审查结果' }],
     nodes: [
-      { nodeId: 'b5c6d7e8f9a1b2c3d4e5f60718293a4b', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      { workflowNodeId: 'b5c6d7e8f9a1b2c3d4e5f60718293a4b', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
       {
-        nodeId: 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', label: 'node_lint', kind: 'op', position: { x: 180, y: 50 },
+        workflowNodeId: 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', label: 'node_lint', kind: 'op', position: { x: 180, y: 50 },
         opId: '1000000000000000000000000000000a', opVersion: 2, clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
         bindings: { target: { kind: 'workflow_input', inputName: 'repo' } },
         retry: null
       },
       {
-        nodeId: 'd7e8f9a1b2c3d4e5f60718293a4b5c6d', label: 'node_review', kind: 'op', position: { x: 360, y: 50 },
+        workflowNodeId: 'd7e8f9a1b2c3d4e5f60718293a4b5c6d', label: 'node_review', kind: 'op', position: { x: 360, y: 50 },
         opId: '10000000000000000000000000000002', opVersion: 2, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
-        bindings: { test_result: { kind: 'node_output', nodeId: 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', outputName: 'issues' } },
+        bindings: { test_result: { kind: 'node_output', workflowNodeId: 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', outputName: 'issues' } },
         retry: null
       },
-      { nodeId: 'e8f9a1b2c3d4e5f60718293a4b5c6d7e', label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
+      { workflowNodeId: 'e8f9a1b2c3d4e5f60718293a4b5c6d7e', label: 'node_end', kind: 'end', position: { x: 540, y: 155 } }
     ],
     edges: [
       { from: 'b5c6d7e8f9a1b2c3d4e5f60718293a4b', to: 'c6d7e8f9a1b2c3d4e5f60718293a4b5c', condition: 'always' },
@@ -389,16 +389,16 @@ var WORKFLOWS = [
     version: 1,
     description: '每小时健康检查',
     inputs: [{ name: 'endpoint', type: 'string', required: true, description: '检查地址' }],
-    outputs: [{ name: 'healthy', from: { nodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', outputName: 'healthy' }, description: '是否健康' }],
+    outputs: [{ name: 'healthy', from: { workflowNodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', outputName: 'healthy' }, description: '是否健康' }],
     nodes: [
-      { nodeId: 'f9a1b2c3d4e5f60718293a4b5c6d7e8f', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
+      { workflowNodeId: 'f9a1b2c3d4e5f60718293a4b5c6d7e8f', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
       {
-        nodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', label: 'node_health', kind: 'op', position: { x: 180, y: 155 },
+        workflowNodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', label: 'node_health', kind: 'op', position: { x: 180, y: 155 },
         opId: '10000000000000000000000000000008', opVersion: 1, clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
         bindings: { endpoint: { kind: 'workflow_input', inputName: 'endpoint' } },
         retry: null
       },
-      { nodeId: '1a2b3c4d5e6f708192a3b4c5d6e7f809', label: 'node_end', kind: 'end', position: { x: 380, y: 155 } }
+      { workflowNodeId: '1a2b3c4d5e6f708192a3b4c5d6e7f809', label: 'node_end', kind: 'end', position: { x: 380, y: 155 } }
     ],
     edges: [
       { from: 'f9a1b2c3d4e5f60718293a4b5c6d7e8f', to: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', condition: 'on_success' },
@@ -1133,8 +1133,8 @@ function mockFetch(path, options) {
           workflowId: __uid32(), name: iwfName, version: 1, description: '导入的 Workflow',
           inputs: [], outputs: [],
           nodes: [
-            { nodeId: iwfSid, label: 'node_start', kind: 'start', position: { x: 40, y: 175 } },
-            { nodeId: iwfEid, label: 'node_end', kind: 'end', position: { x: 620, y: 175 } }
+            { workflowNodeId: iwfSid, label: 'node_start', kind: 'start', position: { x: 40, y: 175 } },
+            { workflowNodeId: iwfEid, label: 'node_end', kind: 'end', position: { x: 620, y: 175 } }
           ],
           edges: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
         };
@@ -1182,7 +1182,7 @@ function mockFetch(path, options) {
           if (cl.description) cy += 'description: ' + cl.description + '\n';
           if (cl.type === 'prompt') {
             if (cl.command) cy += 'command: ' + cl.command + '\n';
-            if (cl.argsTemplate) cy += 'argsTemplate: ' + JSON.stringify(cl.argsTemplate) + '\n';
+            if (cl.argsTemplate) cy += 'argsTemplate: ' + cl.argsTemplate + '\n';   // 参数模板为字符串（DB 直接存字符串）
             if (cl.inputMode) cy += 'inputMode: ' + cl.inputMode + '\n';
           } else if (cl.binaryPath) {
             cy += 'binaryPath: ' + cl.binaryPath + '\n';
@@ -1246,7 +1246,7 @@ function mockFetch(path, options) {
           if (wf) (wf.nodes || []).forEach(function (n) {
             if (n.kind !== 'op') return;
             var def = OP_BY_ID[n.opId];
-            if (!def || n.opVersion !== def.version) outs.push(n.nodeId);
+            if (!def || n.opVersion !== def.version) outs.push(n.workflowNodeId);
           });
           return resolve({ needsUpdate: outs.length > 0, outdatedNodes: outs });
         }

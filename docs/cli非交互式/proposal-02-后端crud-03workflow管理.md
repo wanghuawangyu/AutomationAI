@@ -20,7 +20,7 @@
 | POST | `/api/workflows/{workflowId}/export` | — | `{zip: base64}` | 返回 ZIP 内容 |
 | POST | `/api/workflows/import` | `{zip: base64}` | Workflow | 导入 |
 | GET | `/api/workflows/{workflowId}/needs-update` | — | `{needsUpdate:bool, outdatedNodes:[...]}` | 动态计算 |
-| GET | `/api/workflows/{workflowId}/outdated-nodes` | — | `[nodeId,...]` | 节点 opVersion != OP 当前 version |
+| GET | `/api/workflows/{workflowId}/outdated-nodes` | — | `[workflowNodeId,...]` | 节点 opVersion != OP 当前 version |
 
 **Workflow 对象**：
 ```json
@@ -30,11 +30,11 @@
   "description": "部署流水线",
   "version": 2,
   "inputs": [{"name":"env","type":"string","required":true,"default":"prod","description":"环境"}],
-  "outputs": [{"name":"status","from":{"nodeId":"4e5f60718293a4b5c6d7e8f9a1b2c3d4","outputName":"result"},"description":"部署结果"}],
+  "outputs": [{"name":"status","from":{"workflowNodeId":"4e5f60718293a4b5c6d7e8f9a1b2c3d4","outputName":"result"},"description":"部署结果"}],
   "nodes": [
-    {"nodeId":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","label":"node_start","kind":"start","position":{"x":40,"y":200}},
-    {"nodeId":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","label":"node_check","kind":"op","opId":"...","opVersion":2,"clientId":"...","bindings":{},"retry":{"on":"failure","max":2,"backoff":"constant","interval":30000},"position":{"x":320,"y":180}},
-    {"nodeId":"2c3d4e5f60718293a4b5c6d7e8f9a1b2","label":"node_end","kind":"end","position":{"x":620,"y":200}}
+    {"workflowNodeId":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","label":"node_start","kind":"start","position":{"x":40,"y":200}},
+    {"workflowNodeId":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","label":"node_check","kind":"op","opId":"...","opVersion":2,"clientId":"...","bindings":{},"retry":{"on":"failure","max":2,"backoff":"constant","interval":30000},"position":{"x":320,"y":180}},
+    {"workflowNodeId":"2c3d4e5f60718293a4b5c6d7e8f9a1b2","label":"node_end","kind":"end","position":{"x":620,"y":200}}
   ],
   "edges": [
     {"from":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","to":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","condition":"on_success"},
@@ -50,12 +50,12 @@
 | 字段 | 类型 | 说明 |
 |-|-|-|
 | workflowId | string(32 位 UUID) | 系统生成 |
-| name | string | 全局唯一 |
+| name | string | 全局唯一；**边界：长度 ≤ 512 字符，字符集不限（任意 UTF-8 字符）** |
 | description | string \| null | 描述 |
 | version | integer | 版本号，默认 1 |
 | inputs | WorkflowInput[] | 入参：`[{name, type:"string", required, default, description}]` |
-| outputs | WorkflowOutput[] | 出参：`[{name, from:{nodeId, outputName}, description}]` |
-| nodes | WorkflowNode[] | 节点：`{nodeId, label, kind(start/op/end), position, opId, opVersion, clientId, bindings, retry}` |
+| outputs | WorkflowOutput[] | 出参：`[{name, from:{workflowNodeId, outputName}, description}]` |
+| nodes | WorkflowNode[] | 节点：`{workflowNodeId, label, kind(start/op/end), position, opId, opVersion, clientId, bindings, retry}` |
 | edges | WorkflowEdge[] | 边：`{from, to, condition(on_success/on_failure/always)}`；存储于 `workflows.edges` JSON 字段，随 Workflow 整体读写 |
 | createdAtMs | string | 创建时间 |
 | updatedAtMs | string | 更新时间 |
@@ -64,7 +64,8 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| nodeId | string(32 位 UUID) | 是 | 系统生成，Workflow 内唯一。**nodeId 与 opId 是"OP 定义 ↔ OP 实例"的关系：opId 标识 OP 模板，nodeId 标识该 OP 在画布上的一次使用实例；同一 OP 可被多个节点引用（多对一），故不能用 opId 代替 nodeId** |`r`n| label | string | 是 | 画布展示名（如 node_start / node_deploy），由前端生成，仅用于展示与定位，不是唯一标识 |
+| workflowNodeId | string(32 位 UUID) | 是 | 系统生成，Workflow 内唯一。**workflowNodeId 与 opId 是"OP 定义 ↔ OP 实例"的关系：opId 标识 OP 模板，workflowNodeId 标识该 OP 在画布上的一次使用实例；同一 OP 可被多个节点引用（多对一），故不能用 opId 代替 workflowNodeId** |
+| label | string | 是 | 画布展示名（如 node_start / node_deploy），由前端生成，仅用于展示与定位，不是唯一标识 |
 | kind | enum | 是 | `start` / `op` / `end` |
 | position | object \| null | 否 | 画布坐标 `{x, y}`。**创建 API 必填**（前端画布布局后传入，缺失报 400）；**导入 API 可空**（manifest 无坐标时后端生成默认排布并持久化）；更新时随节点整体提交 |
 | opId | string(32 位 UUID) | op 时必填 | 绑定的 OP |
@@ -77,7 +78,7 @@
 
 | kind | 附加字段 | 说明 |
 |-|-|-|
-| `node_output` | `nodeId`, `outputName` | 取上游节点出参 |
+| `node_output` | `workflowNodeId`, `outputName` | 取上游节点出参 |
 | `workflow_input` | `inputName` | 取 Workflow 入参 |
 | `literal` | `value` | 固定值 |
 
@@ -94,8 +95,8 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| from | string | 是 | 起始节点 nodeId |
-| to | string | 是 | 目标节点 nodeId |
+| from | string | 是 | 起始节点 workflowNodeId |
+| to | string | 是 | 目标节点 workflowNodeId |
 | condition | enum | 是 | `on_success` / `on_failure` / `always` |
 
 > 说明：`edges` **不作为单独表存储**，而是随 Workflow 整体存于 `workflows.edges` JSON 字段（无独立主键/`edge_id`）。边由 `from` / `to` / `condition` 唯一定位，API 层不暴露边 ID；Workflow 的 `edges` 数组本身即完整边列表，无需单独引用某条边。
@@ -106,6 +107,7 @@
 - **允许环路**：回跳边形成的环由 Engine 在运行时以计数终止（循环回跳上限 min(max × 3, max_loop_multiplier)，见 4.3.0），拓扑校验不拒绝环。
 - **Start 出边约束**：Start 无失败语义，不允许 `on_failure` 出边（恒 `on_success` / `always`；Start 仅 🟢 单出边锚点）。
 - 每个 op 节点必须绑定 opId + opVersion。
+- **op 节点绑定 `clientId` 时，Client 类型须与节点 OP 类型匹配**（bash/python/powershell/prompt 须同类对应；不匹配 → 400 `CLIENT_TYPE_MISMATCH`，与 crud-02 3.2.6 同一校验口径）；`clientId` 为空则运行前由调用方指定（执行时同样校验）。
 - bindings 引用的前置节点出参必须存在。
 
 ---
@@ -123,7 +125,7 @@
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
 | `Workflow.workflowId` | `workflows.workflow_id` | 主键，32 位 UUID |
-| `WorkflowNode.nodeId` | `workflow_nodes.node_id` | 主键，全局唯一 UUID |
+| `WorkflowNode.workflowNodeId` | `workflow_nodes.workflow_node_id` | 主键，全局唯一 UUID |
 | `WorkflowNode.position.{x,y}` | `workflow_nodes.position_x / position_y` | 画布坐标 |
 | `Workflow.createdAtMs` | `workflows.created_at_ms` | 毫秒时间戳 |
 | `Workflow.updatedAtMs` | `workflows.updated_at_ms` | 毫秒时间戳 |
@@ -208,11 +210,11 @@
   "name": "deploy_workflow",
   "description": "部署流水线",
   "inputs": [{"name":"env","type":"string","required":true,"default":"prod","description":"环境"}],
-  "outputs": [{"name":"status","from":{"nodeId":"4e5f60718293a4b5c6d7e8f9a1b2c3d4","outputName":"result"},"description":"部署结果"}],
+  "outputs": [{"name":"status","from":{"workflowNodeId":"4e5f60718293a4b5c6d7e8f9a1b2c3d4","outputName":"result"},"description":"部署结果"}],
   "nodes": [
-    {"nodeId":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","label":"node_start","kind":"start","position":{"x":40,"y":200}},
-    {"nodeId":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","label":"node_check","kind":"op","opId":"...","opVersion":2,"clientId":"...","bindings":{},"retry":null,"position":{"x":320,"y":180}},
-    {"nodeId":"2c3d4e5f60718293a4b5c6d7e8f9a1b2","label":"node_end","kind":"end","position":{"x":620,"y":200}}
+    {"workflowNodeId":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","label":"node_start","kind":"start","position":{"x":40,"y":200}},
+    {"workflowNodeId":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","label":"node_check","kind":"op","opId":"...","opVersion":2,"clientId":"...","bindings":{},"retry":null,"position":{"x":320,"y":180}},
+    {"workflowNodeId":"2c3d4e5f60718293a4b5c6d7e8f9a1b2","label":"node_end","kind":"end","position":{"x":620,"y":200}}
   ],
   "edges": [
     {"from":"0a1b2c3d4e5f60718293a4b5c6d7e8f9","to":"1b2c3d4e5f60718293a4b5c6d7e8f9a1","condition":"on_success"},
@@ -227,7 +229,8 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | name 为空、position 缺失、拓扑非法、节点字段约束不满足 |
+| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、position 缺失、拓扑非法、节点字段约束不满足 |
+| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定的 `clientId` 类型与节点 OP 类型不匹配**（见 3.3 校验规则；同一校验口径见 crud-02 3.2.6） |
 | 409 | `WORKFLOW_NAME_EXISTS` | name 已存在 |
 
 ---
@@ -249,6 +252,7 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | 请求体字段非法、拓扑非法 |
+| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定的 `clientId` 类型与节点 OP 类型不匹配**（同一校验口径见 3.3.3） |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NAME_EXISTS` | name 与其他 Workflow 冲突 |
 
@@ -332,6 +336,7 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | workspace 缺失、inputs 含未定义参数 |
+| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定 `clientId`（或节点未绑定、按 Engine 运行前指派）的 Client 类型与节点 OP 类型不匹配**（Client 可被编辑更换类型，故运行时仍须校验；同一校验口径见 3.3.3） |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NEEDS_UPDATE` | needsUpdate=true，需更新后才能执行 |
 | 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
@@ -360,17 +365,17 @@
 
 > ZIP 结构：`manifest.json` + `workflow.yaml` + `ops/*.yaml`。
 
-**`workflow.yaml`（导出格式；与 3.4.9 Job 包内 `workflows/*.yaml` 同一格式）**：
+**`workflow.yaml`（导出格式；与 3.4.9 Job 包内 `workflow.yaml` 同一格式）**：
 
 ```yaml
 name: deploy_workflow
 version: 1
 description: 部署流水线
 inputs:  [{name: env, type: string, required: true, default: prod, description: 环境}]
-outputs: [{name: status, from: {nodeId: n2, outputName: result}, description: 部署结果}]
+outputs: [{name: status, from: {workflowNodeId: n2, outputName: result}, description: 部署结果}]
 nodes:
-  - {nodeId: n1, label: node_start, kind: start, position: {x: 40, y: 200}}
-  - nodeId: n2
+  - {workflowNodeId: n1, label: node_start, kind: start, position: {x: 40, y: 200}}
+  - workflowNodeId: n2
     label: node_check
     kind: op
     opName: check_tests      # 以【名称】引用 OP（导入重映射锚点；导出时由 opId 反查名称）
@@ -379,13 +384,61 @@ nodes:
     bindings: {}
     retry: {on: failure, max: 2, backoff: constant, interval: 30000}
     position: {x: 320, y: 180}
-  - {nodeId: n3, label: node_end, kind: end, position: {x: 620, y: 200}}
+  - {workflowNodeId: n3, label: node_end, kind: end, position: {x: 620, y: 200}}
 edges:
   - {from: n1, to: n2, condition: on_success}
   - {from: n2, to: n3, condition: on_success}
 ```
 
-> 关键差异：**依赖引用（OP / Client）在包内以名称表达**（`opName` / `clientName`），不以 uuid 表达，以便导入到新环境时按名称解析并重映射为新 uuid（见 3.3.9）。`nodeId` 为 Workflow 内部作用域标识（`outputs.from` 引用它），导出 / 导入**原样保留**。
+> 关键差异：**依赖引用（OP / Client）在包内以名称表达**（`opName` / `clientName`），不以 uuid 表达，以便导入到新环境时按名称解析并重映射为新 uuid（见 3.3.9）。`workflowNodeId` 为 Workflow 内部作用域标识（`outputs.from` 引用它），导出 / 导入**原样保留**。
+
+**完整 ZIP 目录结构**：
+
+```text
+workflow-deploy_workflow-v2.zip
+├── manifest.json
+├── workflow.yaml
+└── ops/
+    ├── check_tests.yaml
+    ├── review.yaml
+    └── deploy.yaml
+```
+
+**`manifest.json`（包描述）**：
+
+```json
+{
+  "kind": "workflow",
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "exportedAtMs": "1728000000000",
+  "workflow": { "name": "deploy_workflow", "version": 2 },
+  "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|-|-|-|
+| kind | string | 固定 `"workflow"` |
+| schemaVersion | integer | 包格式版本，当前 1 |
+| appVersion | string | 导出 APP 版本（迁移兼容判断用） |
+| exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
+| workflow | object | 包内 Workflow 的名称与版本（锚定 `workflow.yaml`） |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 为包内相对路径） |
+
+**`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；仅包含 OP 定义字段，不含 `opId` / 时间戳。
+
+**`workflow.yaml` 字段说明（对应 Workflow 对象，见 3.3）**：
+
+| YAML 字段 | 说明 |
+|-|-|
+| name / version / description | Workflow 定义（version 为导出时快照，导入沿用） |
+| inputs | 入参 `[{name, type, required, default, description}]` |
+| outputs | 出参 `[{name, from:{workflowNodeId, outputName}, description}]`（`from.workflowNodeId` 引用节点，原样保留） |
+| nodes | 节点数组：`workflowNodeId`（原样保留）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
+| edges | 边数组 `[{from, to, condition}]`（`from`/`to` 引用 workflowNodeId，原样保留） |
+
+> 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `workflow.yaml` 的 `opName` / `clientName` 重映射为新 uuid；`workflowNodeId` 与 `edges` 原样保留（Workflow 内作用域）。
 
 **错误响应**：404 `WORKFLOW_NOT_FOUND`。
 
@@ -412,7 +465,7 @@ edges:
 | Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10） |
 | 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示） |
 | 节点 `clientName` → `clientId` | **按 name 匹配 Client**：存在 → 重写为新 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**）；`clientName` 为空则不校验 |
-| `nodeId` | **原样保留**（Workflow 内作用域标识，`outputs.from` 引用它） |
+| `workflowNodeId` | **原样保留**（Workflow 内作用域标识，`outputs.from` 引用它） |
 | 原子性 | 整个导入（解析校验 → 创建/复用 OP → 创建 Workflow）在**单一事务**内完成；任一失败 → **整体回滚**，不产生半成品 |
 | 版本差异告警 | 复用的 OP 版本与包内声明不一致 → 计入响应 `warnings`（导入仍成功） |
 
@@ -420,7 +473,7 @@ edges:
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法 |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**等字段非法） |
 | 409 | `WORKFLOW_NAME_EXISTS` | 同名 Workflow 已存在（导入冲突） |
 | 409 | `CLIENT_NOT_FOUND` | 节点 `clientName` 在目标环境不存在（响应体列出缺失名称） |
 
@@ -443,7 +496,7 @@ edges:
 | 超前 | `node.opVersion > op.version`（OP 版本被回滚） | 是（版本异常，需重新绑定） |
 | 悬挂引用 | `opId` 在 `ops` 中不存在（OP 被删除） | 是（失效节点，需修复绑定） |
 
-4. **聚合规则**：`needsUpdate` = 存在任一需更新节点；`outdatedNodes` = 全部需更新节点的 nodeId，按画布拓扑顺序（start → end 方向，同级按 nodeId 稳定排序）返回，保证前端高亮顺序稳定。
+4. **聚合规则**：`needsUpdate` = 存在任一需更新节点；`outdatedNodes` = 全部需更新节点的 workflowNodeId，按画布拓扑顺序（start → end 方向，同级按 workflowNodeId 稳定排序）返回，保证前端高亮顺序稳定。
 5. **边界情况**：仅含 start / end 的骨架 Workflow 无 op 节点 → `needsUpdate=false`、`outdatedNodes=[]`。
 6. **伪代码**：
 
@@ -453,9 +506,9 @@ function evaluateWorkflowOutdated(workflow):
     for node in workflow.nodes where node.kind == 'op':
         op = ops.find(node.opId)
         if op is null:
-            outdated.push(node.nodeId)          # 悬挂引用（OP 已删除）
+            outdated.push(node.workflowNodeId)          # 悬挂引用（OP 已删除）
         elif node.opVersion != op.version:
-            outdated.push(node.nodeId)          # 落后 或 超前
+            outdated.push(node.workflowNodeId)          # 落后 或 超前
     return outdated
 
 needsUpdate   = evaluateWorkflowOutdated(workflow).length > 0
@@ -477,7 +530,7 @@ outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结
 | 响应字段 | 类型 | 说明 |
 |-|-|-|
 | needsUpdate | boolean | 是否存在需更新节点（落后 / 版本超前 / OP 悬挂引用），判定规则见上文 |
-| outdatedNodes | string[] | 落后节点的 nodeId 列表 |
+| outdatedNodes | string[] | 落后节点的 workflowNodeId 列表 |
 
 **错误响应**：404 `WORKFLOW_NOT_FOUND`。
 
@@ -485,7 +538,7 @@ outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结
 
 ### 3.3.11 GET /api/workflows/{workflowId}/outdated-nodes —— 获取需更新节点
 
-**功能说明**：返回所有需更新节点的 nodeId 列表——节点 `opVersion` 落后于 / 超前于 OP 当前 `version`，或 OP 已删除形成悬挂引用，均计入。供前端在画布上高亮提示需要更新的节点。
+**功能说明**：返回所有需更新节点的 workflowNodeId 列表——节点 `opVersion` 落后于 / 超前于 OP 当前 `version`，或 OP 已删除形成悬挂引用，均计入。供前端在画布上高亮提示需要更新的节点。
 
 **与 3.3.10 的关系**：本接口与 3.3.10 共用同一判定内核（见 3.3.10「判定逻辑」1–6 步），本接口返回 `evaluateWorkflowOutdated` 的直接结果；前端仅需节点列表时调用本接口，需同时判断布尔标记时调用 3.3.10（二者计算结果一致）。
 
@@ -544,7 +597,7 @@ POST /api/workflows/{workflowId}/execute {inputs, workspace}
 - 以**事件处理函数 `process_event`（纯函数式推进）**推进 workflow（engine_start / step_completed / walk_edge / workflow_done / terminate，见下方）
 - 加载 workflow definition；执行上下文（节点就绪判定、出参累积）由**内存 `RunContext`** 承载，DB（`engine_events` + `step_records`）为唯一事实来源、缓存可随时重建（见 4.3.0 / 4.3.3）
 - 以**边状态机**（每条边的 activated / dropped）与 **activation（执行实例）**模型决定下一批可调度节点（见 4.3.0）
-- 处理 Start → End 的汇聚（op 节点 AND-join；End 所有入边均已决定且至少一条 activated、并等在飞步骤收敛）、循环回跳（该 step 执行总次数达上限 min(max × 3, max_loop_multiplier)）、超时终止（该 OP 自身 `timeoutMs` 到期 → Executor kill 该 OP；Run 停止后续调度、不走边、不重试，**但等其它在跑 OP 自然结束**）、**未接住的失败置 Run failed（V11-B；不 kill 在跑 OP，等收敛后落 job_run failed、terminated_by=error）**、**OP 运行中不可被外部终止（终止 = 停止派发 + 取消 waiting + 等其在跑 OP 跑完）**
+- 处理 Start → End 的汇聚（op 节点 AND-join；End 所有入边均已决定且至少一条 activated、并等在飞步骤收敛）、循环回跳（该 step 执行总次数达上限 min(max × 3, max_loop_multiplier)）、超时终止（该 OP 自身 `timeoutSeconds` 到期 → Executor kill 该 OP；Run 停止后续调度、不走边、不重试，**但等其它在跑 OP 自然结束**）、**未接住的失败置 Run failed（V11-B；不 kill 在跑 OP，等收敛后落 job_run failed、terminated_by=error）**、**OP 运行中不可被外部终止（终止 = 停止派发 + 取消 waiting + 等其在跑 OP 跑完）**
 - 写入 job_run 的状态流转（终态经全局 `JobComplete` 落库）
 - **无常驻循环、无内存信号**：无常驻事件循环线程、无 Inbox / 唤醒信号——**事件写库后立即同步处理（写即处理）**；运行态为**按 run 的内存缓存**（可重建，见 4.3.3）；多 workflow 并发 = 各触发方交错调用 `process_event`，互不干扰
 
@@ -625,7 +678,7 @@ edge_state ∈ { pending, activated, dropped }
   1b. **终止 / 失败的停派发约束（Z）**：`run_terminate_requested` / `run_failed` 置位后，in-flight 完成的 `step_completed` **一律跳过 `pending_reentry` 消费与决策链 ②③（不重入、不重试、不 dispatch）**，仅做收敛判定；**并清空 `pending_reentry`（不再回跳重入，BB4）**。
   2. **终态优先级（Z3）**：`run_terminate_requested`（cancelled / timeout）**优先于** `run_failed`（failed）；两者均置时落 cancelled / timeout。
   → 因此「并行分支 A 失败且无失败出边、B 成功到 End」→ 整体 **failed**（等其余在飞跑完再落终态）；若 A 的失败被 `on_failure`/`always` 边接住，则不置 failed、按该边继续。
-  ※ **OP 是最小执行单位：运行中一律不 kill**——无论失败传播、用户终止还是超时（唯一 kill = 该 OP 自身 `timeoutMs` 到期，**自子进程实际启动（spawn）起算，排队与准备时长不计入**；Executor 内部按进程组处理）。终止 / 超时均只「停止派发 + 取消 waiting + 等在跑 OP 收敛」。
+  ※ **OP 是最小执行单位：运行中一律不 kill**——无论失败传播、用户终止还是超时（唯一 kill = 该 OP 自身 `timeoutSeconds` 到期，**自子进程实际启动（spawn）起算，排队与准备时长不计入**；Executor 内部按进程组处理）。终止 / 超时均只「停止派发 + 取消 waiting + 等在跑 OP 收敛」。
 
 **③ 回跳边（back edge）**
 
@@ -682,7 +735,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
   │           → 更新 job_run 终态 (success / failed) + duration_ms（落库），刷新界面
   │           → Runner 常驻轮询自动感知并调度下一个
   └─ terminate{run, reason}                         ← notify(Terminate) 写库后立即调用
-        → **不 kill 任何正在运行的 OP**（OP 是最小执行单位，运行中不可外部终止；唯一 kill = 该 OP 自身 `timeoutMs` 到期，由 Executor 内部处理）
+        → **不 kill 任何正在运行的 OP**（OP 是最小执行单位，运行中不可外部终止；唯一 kill = 该 OP 自身 `timeoutSeconds` 到期，由 Executor 内部处理）
         → 置 `run_terminate_requested=reason`（停调度）：**不再派发新步骤**、取消待调度节点
         → 将该 run 仍在 waiting 的步骤置 cancelled（条件更新 `UPDATE … SET status='cancelled' WHERE run_id=? AND status='waiting'`；**并对每个被置 cancelled 的 waiting 步骤递减 `inflight_count`**，AA8）
         → **清空 `RunContext.pending_reentry`**（不再回跳重入，BB4）
@@ -1075,9 +1128,9 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
 - **调度（WorkerPool 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序；**跳过 `not_before_ms` 未到点者**，即重试退避尚未到期；**并跳过所属 run 已终态的 waiting 任务**），
   查询 Worker 忙闲（busy 标志），发现空闲即**指派**（push 到该 Worker 的小队列）：**置 running 用 CAS —— `UPDATE step_records SET status='running' WHERE record_id=? AND status='waiting'`**；`affected=0` 表示已被 terminate 置 `cancelled`（或已被处理），**跳过不执行**——消除与 terminate 的竞态（P4）；
 - **执行（Worker 池）**：池大小 = **`ceil(job_queue_running_max × 1.5)`**（`worker_pool_size`，只读派生；**与 Task Runner 并发阈值 `job_queue_running_max` 是两个独立概念**，见 crud-06 一）；
-  自子进程 spawn（waiting → running 之后的实际执行起点）始计 `op.timeoutMs`（排队时长与 spawn 前准备期不计入，见 crud-01 5.1）；
+  自子进程 spawn（waiting → running 之后的实际执行起点）始计 `op.timeoutSeconds`（排队时长与 spawn 前准备期不计入，见 crud-01 5.1）；
   每个 Worker 一个**常驻执行循环 + 小队列**（WorkerPool 经小队列触发执行），**数量固定、运行期不新增**，
-  内存有上界；收任务 → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
+  内存有上界；收任务 → **执行前校验：step 绑定的 Client 类型与 OP 类型匹配（Client 可被编辑更换类型，故每次执行前校验；不匹配 → step 直接写 failed 终态，`error=CLIENT_TYPE_MISMATCH`，不启动子进程、不消耗超时）** → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
   （outputs / raw_output / exit_code / error / duration_ms）→ 按 source 同步调全局完成实现：
         ├─ source=job  → 全局 JobComplete:
         │     → 更新 job_runs 终态（落库）并供运行历史界面展示结果（run_id 取自 result）
@@ -1088,7 +1141,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
               → 立即调全局 ENGINE.process_event 同步推进（写即处理）: 标记步骤结束 → walk_edge → 派发下一节点 → 直至 End
 - **崩溃恢复（启动时）**：WorkerPool 初始化时扫描 step_records 中 **status=running** 的任务（上次中断残留），
   重新指派给空闲 Worker **重新执行**（复用 record_id，完成后覆盖终态与结果）；
-- **排队中（waiting）的 OP 可直接 cancel（D1 拍板）**：位于 `step_records` 中 status=waiting 的任务，terminate 时**直接置 `cancelled`**（不再指派执行），无需等它跑；**仅 running 的 OP 不可外部 cancel**（OP 为最小原子执行单位，唯一 kill = 其自身 `timeoutMs` 到期，见 4.4）。此规则对 **Job 与 Workflow 执行一致生效**。
+- **排队中（waiting）的 OP 可直接 cancel（D1 拍板）**：位于 `step_records` 中 status=waiting 的任务，terminate 时**直接置 `cancelled`**（不再指派执行），无需等它跑；**仅 running 的 OP 不可外部 cancel**（OP 为最小原子执行单位，唯一 kill = 其自身 `timeoutSeconds` 到期，见 4.4）。此规则对 **Job 与 Workflow 执行一致生效**。
 - **并发边界**：同时执行任务数 ≤ Worker 池大小（`ceil(job_queue_running_max × 1.5)`）；Runner 的并发配额（job_runs
   running 计数 ≤ `job_queue_running_max`）保证"Job 级并发"，WorkerPool 保证"执行体并发"，DB 排队天然有界（不占内存）。
 
@@ -1096,7 +1149,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
 
 - **池满 = 任务留在 DB 排队**：`run_job` / `run_step` **总是**写 waiting 记录并返回，**不因“无空闲 Worker”而报错**；WorkerPool 调度线程扫到 waiting 且发现空闲 Worker 时才指派（`waiting → running` CAS）。重启后 waiting 任务继续调度、running 任务重跑，**不丢任务**。
 - **为何“执行体并发”（15）> “Job 级并发”（10）（U1）**：两者是**不同维度**的限制——一个 JobRun 内可**多个 step 并行**（如并行分支），故 Worker 池按 JobRun 上界的 1.5 倍预留；否则池太小会让大量 step 长时间停在 waiting，拖慢调度。
-- **超时计时起点（D1 拍板）**：`op.timeoutMs` 自**子进程实际启动（spawn）**起算（`waiting → running` 置位仅表示已指派，spawn 前的准备期**不计入**），**排队时长不计入**——step 在 `step_records` waiting（等池空或重试退避 `not_before_ms`）期间**不会超时**（也正是“唯一 kill = 自身 timeoutMs”指的是**已开始执行**的 OP）。
+- **超时计时起点（D1 拍板）**：`op.timeoutSeconds` 自**子进程实际启动（spawn）**起算（`waiting → running` 置位仅表示已指派，spawn 前的准备期**不计入**），**排队时长不计入**——step 在 `step_records` waiting（等池空或重试退避 `not_before_ms`）期间**不会超时**（也正是“唯一 kill = 自身 timeoutSeconds”指的是**已开始执行**的 OP）。
 - **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"；**观测指标**：关注 step 在 `waiting` 状态的**停留时长**（waiting → running 的时间差）——正常应远小于 OP 自身执行时长；若普遍持续数分钟以上即触发下方运维动作。**运维提示（C7）**：若界面长期出现大量 step 停在 `waiting（排队中）`（占比高或持续数分钟），说明 Worker 池相对并行度偏小——优先**调大 `job_queue_running_max`**（池大小 = `ceil(running_max × 1.5)` 随其联动，见 crud-05 4.6 / crud-06 一）；若受机器资源限制不能调大，则**调小 `workflow_max_nodes`**（限制单 Workflow 最大节点数）以压缩排队上界；单个 Workflow 内并行分支过多也可拆分为多个顺序 Workflow 降低单 Run 并行 step 峰值。
 - **可 cancel 范围**：waiting（排队中）的 step **可直接置 cancelled**；running 的 step **不可外部 cancel**（仅等其自然结束或自身超时 kill）。
 
@@ -1198,7 +1251,7 @@ pub struct WorkerHandle {
 
 impl WorkerHandle {
     /// **不再提供外部运行时 kill**：OP 运行中不可被外部终止（避免中途强杀产生不可预期结果）。
-    /// 唯一按进程组 kill 的时机 = 该 OP 自身 `timeoutMs` 到期（**自开始执行起算，排队时长不计入**），由 Executor 内部处理。
+    /// 唯一按进程组 kill 的时机 = 该 OP 自身 `timeoutSeconds` 到期（**自开始执行起算，排队时长不计入**），由 Executor 内部处理。
     /// 外部「终止 Run」= 置终止意图 + 取消 waiting 步骤 + 等其在跑 OP 自然结束（见 Engine terminate）。
     pub fn abort(&self);
 

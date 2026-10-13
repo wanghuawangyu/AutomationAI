@@ -283,7 +283,7 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T10.7 | `POST /api/jobs/{jobId}/enable` / `/disable` | crud-04 | 返回 Job |
 | T10.8 | `GET /api/jobs/{jobId}/last-run` | crud-04 | JobRun\|null |
 | T10.9 | `GET /api/jobs/{jobId}/needs-update` | crud-04 | 动态计算 |
-| T10.10 | `POST /api/jobs/{jobId}/export` / `POST /api/jobs/import`（ZIP：manifest + job.yaml + workflows/*.yaml + ops/*.yaml；导入 version 重置为 1、依赖按名称重映射） | crud-04 3.4.9/3.4.10 | `{zip:base64}` |
+| T10.10 | `POST /api/jobs/{jobId}/export` / `POST /api/jobs/import`（ZIP：manifest + job.yaml + [workflow.yaml + ops/*.yaml ｜ op.yaml]（按 target.kind 二选一）；导入 version 重置为 1、依赖按 manifest 名称锚重映射） | crud-04 3.4.9/3.4.10 | `{zip:base64}` |
 | T10.11 | Scheduler 单例（`tokio-cron-scheduler`，时区固定 Local，`scheduler_max_jobs` 上限） | proposal-02 §1.1；crud-04 4.5 | 启动加载 cron Job |
 | T10.12 | cron 到点触发：检查 `enabled` / `needsUpdate` / 全局 waiting 上限；跳过不触发 | crud-04 4.5.2 | 触顶本轮跳过 |
 | T10.13 | `nextRunAtMs` 计算（schedule+enabled+非 needsUpdate 才有值） | crud-04 3.4 字段说明 | 列表/详情返回 |

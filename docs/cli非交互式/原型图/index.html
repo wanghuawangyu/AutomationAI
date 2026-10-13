@@ -964,26 +964,26 @@
     // 构建节点状态：从 run.steps 中匹配每个 op 节点的执行状态（steps 为扁平数组；同一 step 多条记录时取最后一条，D3）
     currentWfNodes = {};
     (wf.nodes || []).forEach(function (n) {
-      var nodeId = n.nodeId;
-      currentWfNodes[nodeId] = Object.assign({}, n);
+      var workflowNodeId = n.workflowNodeId;
+      currentWfNodes[workflowNodeId] = Object.assign({}, n);
       // 坐标直接保留 position（与编辑画布结构体一致，由 workflow-canvas.js 渲染）
 
       if (n.kind === 'start') {
-        currentWfNodes[nodeId].status = 'success';
+        currentWfNodes[workflowNodeId].status = 'success';
       } else if (n.kind === 'end') {
-        if (run.status === 'success') currentWfNodes[nodeId].status = 'success';
-        else currentWfNodes[nodeId].status = 'waiting';
+        if (run.status === 'success') currentWfNodes[workflowNodeId].status = 'success';
+        else currentWfNodes[workflowNodeId].status = 'waiting';
       } else {
-        // op 节点：stepId === nodeId（一条执行 = 一条 StepRecord）
-        var matched = lastRecordOf(run, nodeId);
+        // op 节点：stepId === workflowNodeId（一条执行 = 一条 StepRecord）
+        var matched = lastRecordOf(run, workflowNodeId);
         if (matched) {
-          currentWfNodes[nodeId].status = matched.status;
-          currentWfNodes[nodeId].exitCode = matched.exitCode;
-          currentWfNodes[nodeId].error = matched.error;
-          currentWfNodes[nodeId].inputs = matched.inputs;
-          currentWfNodes[nodeId].outputs = matched.outputs;
+          currentWfNodes[workflowNodeId].status = matched.status;
+          currentWfNodes[workflowNodeId].exitCode = matched.exitCode;
+          currentWfNodes[workflowNodeId].error = matched.error;
+          currentWfNodes[workflowNodeId].inputs = matched.inputs;
+          currentWfNodes[workflowNodeId].outputs = matched.outputs;
         } else {
-          currentWfNodes[nodeId].status = 'waiting';
+          currentWfNodes[workflowNodeId].status = 'waiting';
         }
       }
     });
