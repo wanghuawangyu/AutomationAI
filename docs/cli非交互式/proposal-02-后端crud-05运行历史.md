@@ -53,21 +53,26 @@
 {
   "recordId": "a1b2c3d4e5f67890abcdef1234567890",
   "stepId": "1b2c3d4e5f60718293a4b5c6d7e8f9a1",  // workflow_node.workflow_node_id (32 位 UUID)
+  "runId": "...",  // 引用 job_runs.run_id
   "activationSeq": 1,   // 第几次激活（首次=1；循环回跳重入 +1）
   "retrySeq": 1,   // activation 内第几次尝试（含首次；首次=1，apply_retry +1）
   "opId": "...",
   "opVersion": 2,
   "opName": "check_tests",
   "clientId": "...",
+  "source": "step",  // job=单次 OP/Job / step=workflow 步骤（完成钩子分流）
   "status": "failed",
   "inputs": {"env":"prod"},
   "bodySnapshot": "在当前工作区运行测试...",
+  "workspace": "/path/ws-003",
   "outputs": null,
   "rawOutput": "...",
   "exitCode": 1,
   "error": "test failed",
   "timeoutMs": 300000,
   "timedOut": false,
+  "notBeforeMs": null,  // 最早可执行时间（重试退避/延迟调度）
+  "createdAtMs": "...",  // 入队时间（waiting 队列按此顺序调度）
   "startedAtMs": "...",
   "finishedAtMs": "...",
   "durationMs": 5200

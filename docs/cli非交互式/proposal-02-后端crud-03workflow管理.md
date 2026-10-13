@@ -390,7 +390,7 @@ edges:
   - {from: n2, to: n3, condition: on_success}
 ```
 
-> 关键差异：**依赖引用（OP / Client）在包内以名称表达**（`opName` / `clientName`），不以 uuid 表达，以便导入到新环境时按名称解析并重映射为新 uuid（见 3.3.9）。`workflowNodeId` 为 Workflow 内部作用域标识（`outputs.from` 引用它），导出 / 导入**原样保留**。
+> 关键差异：**依赖引用（OP / Client）在包内以名称表达**（`opName` / `clientName`），不以 uuid 表达，以便导入到新环境时按名称解析并重映射为新 uuid（见 3.3.9）。`workflowNodeId` 在包内以**短别名**（`n1` / `n2` / `n3` …）表达——导出时由后端生成（按节点顺序 n1、n2…），edges / outputs.from 引用同一短别名；**导入时为每个节点重新生成 32 位 UUID**，并按短别名映射重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（不沿用导出环境的 UUID，避免跨环境主键冲突）。
 
 **完整 ZIP 目录结构**：
 
@@ -434,11 +434,11 @@ workflow-deploy_workflow-v2.zip
 |-|-|
 | name / version / description | Workflow 定义（version 为导出时快照，导入沿用） |
 | inputs | 入参 `[{name, type, required, default, description}]` |
-| outputs | 出参 `[{name, from:{workflowNodeId, outputName}, description}]`（`from.workflowNodeId` 引用节点，原样保留） |
-| nodes | 节点数组：`workflowNodeId`（原样保留）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
-| edges | 边数组 `[{from, to, condition}]`（`from`/`to` 引用 workflowNodeId，原样保留） |
+| outputs | 出参 `[{name, from:{workflowNodeId, outputName}, description}]`（`from.workflowNodeId` 引用节点短别名；导入时按节点 UUID 映射重写） |
+| nodes | 节点数组：`workflowNodeId`（短别名 n1/n2/…，导出时按节点顺序生成；导入时重新生成 UUID）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
+| edges | 边数组 `[{from, to, condition}]`（`from`/`to` 引用节点短别名；导入时按节点 UUID 映射重写） |
 
-> 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `workflow.yaml` 的 `opName` / `clientName` 重映射为新 uuid；`workflowNodeId` 与 `edges` 原样保留（Workflow 内作用域）。
+> 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `workflow.yaml` 的 `opName` / `clientName` 重映射为新 uuid；`workflowNodeId` 不沿用导出环境值——导入时为每个节点生成新的 32 位 UUID，建立 `短别名 → 新UUID` 映射，并同步重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（避免跨环境主键冲突）。
 
 **错误响应**：404 `WORKFLOW_NOT_FOUND`。
 
@@ -465,7 +465,7 @@ workflow-deploy_workflow-v2.zip
 | Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10） |
 | 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示） |
 | 节点 `clientName` → `clientId` | **按 name 匹配 Client**：存在 → 重写为新 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**）；`clientName` 为空则不校验 |
-| `workflowNodeId` | **原样保留**（Workflow 内作用域标识，`outputs.from` 引用它） |
+| `workflowNodeId` | **不沿用导出环境 UUID**：导入时为每个节点重新生成 32 位 UUID，建立 `短别名（n1/n2/…）→ 新UUID` 映射表；随后按映射同步重写 `edges.from` / `edges.to` / `outputs.from.workflowNodeId`。短别名在包内唯一即可，跨环境不保留——与 opId/clientId 导入时重新生成同口径 |
 | 原子性 | 整个导入（解析校验 → 创建/复用 OP → 创建 Workflow）在**单一事务**内完成；任一失败 → **整体回滚**，不产生半成品 |
 | 版本差异告警 | 复用的 OP 版本与包内声明不一致 → 计入响应 `warnings`（导入仍成功） |
 

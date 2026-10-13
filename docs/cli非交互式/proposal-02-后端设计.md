@@ -307,17 +307,47 @@ ai-automation version
 
 ## 十、错误处理规范
 
-| HTTP 状态码 | 场景 |
-|-|-|
-| 400 | 参数校验失败 |
-| 404 | 资源不存在 |
-| 409 | 冲突（被引用、需要更新、并发策略冲突） |
-| 500 | 内部错误 |
-
 错误响应统一格式：
 ```json
 {"error": {"code": "OP_NOT_FOUND", "message": "OP xxx not found"}}
 ```
+
+### 10.1 统一错误码总表
+
+> 全后端**错误码唯一总表**（约 26 个）。各 crud 文档内联错误表为**局部详表**（含接口级场景），本表为汇总口径——code 拼写、HTTP 状态码、语义均以本表为准；实现枚举以此表为基准对齐。
+
+| code | HTTP | 语义 | 定义位置 |
+|-|-|-|-|
+| `VALIDATION_ERROR` | 400 | 参数 / 字段校验失败（格式、缺失、枚举非法、超限等） | 全部 crud（通用） |
+| `CRON_INVALID` | 400 | cron 表达式非法 | crud-04 3.4.3/3.4.4 |
+| `CLIENT_TYPE_MISMATCH` | 400 | Client 类型与 OP 类型不匹配（bash/python/powershell/prompt 须同类对应） | crud-02 3.2.6（口径基准）；crud-03 3.3/3.3.3/3.3.4/3.3.7/4.4；crud-04 3.4.3/3.4.4/3.4.6/4.5 |
+| `OP_NOT_FOUND` | 404 | OP 不存在 | crud-02 |
+| `CLIENT_NOT_FOUND` | 404 | Client 不存在（导入/引用时按名称匹配不到） | crud-01/02/03/04 |
+| `WORKFLOW_NOT_FOUND` | 404 | Workflow 不存在 | crud-03 |
+| `JOB_NOT_FOUND` | 404 | Job 不存在 | crud-04 |
+| `RUN_NOT_FOUND` | 404 | 运行记录不存在 | crud-05 |
+| `STEP_NOT_FOUND` | 404 | 步骤记录不存在 | crud-05 |
+| `TARGET_NOT_FOUND` | 404 | 重跑时目标（op / workflow）已删除 | crud-04/05 |
+| `CLIENT_NAME_EXISTS` | 409 | Client name 冲突（创建 / 更新 / 导入） | crud-01 |
+| `OP_NAME_EXISTS` | 409 | OP name 冲突（创建 / 更新 / 导入） | crud-02 |
+| `WORKFLOW_NAME_EXISTS` | 409 | Workflow name 冲突（创建 / 更新 / 导入） | crud-03 |
+| `JOB_NAME_EXISTS` | 409 | Job name 冲突（创建 / 更新 / 导入） | crud-04 |
+| `CLIENT_REFERENCED` | 409 | Client 正被 Job 引用，删除被拒绝 | crud-01 |
+| `OP_REFERENCED` | 409 | OP 正被 Workflow 节点或 Job.target 引用，删除被拒绝 | crud-02 |
+| `WORKFLOW_REFERENCED` | 409 | Workflow 正被 Job 引用，删除被拒绝 | crud-03 |
+| `JOB_HAS_ACTIVE_RUNS` | 409 | Job 存在 waiting/running/terminating 实例，删除被拒绝（terminating 仍占在途名额） | crud-04 3.4.5 |
+| `WORKFLOW_NEEDS_UPDATE` | 409 | Workflow.needsUpdate=true，需更新后才能执行 | crud-03 3.3.7 |
+| `JOB_NEEDS_UPDATE` | 409 | Job.needsUpdate=true，需更新后才能运行 | crud-04 3.4.6 |
+| `CONCURRENCY_CONFLICT` | 409 | 并发冲突：全局 waiting 队列达 `job_queue_waiting_max` 上限（所有创建 job_runs 入口统一检查）；或并发策略 skip 且已有在途实例 | crud-02 3.2.6 / crud-03 3.3.7 / crud-04 3.4.6 / crud-05 3.5.7/3.5.8 |
+| `RUN_NOT_TERMINABLE` | 409 | target=OP 且已开始运行（OP 运行中不可终止） | crud-05 3.5.6 |
+| `RERUN_NOT_ALLOWED` | 409 | Run 未结束（waiting/running/terminating）不可重跑 | crud-05 3.5.7 |
+| `RETRY_NOT_ALLOWED` | 409 | 不满足重试前提（版本不一致 / needsUpdate / 无失败或超时 step） | crud-05 3.5.8 |
+| `WRITE_FAILED` | 500 | 配置原子写回 `ai-automation.json` 失败（内存回滚，保证一致性） | crud-06 3.4/3.5 |
+| `INTERNAL_ERROR` | 500 | 执行进程内部错误 | crud-01 3.1.6 |
+
+**说明**：
+- **内部错误不直接暴露**：Task Runner 内部 `TaskError::QueueFull` 在 API 层映射为 409 `CONCURRENCY_CONFLICT`（见 crud-05 4.6），不入错误码表。
+- 多资源不存在时（如 `OP_NOT_FOUND / WORKFLOW_NOT_FOUND / CLIENT_NOT_FOUND` 并列），按调用上下文返回**首个命中**的错误码。
 
 ---
 
