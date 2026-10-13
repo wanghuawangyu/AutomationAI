@@ -64,7 +64,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| workflowNodeId | string(32 位 UUID) | 是 | 系统生成，Workflow 内唯一。**workflowNodeId 与 opId 是"OP 定义 ↔ OP 实例"的关系：opId 标识 OP 模板，workflowNodeId 标识该 OP 在画布上的一次使用实例；同一 OP 可被多个节点引用（多对一），故不能用 opId 代替 workflowNodeId** |
+| workflowNodeId | string(32 位 UUID) | 是 | 系统生成，**全局唯一 UUID**（主键；同一 Workflow 内自然唯一）。**workflowNodeId 与 opId 是"OP 定义 ↔ OP 实例"的关系：opId 标识 OP 模板，workflowNodeId 标识该 OP 在画布上的一次使用实例；同一 OP 可被多个节点引用（多对一），故不能用 opId 代替 workflowNodeId** |
 | label | string | 是 | 画布展示名（如 node_start / node_deploy），由前端生成，仅用于展示与定位，不是唯一标识 |
 | kind | enum | 是 | `start` / `op` / `end` |
 | position | object \| null | 否 | 画布坐标 `{x, y}`。**创建 API 必填**（前端画布布局后传入，缺失报 400）；**导入 API 可空**（manifest 无坐标时后端生成默认排布并持久化）；更新时随节点整体提交 |
@@ -620,6 +620,42 @@ Engine 采用**事件驱动 + 调度事件流**：每次"节点完成 → 决定
 | `dispatch_step` | 决定调度某节点，派发给 WorkerPool（pending=false 时 payload 含 activation_seq / retry_seq / not_before_ms；pending=true 时 payload **不含四元组**，仅回跳挂起登记） | Engine（process_event 内部写，随后 worker.run_step） |
 | `workflow_done` | workflow 结束（payload 含终态 success / failed）：End 所有入边均已决定且至少一条 activated（并等在飞收敛）→ success；无可就绪/挂起且 End 未 activated → failed | Engine（process_event 内部写 + 处理 → 全局 JobComplete） |
 | `terminate` | 异常终止（timeout / user terminate = notify(Terminate) 持久化，payload 含 reason） | Engine / 外部 → notify 写库后立即 process_event |
+
+**engine_events.payload 字段级定义（统一表）**：
+
+> 通用列（非 payload）：`event_id`(PK) / `run_id` / `event_type` / `step_id`（相关节点，多数事件非空）/ `step_status`（节点结果，step_completed 类携带）/ `processed` / `created_at_ms` / `processed_at_ms` / `soft_deleted_at_ms`。下方仅列 `payload` JSON 内字段；`step_id` / `step_status` 列与 payload 内同名字段的关系见"备注"列。
+
+| event_type | payload 字段 | 类型 | 必填 | 含义 / 取值 | 备注 |
+|-|-|-|-|-|-|
+| `engine_start` | `inputs` | object | 是 | Workflow 入参名值对（= JobRun.inputs 透传） | INSERT 时写入 |
+| `engine_start` | `workspace` | string | 是 | 执行工作目录 | INSERT 时写入 |
+| `engine_start` | `workflow_id` | string | 是 | 启动的 workflow_id | INSERT 时写入 |
+| `engine_start` | `definition_snapshot` | object | 处理时补齐 | 定义快照冻结：`{nodes:[...], edges:[...], ops:{op_id:{op_version, body, ...}}}`；首次 process_event 加载当前 workflow 定义后 **UPDATE 进 payload**（同事务），重放时直接复用、不再重载校验 | 崩溃落在 INSERT 与 UPDATE 之间时，重放走首次处理路径重新加载（S1） |
+| `engine_start` | `actual_workflow_version` | integer | 处理时补齐 | 实际加载的 workflow 版本（`workflows.version`）；不静默记录 | 与 job_runs.target_version 的口径差见 S2 |
+| `step_completed` | `activation_seq` | integer | 是 | 本次完成的 activation 序号 | 与 step_records.activation_seq 对齐 |
+| `step_completed` | `retry_seq` | integer | 是 | 本次完成的 attempt 序号 | 与 step_records.retry_seq 对齐 |
+| `step_completed` | `result` | enum | 是 | `success` / `failed` / `timeout` | 与列 `step_status` 同值（列冗余便于索引查询） |
+| `step_completed` | `outputs` | object \| null | 否 | 节点出参名值对（成功时） | 源自 step_records.outputs |
+| `step_completed` | `error` | string \| null | 否 | 失败原因（failed/timeout 时） | 源自 step_records.error |
+| `step_completed` | `exit_code` | integer \| null | 否 | 子进程退出码 | 源自 step_records.exit_code |
+| `apply_retry` | `activation_seq` | integer | 是 | 同 step 的 activation（不变） | |
+| `apply_retry` | `retry_seq` | integer | 是 | 即将进入的 attempt 序号（= 当前 +1） | 其处理即写 dispatch_step |
+| `apply_retry` | `not_before_ms` | string \| null | 否 | 退避后最早可执行时间（毫秒）；无退避则 null | WorkerPool 据此延迟指派 |
+| `apply_retry` | `reason` | enum | 是 | `on_failure` / `on_timeout`（命中的 retry.on 条件） | |
+| `walk_edge` | `result` | enum | 是 | 节点结果（`success` / `failed` / `timeout`），与列 `step_status` 同值 | |
+| `walk_edge` | `edges` | array | 是 | 出边判定结果：`[{to: workflow_node_id, condition: "on_success"\|"on_failure"\|"always", state: "activated"\|"dropped"}]` | 边状态审计/重放依据 |
+| `walk_edge` | `reentry_targets` | array | 否 | 本次判定出的回跳目标节点 id 列表（已执行过的目标）；用于推导 pending_reentry | |
+| `dispatch_step` | `pending` | boolean | 是 | `false`=正常派发（含四元组，将 run_step）；`true`=回跳挂起登记（不含四元组，仅登记 pending_reentry） | |
+| `dispatch_step` | `activation_seq` | integer | pending=false 时必填 | 即将执行的 activation 序号 | |
+| `dispatch_step` | `retry_seq` | integer | pending=false 时必填 | 即将执行的 attempt 序号 | |
+| `dispatch_step` | `not_before_ms` | string \| null | 否 | 最早可执行时间（重试退避）；null=立即 | 落库为 step_records.not_before_ms |
+| `dispatch_step` | `inputs` | object | pending=false 时必填 | 解析 bindings 后组装的 OP 入参快照 | |
+| `dispatch_step` | `client_id` | string \| null | 否 | 执行 Client（节点级；空则走 Job.target.clientId 回退） | |
+| `workflow_done` | `status` | enum | 是 | `success` / `failed` | 决定 job_runs 终态；failed 时 terminated_by=error |
+| `workflow_done` | `reason` | string \| null | 否 | 失败原因简述（如 end_not_activated / run_failed / loop_limit） | 审计用 |
+| `terminate` | `reason` | enum | 是 | `user_terminate` / `timeout` / `run_failed` / `loop_limit` | 对应 job_runs.terminated_by 的语义来源 |
+
+> **payload 写即完整约定**：`engine_start` / `terminate` 由 notify 入口写库时即写入基础 payload（定义快照除外）；其余事件（step_completed / apply_retry / walk_edge / dispatch_step / workflow_done）在 process_event 调用栈内 INSERT 时 payload 即完整。任何事件处理失败保持 `processed=0`，重放时按上述字段语义幂等处理。
 
 #### 4.3.0 执行模型：activation、边状态机与 reducer（内存 RunContext）
 

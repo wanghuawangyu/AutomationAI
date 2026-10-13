@@ -462,7 +462,9 @@
 
 > Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
-**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，默认 10 阈值 → 15 个 Worker，只读派生；**一个 JobRun 可并行多个 step，故池大小需大于并发阈值**，见 crud-03 4.4 / crud-06 一）**是两个独立概念**）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：`running_count.load() < job_queue_running_max` 时扫描 DB 中 `waiting` 任务并触发运行、计数自增（`fetch_add(1)`）；达到上限则暂停调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，轮询即获得调度机会。
+**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，默认 10 阈值 → 15 个 Worker，只读派生；**一个 JobRun 可并行多个 step，故池大小需大于并发阈值**，见 crud-03 4.4 / crud-06 一）**是两个独立概念**）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：每轮轮询先 `running_count.load() < job_queue_running_max` 判断是否还有并发空位；有则执行 `SELECT run_id, target_kind FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`（**FIFO 按入队时间，每轮最多取 `runner_batch_size` 条候选**），逐条尝试调度——每条在派发前再读一次 `running_count.load() < job_queue_running_max`，仍有空位则 waiting → running 并 `running_count.fetch_add(1)`；一旦计数达到阈值即**中断本批剩余候选**（留待下轮轮询），未取完的候选不发额外信号，靠下轮 `runner_poll_interval_ms` 自然重扫。达到阈值则整轮不调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，下轮轮询即获得调度机会。
+
+> **`runner_batch_size` 与 `job_queue_running_max` 的关系（消费定义）**：`job_queue_running_max` 是**总量闸门**（running 总数上限），`runner_batch_size` 是**单轮扫描的候选上限**。二者共同决定每轮实际启动数 = `min(runner_batch_size, job_queue_running_max - running_count, 当前 waiting 总数)`。batch_size 不参与并发总量约束，只限制单轮 SELECT 的行数与循环次数，避免队列积压时一轮把全表 waiting 捞进内存逐条判断；调大只加快空队列吞吐，不突破 running 上限；调小则每轮只取更少候选，靠多轮轮询消化（默认 10，与 running_max 默认值一致，常规场景一轮即满）。
 
 > **waiting → running 的前提（D1 定稿）**：需**入队成功**（单次 OP / Job(target=op) 入 step_records waiting；Job(target=workflow) / 单次 Workflow 完成 engine_start 处理并成功写入首个 dispatch_step）后才置 running；**池满不影响入队**（无空闲 Worker 时任务就留在 step_records waiting，由调度线程稍后指派），**不存在“派发失败由上游重试”**。
 
@@ -492,7 +494,9 @@ impl TaskRunner {
     /// 查询任务状态（对应内部 JobRun 状态）
     pub fn status(run_id: &str) -> TaskStatus;
     /// 常驻轮询线程（App 启动 init() 时 start）：基于内存计数 running_count 判断并发配额
-    /// （running_count.load() < job_queue_running_max → 扫描 DB waiting → 调度 waiting → running → fetch_add(1)）→ 刷新界面状态；
+    /// （每轮：running_count.load() < job_queue_running_max →
+    ///   SELECT ... FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size →
+    ///   逐条派发 waiting → running → fetch_add(1)；计数达阈值即中断本批剩余候选）→ 刷新界面状态；
     /// 并**顺带扫描 engine_events WHERE processed=0 且 run 仍 running，按序逐个 process_event（幂等）**（运行中处理失败兜底，见 crud-03 T26）；
     /// 以及**运行中事件补齐**：扫描 running run 中“step_records 有终态但缺 step_completed 事件”的记录，补写并 process_event（见 crud-03 U13）
     pub fn start(&self);
@@ -562,9 +566,12 @@ add_op / add_job / add_workflow(req)
   │      **检查与插入在同一事务（`BEGIN IMMEDIATE`）内**（先查后插，防与 cron / 手动 / rerun / retry 并发击穿）；
   │      写入 job_runs（crud-05 立即可见）；每调用一次入口即插入一条记录
   ├─ 3. 投递后台调度线程，接口即结束，返回 {runId}
-  │     后台调度线程（按入库顺序）:
-  │       ├─ 检查并发：running_count.load() < job_queue_running_max（阈值）？否则保持 waiting 等待
-  │       ├─ ① 取出任务：**先成功入队**（单次 OP / Job(target=op) 写 step_records waiting；Job(target=workflow) / 单次 Workflow 写入首个 dispatch_step 并入队首个 OP）→ 运行历史状态 waiting → running（本线程完成）→ running_count.fetch_add(1)；**入队失败（DB 错误）即使任务重试（T26）；池满不算失败**（OP 在 step_records 排队等 Worker）
+  │     后台调度线程（每轮 runner_poll_interval_ms，按入库 FIFO）:
+  │       ├─ ① 候选批次：SELECT run_id, target_kind FROM job_runs WHERE status='waiting'
+  │       │                 ORDER BY created_at_ms ASC LIMIT runner_batch_size   // 每轮最多取 batch_size 条
+  │       ├─ 逐条遍历候选（每条派发前重读并发位）:
+  │       │     ├─ running_count.load() < job_queue_running_max？否 → **中断本批剩余候选**（留待下轮，靠 OnComplete 自减后下轮重扫）
+  │       │     └─ 是 → ② 取出任务：**先成功入队**（单次 OP / Job(target=op) 写 step_records waiting；Job(target=workflow) / 单次 Workflow 写入首个 dispatch_step 并入队首个 OP）→ 运行历史状态 waiting → running（本线程完成）→ running_count.fetch_add(1)；**入队失败（DB 错误）即使任务重试（T26）；池满不算失败**（OP 在 step_records 排队等 Worker）
   │       ├─ 按任务类型分派（Task Runner 不亲自执行 OP，直接以入口函数调用）:
   │       │     ├─ 单次 OP（add_op）:
   │       │     │     内部按 client_id/op_id 查询实例 → 组装 ExecuteRequest

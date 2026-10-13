@@ -46,7 +46,13 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 ```
 
 - 原子写：先写 `ai-automation.json.tmp`，成功后 `rename` 覆盖，避免写一半损坏。
-- **首次启动 / 缺失损坏**：启动时若 `{run}/ai-automation.json` **不存在** → 写入一份**默认配置**后加载；若**存在但解析失败**（JSON 损坏）→ **报错并拒绝启动**（或将损坏文件备份为 `.bak` 后按默认重建，由实现选择）——不静默以残缺配置运行。
+- **首次启动 / 缺失损坏**：启动时按以下顺序处理 `{run}/ai-automation.json`，**不静默以残缺配置运行**：
+  - **文件不存在** → 直接写入一份**完整默认配置**（全部可配置项取默认值，含 `config_version`）后加载，无告警。
+  - **存在但解析失败**（JSON 损坏 / 非法 JSON / 顶层结构不是 object）→ **自动恢复，不拒绝启动**：
+    1. 将损坏文件**原样重命名备份**为 `ai-automation.json.bak`（若 `.bak` 已存在则追加时间戳 `ai-automation.json.bak.YYYYMMDDHHmmss`，不覆盖历史备份）；
+    2. 按默认配置**重建**一份新的 `ai-automation.json`（原子写）并加载；
+    3. **启动时显式告警**（stderr + 应用日志 ERROR 级 + 启动 Banner 输出一次）：「检测到配置文件损坏，已备份为 `{run}/ai-automation.json.bak` 并按默认配置重建，请检查备份文件或重新配置」。**不静默**——用户必须能在启动日志里看到这一事件。
+  - **存在且可解析，但缺少部分可配置项**（例如旧版本升级后新增字段）→ **不重建、不报错**：以内存默认值补齐缺失字段，本次启动不回写；下次 `PUT /api/settings` 或配置变更时随原子写一并落盘补齐（向前兼容，见 3.4）。
 - **生效语义**：当前版本**所有可配置项均为动态（修改后无需重启）**，无纯「静态（需重启）」可配置项；唯一的重启生效场景 = `job_queue_running_max` 派生的 **Worker 池大小**在下一次启动按新值重新初始化（界面于该项注明「🔄 池大小重启后生效」）。动态项内分两档：**即时生效**（`log_level`、`job_queue_running_max` 阈值等，改动即对运行中模块生效）与**下次使用生效**（`history_max_*`、`workflow_max_nodes` / `workflow_auto_layout`、`runner_batch_size` / `runner_poll_interval_ms`、`scheduler_max_jobs` 等，改动在消费方下次读取 / 下次调度 / 下次导入时生效）。
 
 ---
@@ -76,7 +82,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | **Worker** | `worker_pool_size` | =1.5×running | 只读派生 | Worker 池大小 = `ceil(job_queue_running_max × 1.5)`，只读展示；**数值派生自同一配置，语义与 Task Runner 并发阈值不同**（阈值为 running 的 JobRun 数上限，池大小为常驻执行体数） |
 | | `worker_max_concurrency` | =pool_size | 只读派生 | = `worker_pool_size`（单 Worker 单工作线程） |
 | **Task Runner** | `runner_poll_interval_ms` | 1000 | 动态 | **后端** Task Runner 调度轮询间隔（ms；区别于前端 `poll_interval_ms`） |
-| | `runner_batch_size` | 10 | 动态 | 单轮调度批数 |
+| | `runner_batch_size` | 10 | 动态 | 单轮调度批数：每轮轮询 `SELECT ... FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`，FIFO 取候选后逐条派发；与并发阈值 `job_queue_running_max` 配合，每轮实际启动数 = `min(batch_size, running_max - running_count, waiting 总数)`；仅限制单轮扫描行数，不突破 running 总量闸门（消费逻辑见 crud-05 4.6） |
 | **Scheduler** | `scheduler_max_jobs` | 100 | 动态 | 可加载定时任务上限（时区固定 Local） |
 | **日志** | `log_level` | info | 动态 | 应用日志级别 |
 | | `log_max_files` | 10 | 动态 | 最大绕接 zip 文件数（无保留天数） |

@@ -1592,9 +1592,14 @@ interface JobRun {
   jobKind: "persistent" | "virtual";
   jobVersion?: number | null;   // Job 修订号；virtual Run（单次执行）无此值 → null
   triggeredBy: "manual" | "schedule" | "single_op" | "single_workflow" | "retry";
-  target:
-    | { kind: "op"; opId: string; opVersion: number; name: string }
-    | { kind: "workflow"; workflowId: string; workflowVersion: number; name: string };  // name = 目标名称快照（落 job_runs.target_name；区别于 JobDefinition.targetName——后者为实时 join 计算字段）
+  target: {
+    kind: "op" | "workflow";
+    opId: string | null;            // kind=op 时必填；kind=workflow 时为 null
+    opVersion: number | null;       // kind=op 时必填；kind=workflow 时为 null
+    workflowId: string | null;      // kind=workflow 时必填；kind=op 时为 null
+    workflowVersion: number | null;  // kind=workflow 时必填；kind=op 时为 null
+    name: string;                   // 目标名称快照（落 job_runs.target_name；区别于 JobDefinition.targetName——后者为实时 join 计算字段）
+  };
   inputs: Record<string, string>;
   workspace: string;
   status: RunStatus;
@@ -1617,21 +1622,28 @@ type StepStatus =
   | "waiting" | "running" | "success" | "failed" | "timeout" | "cancelled";
 
 interface StepRecord {
+  recordId: string;          // 主键，32 位 UUID（step_records.record_id）；同 step 每次执行（重试/循环重入）一条独立记录
+  runId: string;             // 所属 JobRun（step_records.run_id）；内嵌展示时冗余返回，独立查步骤接口时必带
   stepId: string;
   activationSeq: number;    // 第几次激活（首次=1；循环回跳重入 +1）
   retrySeq: number;         // activation 内第几次尝试（含首次；首次=1，apply_retry +1）
   opId: string;
   opVersion: number;
+  opName: string;           // OP 名称快照（step_records.op_name；OP 改名/删除后仍可展示）
   clientId?: string;
+  source: "job" | "step";   // 任务来源：job=单次 OP/Job（Runner 触发，完成调 job_complete）；step=workflow 步骤（Engine 触发，完成调 step_complete）
   status: StepStatus;
   inputs: Record<string, string>;
   bodySnapshot?: string;
+  workspace: string;         // 执行工作目录（step_records.workspace；ExecuteRequest.workspace 落库）
   outputs?: Record<string, string>;
   rawOutput?: string;
   exitCode?: number;
   error?: string;
   timeoutMs?: number;
   timedOut?: boolean;
+  notBeforeMs?: bigint | null;  // 最早可执行时间（毫秒）；NULL=立即可执行。用于重试退避/延迟调度
+  createdAtMs: bigint;      // 入队时间（step_records.created_at_ms；waiting 队列按此 FIFO 调度）
   startedAtMs: bigint;
   finishedAtMs?: bigint;
   durationMs?: number;     // 耗时（毫秒）
