@@ -4,9 +4,9 @@ description: 代码审查
 inputs: []
 outputs: []
 nodes:
-  - {nodeId: 04040404040404040404040404040400, label: node_start, kind: start, position: {x: 40, y: 120}}
-  - {nodeId: 04040404040404040404040404040401, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
-  - {nodeId: 04040404040404040404040404040402, label: node_end, kind: end, position: {x: 440, y: 120}}
+  - {workflowNodeId: 04040404040404040404040404040400, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: 04040404040404040404040404040401, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
+  - {workflowNodeId: 04040404040404040404040404040402, label: node_end, kind: end, position: {x: 440, y: 120}}
 edges:
   - {from: 04040404040404040404040404040400, to: 04040404040404040404040404040401, condition: on_success}
   - {from: 04040404040404040404040404040401, to: 04040404040404040404040404040402, condition: on_success}

@@ -3,7 +3,7 @@ version: 1
 type: prompt
 description: 代码审查
 content: 审查代码并给出结论
-timeoutMs: 300000
+timeoutSeconds: 300
 inputs:
   - {name: code, type: string, required: true, default: null, description: 待审查代码}
 outputs:

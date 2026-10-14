@@ -3,7 +3,7 @@ version: 1
 type: prompt
 description: 部署到生产
 content: 部署到生产环境
-timeoutMs: 120000
+timeoutSeconds: 120
 inputs:
   - {name: env, type: string, required: true, default: null, description: 环境}
 outputs:

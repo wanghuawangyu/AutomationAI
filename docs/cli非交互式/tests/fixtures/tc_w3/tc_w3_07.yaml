@@ -4,9 +4,9 @@ description: 冒烟测试
 inputs: []
 outputs: []
 nodes:
-  - {nodeId: 07070707070707070707070707070700, label: node_start, kind: start, position: {x: 40, y: 120}}
-  - {nodeId: 07070707070707070707070707070701, label: node_op, kind: op, opName: op_prompt_review, opVersion: 2, position: {x: 240, y: 120}}
-  - {nodeId: 07070707070707070707070707070702, label: node_end, kind: end, position: {x: 440, y: 120}}
+  - {workflowNodeId: 07070707070707070707070707070700, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: 07070707070707070707070707070701, label: node_op, kind: op, opName: op_prompt_review, opVersion: 2, position: {x: 240, y: 120}}
+  - {workflowNodeId: 07070707070707070707070707070702, label: node_end, kind: end, position: {x: 440, y: 120}}
 edges:
   - {from: 07070707070707070707070707070700, to: 07070707070707070707070707070701, condition: on_success}
   - {from: 07070707070707070707070707070701, to: 07070707070707070707070707070702, condition: on_success}

@@ -67,7 +67,7 @@
 | version     | integer                    | 版本号，默认 1                                                                     |
 | target      | object                     | `{kind:"op", opId, opVersion, clientId}` 或 `{kind:"workflow", workflowId, workflowVersion}`；**kind=op 时 target 内必含 `clientId`**（Client 为 OP 专有，引用 clients.client_id） |
 | targetName  | string                     | **计算字段**：target 引用的 OP / Workflow 名称（join `ops` / `workflows` 按 `target_id` 得到；`jobs.target` JSON 不含名称） |
-| workspace   | string                     | 工作区路径                                                                         |
+| workspace   | string                     | 工作区路径（**必填**；schema `jobs.workspace TEXT NOT NULL`，缺失/空 → 400 `VALIDATION_ERROR`） |
 | inputs      | object                     | 入参名值对，name 来源于 OP/Workflow 参数定义                                       |
 | trigger     | object                     | `{kind:"manual"}` 或 `{kind:"schedule", cron}`（**不含 enabled**：Job 是否启用唯一由顶层 `enabled` 控制）       |
 | concurrency | enum                       | `skip` / `queue` / `parallel`                                                      |
@@ -81,7 +81,7 @@
 ### 3.4.0 通用约定
 
 > 以下为 Job 管理全部 API 的完整 HTTP 定义。通用约定：
-> - 基础路径 `/api`；路径参数中的 `jobId` 为 32 位无连字符 UUID。
+> - 基础路径 `/api`；路径参数中的 `jobId` 为 32 位无连字符 UUID；**路径参数格式非法**（非 32 位无连字符 UUID）→ 400 `VALIDATION_ERROR`。
 > - 时间字段 JSON 中统一为 string（毫秒时间戳）。
 > - 列表分页 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
@@ -92,7 +92,8 @@
 |-|-|-|
 | `Job.jobId` | `jobs.job_id` | 主键，32 位 UUID |
 | `Job.name` | `jobs.name` | 全局唯一 |
-| `Job.kind` | `jobs.kind` | 恒为 persistent |
+| `Job.description` | `jobs.description` | 描述（可空） |
+| `Job.kind` | `jobs.kind` | 恒为 `persistent`（virtual Run 只存在于 `job_runs`） |
 | `Job.version` | `jobs.version` | 版本号 |
 | `Job.target` | `jobs.target` | JSON 字段整体存储；kind=op 时内含 `clientId`（引用 clients.client_id），Job 顶层不设 clientId |
 | `Job.workspace` | `jobs.workspace` | 工作区路径 |
@@ -140,7 +141,7 @@
 | keyword | query | string | 否 | — | 模糊匹配 name / target 名称 / description |
 | needsUpdate | query | boolean | 否 | — | 按需更新状态过滤 |
 | enabled | query | boolean | 否 | — | 按启用状态过滤 |
-| failed | query | boolean | 否 | — | **true = 最近一次 Run 为 failed / timeout / cancelled（即非 success）** |
+| failed | query | boolean | 否 | — | **true = 最近一次 Run 为 `failed` / `timeout` / `cancelled`；最近一次 Run 为非终态（waiting / running / terminating）或该 Job 无运行记录时 → 不匹配** |
 | sort | query | string | 否 | `-createdAtMs` | 排序字段：name/createdAtMs/updatedAtMs，`-` 前缀降序 |
 
 **请求体**：无
@@ -218,7 +219,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、target 非法、target=op 缺 target.clientId、trigger 缺失/非法 |
+| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、target 非法、target=op 缺 target.clientId、trigger 缺失/非法、**workspace 缺失/空** |
 | 400 | `CLIENT_TYPE_MISMATCH` | **target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（如 op 为 bash 类型却指定了 prompt 类 Client；bash/python/powershell/prompt 须同类对应，与 crud-02 3.2.6 同一校验口径） |
 | 400 | `CRON_INVALID` | cron 表达式非法（`trigger.kind=schedule` 时） |
 | 404 | `OP_NOT_FOUND` / `WORKFLOW_NOT_FOUND` / `CLIENT_NOT_FOUND` | target 引用的 OP / Workflow 不存在，或 target=op 时 target.clientId 引用的 Client 不存在 |
@@ -246,7 +247,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | 请求体字段非法 |
+| 400 | `VALIDATION_ERROR` | 请求体字段非法（含 `workspace` 缺失/空——PUT 为全量替换，与 3.4.3 同口径） |
 | 400 | `CLIENT_TYPE_MISMATCH` | **更新后 target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（同一校验口径见 3.4.3） |
 | 400 | `CRON_INVALID` | cron 表达式非法（`trigger.kind=schedule` 时） |
 | 404 | `JOB_NOT_FOUND` / `OP_NOT_FOUND` / `WORKFLOW_NOT_FOUND` / `CLIENT_NOT_FOUND` | jobId 不存在，或更新后 target 引用的 OP / Workflow / Client 不存在 |
@@ -321,7 +322,7 @@
 > **适用范围（#3，全入口生效）**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
 
 - `queue` / `parallel` **真正差别**：**Job 内串行 vs 并行**（`queue` 同 Job 多实例逐个执行、`parallel` 同 Job 多实例同时运行）；**全局 waiting 上限（`job_queue_waiting_max`）对两者及各创建入口一律生效**（全入口，见上注 #3）——它并非 queue/parallel 的区分标志。
-- **原子性**：并发检查与创建 JobRun 在**同一事务（`BEGIN IMMEDIATE`）内**执行——先 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running','terminating')` 判定，再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。
+- **原子性（#4，落点 = `TaskRunner.add_job` 内部）**：**全部并发相关校验与创建 JobRun 都在 `add_job` 内、同一事务（`BEGIN IMMEDIATE`）内**执行——依次 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running','terminating')`（`skip` 判定）、`SELECT count(*) … status='waiting'`（全局 waiting 上限，crud-04 3.4.6 #3），再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。**API / Scheduler 只做参数校验与入口分发，不自查不自插**（否则「先查后调 add_*」会使同事务保证失效）；`JobRunRequest` 仅传 `run_id / job_id / inputs / workspace`，concurrency 规则由 `add_job` 按 `job_id` 内部读取。
 - **manual Job 的 `enabled`**：`enabled` 仅对 schedule 语义有效（是否注册定时）；**manual Job 的 `enabled` 固定为 true、不参与运行判断**（disable 只停定时，不影响手动运行）。
 
 ---
@@ -374,34 +375,36 @@
 
 **默认文件名（前端预填，允许用户自定义）**：`job-<name>-v<version>.zip`（name 为 Job 名称、version 为当前版本号；如 `job-hourly_check-v1.zip`）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
 
-**包内组成（按 `target.kind` 二选一）**：
+**包内组成（按 `target.kind` 二选一；统一为 `workflows/` + `ops/` 目录形态——无根级 `workflow.yaml` / `op.yaml`）**：
 
 | target.kind | ZIP 内容 | 格式依据 |
 |-|-|-|
-| `workflow` | `manifest.json` + `job.yaml` + `workflow.yaml` + `ops/*.yaml` | `workflow.yaml` 与 crud-03 3.3.8 同格式；`ops/*.yaml` 为该 Workflow 节点引用的 OP 定义 |
-| `op` | `manifest.json` + `job.yaml` + `op.yaml` | `op.yaml` 与 crud-02 3.2.7 OP 导出 YAML 同格式 |
+| `workflow` | `manifest.json` + `job.yaml` + `workflows/<workflowName>.yaml` + `ops/<opName>.yaml` | `workflows/<workflowName>.yaml` 与 crud-03 3.3.8 `workflow.yaml` 同格式；`ops/<opName>.yaml` 为该 Workflow 节点引用的 OP 定义 |
+| `op` | `manifest.json` + `job.yaml` + `ops/<opName>.yaml` | `ops/<opName>.yaml` 与 crud-02 3.2.7 OP 导出 YAML 同格式；**目标 OP 自身也在 `ops/` 下，不再有根级 `op.yaml`** |
 
 **target.kind=workflow 的完整 ZIP 目录结构**：
 
 ```text
 job-hourly_check-v1.zip
-├── manifest.json
 ├── job.yaml
-├── workflow.yaml          # 关联 Workflow 定义（= crud-03 3.3.8 workflow.yaml 同格式）
-└── ops/                   # workflow 节点引用的 OP 定义（= crud-02 3.2.7 OP YAML 同格式）
-    ├── check_tests.yaml
-    ├── review.yaml
-    └── deploy.yaml
+├── manifest.json
+├── workflows/             # 目标 Workflow 定义（= crud-03 3.3.8 workflow.yaml 同格式）
+│   └── deploy_workflow.yaml
+└── ops/                   # workflow 节点引用的 OP 定义（= crud-02 3.2.7 OP YAML 同格式；本例仅该 Workflow 引用的 check_tests，与 manifest.ops 一致）
+    └── check_tests.yaml
 ```
 
 **target.kind=op 的完整 ZIP 目录结构**：
 
 ```text
 job-hourly_check-v1.zip
-├── manifest.json
 ├── job.yaml
-└── op.yaml                # 关联 OP 定义（= crud-02 3.2.7 OP YAML 同格式）
+├── manifest.json
+└── ops/                   # 目标 OP 自身（= crud-02 3.2.7 OP YAML 同格式）
+    └── check_tests.yaml
 ```
+
+> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`job.yaml` → `manifest.json` → [`workflows/<workflowName>.yaml`] → `ops/<opName>.yaml`（`ops/` 内按 `manifest.ops` 顺序）。导入端**不依赖成员顺序**，一律按 `manifest.target.file` / `manifest.ops[].file` 定位。
 
 **`job.yaml`（导出格式，字段与 JobCreateRequest 一致）**：
 
@@ -412,7 +415,7 @@ description: 每小时健康检查
 target:
   kind: workflow            # op | workflow
   workflowId: 1b2c...       # kind=workflow；kind=op 时为 opId（均为【导出环境 id】，导入时重映射）
-  workflowVersion: 1        # kind=op 时为 opVersion
+  workflowVersion: 2        # kind=op 时为 opVersion
   clientId: a1b2...         # 仅 kind=op 时必填
 workspace: /path/ws-003
 inputs: {env: prod}
@@ -433,7 +436,7 @@ enabled: true
   "exportedAtMs": "1728000000000",
   "job": { "name": "hourly_check", "version": 1 },
   "clients": [ { "name": "my-bash", "clientId": "a1b2..." } ],
-  "target": { "kind": "workflow", "name": "deploy_workflow", "version": 2, "file": "workflow.yaml" },
+  "target": { "kind": "workflow", "name": "deploy_workflow", "version": 2, "file": "workflows/deploy_workflow.yaml" },
   "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
 }
 ```
@@ -445,18 +448,20 @@ enabled: true
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
 | job | object | Job 名称与版本（锚定 `job.yaml`） |
-| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflow.yaml` 节点的 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.4.10） |
-| target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` 为包内相对路径（`workflow.yaml` / `op.yaml`） |
-| ops | object[] | 包内 OP 依赖：`{name, version, file}`。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: op.yaml`） |
+| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.4.10） |
+| target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` 为包内相对路径——`workflows/<name>.yaml`（kind=workflow）或 `ops/<name>.yaml`（kind=op） |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: ops/<name>.yaml`） |
+
+> 旧版 `workflows[]` 数组已由 `target` 取代，**包内不出现**；若出现视为字段非法 → 400 `VALIDATION_ERROR`。
 
 **样例（`target.kind=op` 时的 `target` 与 `ops`）**：
 
 ```json
-"target": { "kind": "op", "name": "check_tests", "version": 2, "file": "op.yaml" },
-"ops": [ { "name": "check_tests", "version": 2, "file": "op.yaml" } ]
+"target": { "kind": "op", "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" },
+"ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
 ```
 
-> 双表达约定（#1）：`workflow.yaml` / `op.yaml` 的**内部引用**以**名称**表达（Workflow 节点 `opName` / `clientName`；OP 无内部引用）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`）——导入时由 `manifest.json` 的 `target` / `ops` **名称锚**解析并重映射为新 uuid（见 3.4.10）。
+> 双表达约定（#1）：`workflows/<name>.yaml` / `ops/<name>.yaml` 的**内部引用**以**名称**表达（Workflow 节点 `opName` / `clientName`；OP 无内部引用）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`）——导入时由 `manifest.json` 的 `target` / `ops` **名称锚**解析并重映射为新 uuid（见 3.4.10）。
 
 **错误响应**：404 `JOB_NOT_FOUND`。
 
@@ -481,13 +486,13 @@ enabled: true
 | 对象 | 策略 |
 |-|-|
 | Job 本身 | 同名已存在 → 409 `JOB_NAME_EXISTS`；否则新建，`version` **重置为 1**（**理由（#2）**：导入 Job 等同新建，与 3.4.3 创建语义一致——Job.version 为自增修订号，从 1 起） |
-| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：`kind=workflow` → 解析 `workflow.yaml`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `op.yaml`（含 `target.clientId` 重映射）。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（#2）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
-| 包内 OP（`manifest.ops` + `ops/*.yaml` / `op.yaml`） | 目标 Workflow 引用的全部 OP（或目标 OP 本身）**按 name 匹配**：不存在 → 按包内定义创建（沿用包内 `version`）；已存在 → 复用现有（不覆盖）；目标 Workflow 的**节点级 `opName`/`clientName` 按 crud-03 3.3.9 策略重映射**为新 uuid |
+| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：先比对 `job.yaml.target.kind` 与 `manifest.target.kind`（不一致 → 400 `VALIDATION_ERROR`），再读 `manifest.target.file`（`workflows/<name>.yaml` 或 `ops/<name>.yaml`）解析实体——`kind=workflow` → 解析 `workflows/<name>.yaml`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `ops/<name>.yaml`（含 `target.clientId` 重映射）；`manifest.target.name` / `version` 为名称与版本锚（与文件内容不一致时以文件内容为准，见 3.4.9 字段表）。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（#2）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
+| 包内 OP（`manifest.ops` + `ops/<opName>.yaml`） | 目标 Workflow 引用的全部 OP（或目标 OP 本身）**按 name 匹配**：不存在 → 按包内定义创建（沿用包内 `version`）；已存在 → 复用现有（不覆盖）；目标 Workflow 的**节点级 `opName`/`clientName` 按 crud-03 3.3.9 策略重映射**为新 uuid |
 | Job.target | 解析后指向目标实体（见上）；`target.xxxVersion` 取**解析后实际引用的当前版本** |
 | Job.inputs 键名（#4） | **复用 3.4.3 同一校验**：inputs 的 name 须匹配 target（OP/Workflow）的参数定义；不匹配 → 400 `VALIDATION_ERROR` |
 | 版本差异告警（#5） | 复用的 OP/Workflow 版本与包内/manifest 声明不一致 → 计入响应 `warnings`（导入仍成功，不报错）；相关 Workflow 可能立即 `needsUpdate=true` |
-| 包内 Client（`job.yaml` 的 `target.clientId` 或 `workflow.yaml` 节点 `clientName`） | **按 name 匹配 Client**：存在 → 用其 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**；需先在目标环境注册同名 Client） |
-| **旧 id → 新 id 重映射（#3）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称**为锚，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
+| 包内 Client（`job.yaml` 的 `target.clientId` 或 `workflows/<name>.yaml` 节点 `clientName`） | **按 name 匹配 Client**：存在 → 用其 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**；需先在目标环境注册同名 Client） |
+| **旧 id → 新 id 重映射（#3）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称锚**（含 `target.file` 定位文件）为切入，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
 | **导入后的 `enabled`（#7）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
 
 > 默认采用「不覆盖已有定义」的保守策略，避免破坏现有 Workflow/Job 引用；如需强制覆盖或严格版本比对，后续可用 manifest 扩展。
@@ -500,7 +505,8 @@ enabled: true
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**等） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」） |
+| 400 | `CLIENT_TYPE_MISMATCH` | 包内 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理） |
 | 409 | `JOB_NAME_EXISTS` | 同名 Job 已存在（导入冲突） |
 | 409 | `CLIENT_NOT_FOUND` | 包内引用的 Client（按 name 匹配）在目标环境不存在；响应体列出缺失的 Client 名称（见上表） |
 

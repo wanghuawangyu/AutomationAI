@@ -10,6 +10,7 @@
   :root{
     --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
     --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --text-dim:#9aa1ad;   /* N12：补充定义（取 --text-3 同值）；此前多处 var(--text-dim) 无定义 → 灰色层次丢失 */
     --accent:#3b6ef6;--accent-soft:#eaf0ff;
     --sidebar:#171b25;--sidebar-hover:#232838;
     --failed:#dc2626;--success:#16a34a;--success-bg:#e8f7ee;
@@ -212,7 +213,7 @@
 
       <div class="card">
         <div class="toolbar">
-          <input class="search" placeholder="🔍 搜索..." />
+          <input class="search" id="opSearch" placeholder="🔍 搜索 OP 名称 / 类型 / 描述..." oninput="applyOpFilters()" />
         </div>
 
         <div id="opList"></div>
@@ -225,7 +226,7 @@
 
       <div class="editor-card">
         <div class="editor-head">
-          <h2 id="editorTitle">编辑: check_tests <span class="tag tag-ver" id="editorVersion">v2</span></h2>
+          <h2 id="editorTitle"><span id="editorTitleText">编辑: </span><span id="editorName">check_tests</span> <span class="tag tag-ver" id="editorVersion">v2</span></h2>
         </div>
 
         <div class="editor-body">
@@ -233,7 +234,7 @@
           <div class="form-row">
             <div class="field">
               <label>名称<span class="required">*</span></label>
-              <input type="text" id="opName" value="check_tests" />
+              <input type="text" id="opName" value="check_tests" maxlength="512" />
               <div class="hint">OP 名称全局唯一</div>
             </div>
             <div class="field">
@@ -299,9 +300,12 @@
           <div class="field">
             <label>工作区<span class="required">*</span></label>
             <div style="display:flex;gap:8px">
-              <input type="text" value="/path/to/workspace" style="flex:1" />
-              <button class="btn">选择</button>
+              <input type="text" id="execWorkspace" value="" placeholder="手工输入工作区绝对路径" style="flex:1" />
+              <select class="select" id="execWorkspaceRecent" style="max-width:180px" onchange="pickRecentWorkspace('execWorkspace', this.value)">
+                <option value="">最近使用 ▾</option>
+              </select>
             </div>
+            <div class="hint">手工输入绝对路径，或从 [最近使用▾]（GET /api/workspaces）点选回填；不提供目录选择器</div>
           </div>
 
           <div class="section-title">入参</div>
@@ -330,7 +334,7 @@
     <div class="modal-body">
       <div class="summary">
         <div><span class="k">即将执行:</span><span class="v" id="confirmOpName">check_tests</span></div>
-        <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
+        <div><span class="k">工作区:</span><span class="v mono" id="confirmWorkspace">/path/to/workspace</span></div>
         <div><span class="k">Client:</span><span class="v" id="confirmClient">Claude Code</span></div>
         <div><span class="k">入参:</span><span class="v" id="confirmInputs">（见执行表单）</span></div>
       </div>
@@ -359,14 +363,14 @@
         <label class="option-item" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="update" />
           <div>
-            <div class="opt-title">更新版本（v2 → v3）</div>
+            <div class="opt-title" id="verOptTitleUpdate">更新版本（v2 → v3）</div>
             <div class="opt-desc">创建新版本，历史运行记录保留旧版本快照</div>
           </div>
         </label>
         <label class="option-item selected" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="keep" checked />
           <div>
-            <div class="opt-title">不更新版本（覆盖 v2）</div>
+            <div class="opt-title" id="verOptTitleKeep">不更新版本（覆盖 v2）</div>
             <div class="opt-desc">默认选项，覆盖当前版本定义</div>
           </div>
         </label>
@@ -411,7 +415,7 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="check_tests-v2.yaml" />
+        <input type="text" id="exportFileName" value="op-check_tests-v2.yaml" />
       </div>
       <div class="field">
         <label>导出目录</label>
@@ -463,8 +467,38 @@
 
   /* ---------- 分页状态 ---------- */
   var allOps = [];
+  var fetchedOps = [];   // 最近一次接口返回的全量列表（前端 mock 过滤的数据源）
   var currentPage = 1;
   var pageSize = 10;
+
+  /* G12：搜索框生效（proposal-01 §18.1.1：OP 管理搜索匹配 名称 / 类型 / 描述；§18.1.2：OP 管理无额外筛选项）
+     原型阶段以前端 mock 过滤模拟（§18.1.3 注），真实后端直接传 keyword 参数 */
+  function applyOpFilters() {
+    var kw = (document.getElementById('opSearch').value || '').trim().toLowerCase();
+    allOps = !kw ? fetchedOps.slice() : fetchedOps.filter(function (op) {
+      return [op.name, op.type, op.description || ''].join(' ').toLowerCase().indexOf(kw) >= 0;
+    });
+    currentPage = 1;
+    renderOpList();
+  }
+
+  /* M8：工作区选择器 = 手工输入 + [最近使用▾]（GET /api/workspaces 回填；proposal-01 §9.6 / §19.6） */
+  function loadRecentWorkspaces() {
+    mockFetch('/api/workspaces').then(function (res) {
+      var items = (res && res.items) || [];
+      ['execWorkspaceRecent'].forEach(function (id) {
+        var sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = '<option value="">最近使用 ▾</option>' + items.map(function (w) {
+          return '<option value="' + escText(w) + '">' + escText(w) + '</option>';
+        }).join('');
+      });
+    });
+  }
+  function pickRecentWorkspace(inputId, value) {
+    if (!value) return;
+    document.getElementById(inputId).value = value;
+  }
 
   function changePageSize() {
     pageSize = parseInt(document.getElementById('pageSize').value);
@@ -506,18 +540,18 @@
     pageData.forEach(function(op) {
       var tagClass = 'tag-' + op.type;
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + op.name + '\',\'v' + op.version + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + op.name + '</span> <span class="tag tag-ver">v' + op.version + '</span>' +
+        '<td style="padding:10px 8px;cursor:pointer" data-action="toggle-detail" data-name="' + escText(op.name) + '" data-version="v' + escText(op.version) + '">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + escText(op.name) + '</span> <span class="tag tag-ver">v' + escText(op.version) + '</span>' +
         '</td>' +
-        '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + op.type + '</span></td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + (op.timeoutMs / 1000) + 's</td>' +
-        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (op.description || '') + '</td>' +
+        '<td style="padding:10px 8px"><span class="tag ' + escText(tagClass) + '">' + escText(op.type) + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + escText(op.timeoutSeconds) + 's</td>' +
+        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escText(op.description || '') + '</td>' +
         '<td style="padding:10px 8px">' +
-          '<button class="btn btn-sm btn-ghost-primary" onclick="openExecute(\'' + op.name + '\')">执行</button>' +
-          '<button class="btn btn-sm" onclick="openEditor(\'' + op.name + '\',\'' + op.type + '\',\'v' + op.version + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="dupOp(\'' + op.name + '\')">复制</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + op.name + '\',\'v' + op.version + '\')">导出</button>' +
-          '<button class="btn btn-sm btn-danger" onclick="delOp(\'' + op.name + '\')">删除</button>' +
+          '<button class="btn btn-sm btn-ghost-primary" data-action="execute" data-name="' + escText(op.name) + '">执行</button>' +
+          '<button class="btn btn-sm" data-action="edit" data-name="' + escText(op.name) + '" data-type="' + escText(op.type) + '" data-version="v' + escText(op.version) + '">编辑</button>' +
+          '<button class="btn btn-sm" data-action="dup" data-name="' + escText(op.name) + '">复制</button>' +
+          '<button class="btn btn-sm" data-action="export" data-name="' + escText(op.name) + '" data-version="v' + escText(op.version) + '">导出</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="del" data-name="' + escText(op.name) + '">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -538,10 +572,10 @@
       '<div style="display:flex;align-items:center;gap:8px">' +
         '<span>每页</span>' +
         '<select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' +
-          '<option value="10">10</option>' +
-          '<option value="50">50</option>' +
-          '<option value="100">100</option>' +
-          '<option value="1000">1000</option>' +
+          '<option value="10"' + (pageSize === 10 ? ' selected' : '') + '>10</option>' +
+          '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50</option>' +
+          '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100</option>' +
+          '<option value="1000"' + (pageSize === 1000 ? ' selected' : '') + '>1000</option>' +
         '</select>' +
         '<span id="totalCount">共 ' + total + ' 条</span>' +
       '</div>' +
@@ -553,8 +587,27 @@
     '</div>';
     card.insertAdjacentHTML('beforeend', paginationHtml);
   }
-  // 调用接口获取数据
-  mockFetch('/api/ops').then(renderOpList);
+  // 调用接口获取数据（crud-02 3.2.1：列表响应 { items, total, page, page_size }，用 listItems 取数组）
+  function refreshOpList() {
+    mockFetch('/api/ops').then(function (res) { fetchedOps = listItems(res); applyOpFilters(); });
+  }
+  refreshOpList();
+  loadRecentWorkspaces();
+
+  /* R6-S1：列表行一律用 data-* 传参 + 事件委托（name 允许任意 UTF-8 字符，不得拼进 onclick） */
+  document.getElementById('opList').addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) return;
+    var d = el.dataset;
+    switch (d.action) {
+      case 'toggle-detail': toggleDetail(el, d.name, d.version); break;
+      case 'execute': openExecute(d.name); break;
+      case 'edit': openEditor(d.name, d.type, d.version); break;
+      case 'dup': dupOp(d.name); break;
+      case 'export': openExport(d.name, d.version); break;
+      case 'del': delOp(d.name); break;
+    }
+  });
 
   /* ---------- 行内展开详情 ---------- */
   function toggleDetail(el, name, version) {
@@ -590,9 +643,9 @@
     var html = '<table class="detail-table">';
     // 第一行：类型 + 超时 + 描述
     html += '<tr>' +
-      '<td class="dt-k">类型</td><td class="dt-v">' + data.type + '</td>' +
-      '<td class="dt-k">超时</td><td class="dt-v">' + (data.timeoutMs / 1000) + 's</td>' +
-      '<td class="dt-k">描述</td><td class="dt-v">' + (data.description || '-') + '</td>' +
+      '<td class="dt-k">类型</td><td class="dt-v">' + escText(data.type) + '</td>' +
+      '<td class="dt-k">超时</td><td class="dt-v">' + escText(data.timeoutSeconds) + 's</td>' +
+      '<td class="dt-k">描述</td><td class="dt-v">' + escText(data.description || '-') + '</td>' +
       '</tr>';
 
     // 入参子表格
@@ -600,7 +653,7 @@
     if (data.inputs && data.inputs.length) {
       html += '<table class="sub-table">';
       data.inputs.forEach(function(i) {
-        html += '<tr><td class="st-name">' + i.name + ' (' + i.type + ')</td><td>' + (i.description || '') + '</td></tr>';
+        html += '<tr><td class="st-name">' + escText(i.name) + ' (' + escText(i.type) + ')</td><td>' + escText(i.description || '') + '</td></tr>';
       });
       html += '</table>';
     } else {
@@ -613,7 +666,7 @@
     if (data.outputs && data.outputs.length) {
       html += '<table class="sub-table">';
       data.outputs.forEach(function(o) {
-        html += '<tr><td class="st-name">' + o.name + ' (' + o.type + ')</td><td>' + (o.description || '') + '</td></tr>';
+        html += '<tr><td class="st-name">' + escText(o.name) + ' (' + escText(o.type) + ')</td><td>' + escText(o.description || '') + '</td></tr>';
       });
       html += '</table>';
     } else {
@@ -622,7 +675,7 @@
     html += '</td></tr>';
 
     // 正文
-    html += '<tr><td class="dt-k">正文</td><td class="dt-v mono" colspan="5">' + (data.content || '') + '</td></tr>';
+    html += '<tr><td class="dt-k">正文</td><td class="dt-v mono" colspan="5">' + escText(data.content || '') + '</td></tr>';
 
     html += '</table>';
     return html;
@@ -632,33 +685,37 @@
   var editorVersion = 'v2';
   var currentOpName = 'check_tests';
   var currentOpType = 'prompt';
+  var editingOpId = null;   // G1：编辑已有 OP 时以 opId 为 PUT 路径参数（支持改名；新建为 null）
 
   function openEditor(name, type, version) {
     var isNew = !name;
 
     if (isNew) {
       /* 新建：各字段为空 */
-      document.getElementById('editorTitle').innerHTML = '新建 OP <span class="tag tag-ver" id="editorVersion">v1</span>';
+      document.getElementById('editorTitleText').textContent = '新建 OP'; document.getElementById('editorName').textContent = ''; document.getElementById('editorVersion').textContent = 'v1';
       document.getElementById('opName').value = '';
       document.getElementById('opDesc').value = '';
       document.getElementById('opTimeout').value = '';
       editorVersion = 'v1';
       currentOpName = '';
       currentOpType = 'prompt';
+      editingOpId = null;
       renderParams({ inputs: [], outputs: [] });
       document.querySelector('input[name="opType"][value="prompt"]').checked = true;
       switchType('prompt');
       document.getElementById('contentArea').value = '';
     } else {
       var data = OP_DATA[name];
-      document.getElementById('editorTitle').innerHTML =
-        '编辑: ' + name + ' <span class="tag tag-ver" id="editorVersion">' + data.version + '</span>';
+      document.getElementById('editorTitleText').textContent = '编辑: ';   // G1：标题前缀走 textContent，不再用 innerHTML 拼名称
+      document.getElementById('editorName').textContent = name;   // G1：名称按字面输出（任意 UTF-8 字符，不解析 HTML；版本徽标为独立元素）
+      document.getElementById('editorVersion').textContent = 'v' + data.version;   // N8：版本号带 v 前缀（与新建分支 'v1' 一致）
       document.getElementById('opName').value = name;
       document.getElementById('opDesc').value = data.description || '';
-      document.getElementById('opTimeout').value = data.timeoutMs / 1000;
-      editorVersion = data.version;
+      document.getElementById('opTimeout').value = data.timeoutSeconds;
+      editorVersion = 'v' + data.version;   // N8：统一为 vX 文本（供标题标签与「当前版本」弹窗复用）
       currentOpName = name;
       currentOpType = data.type;
+      editingOpId = data.opId;   // G1：以 opId 定位编辑对象
       renderParams(data);
       document.querySelector('input[name="opType"][value="' + data.type + '"]').checked = true;
       switchType(data.type);
@@ -677,14 +734,14 @@
     (data.inputs || []).forEach(function (p) {
       inputHtml +=
         '<div class="pt-row pt-in">' +
-          '<input type="text" value="' + (p.name || '') + '" />' +
+          '<input type="text" value="' + escText(p.name || '') + '" />' +
           '<select><option>string</option></select>' +
           '<select>' +
             '<option' + (p.required === true || p.required === '是' ? ' selected' : '') + '>是</option>' +
             '<option' + (p.required !== true && p.required !== '是' ? ' selected' : '') + '>否</option>' +
           '</select>' +
-          '<input type="text" value="' + ((p.default == null) ? '' : p.default) + '" placeholder="default" />' +
-          '<input type="text" value="' + (p.description || '') + '" placeholder="description" />' +
+          '<input type="text" value="' + escText(p.default == null ? '' : p.default) + '" placeholder="default" />' +
+          '<input type="text" value="' + escText(p.description || '') + '" placeholder="description" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
     });
@@ -702,9 +759,9 @@
     (data.outputs || []).forEach(function (p) {
       outputHtml +=
         '<div class="pt-row pt-out">' +
-          '<input type="text" value="' + (p.name || '') + '" />' +
+          '<input type="text" value="' + escText(p.name || '') + '" />' +
           '<select><option>string</option></select>' +
-          '<input type="text" value="' + (p.description || '') + '" placeholder="description" />' +
+          '<input type="text" value="' + escText(p.description || '') + '" placeholder="description" />' +
           '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
         '</div>';
     });
@@ -794,6 +851,10 @@
   function openVersionDialog() {
     document.getElementById('versionOpName').textContent = document.getElementById('opName').value || '(未命名)';
     document.getElementById('versionCurrent').textContent = editorVersion;
+    // N9：选项文案里的版本号按**当前版本**动态生成（与 #versionCurrent 同源，不再硬编码）
+    var curVerNum = parseInt(String(editorVersion).replace(/^v/, ''), 10) || 1;
+    document.getElementById('verOptTitleUpdate').textContent = '更新版本（v' + curVerNum + ' → v' + (curVerNum + 1) + '）';
+    document.getElementById('verOptTitleKeep').textContent = '不更新版本（覆盖 v' + curVerNum + '）';
 
     var items = document.querySelectorAll('#versionModal .option-item');
     items.forEach(function (el, i) {
@@ -815,29 +876,31 @@
     var opt = document.querySelector('#versionModal input[name="versionOpt"]:checked');
     var bump = opt && opt.value === 'update';
     var name = document.getElementById('opName').value.trim();
+    if (!name) { alert('请填写 OP 名称'); return; }
+    if (name.length > 512) { alert('名称长度不能超过 512 字符'); return; }   // R6-G3：proposal-01:78 —— name ≤ 512 字符（后端同样校验）
     var payload = {
       name: name,
       description: document.getElementById('opDesc').value,
-      timeoutMs: (parseInt(document.getElementById('opTimeout').value, 10) || 300) * 1000,
+      timeoutSeconds: parseInt(document.getElementById('opTimeout').value, 10) || 60,   // crud-02：超时为**整数秒**（默认 60）
       type: currentOpType,
       content: document.getElementById('contentArea').value,
       inputs: collectParams('#inputTable', true),
       outputs: collectParams('#outputTable', false)
     };
-    var existing = OP_BY_NAME[name];
+    // G1：按编辑态 opId 判定 PUT / POST——改名时仍更新同一 OP（不再按新名称查找，避免“改名变新建”）
     var req;
-    if (existing) {
+    if (editingOpId) {
       // 编辑：PUT /api/ops/{opId} {op, bumpVersion}（false=覆盖当前版本；true=版本 +1，历史运行保留旧版本快照）
-      req = mockFetch('/api/ops/' + existing.opId, { method: 'PUT', body: JSON.stringify({ op: payload, bumpVersion: bump }) });
+      req = mockFetch('/api/ops/' + editingOpId, { method: 'PUT', body: JSON.stringify({ op: payload, bumpVersion: bump }) });
     } else {
       // 新建：POST /api/ops（默认 v1）
       req = mockFetch('/api/ops', { method: 'POST', body: JSON.stringify(payload) });
     }
     req.then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
+      if (res && res.error) { alert(errorText(res)); return; }
       closeModal('versionModal');
       closeView('editor');
-      renderOpList();
+      refreshOpList();   // 保存后重新拉取列表（新建的 OP 才会出现在列表里）
     });
   }
 
@@ -851,8 +914,8 @@
     });
     delete copy.opId; delete copy.version; delete copy.createdAtMs; delete copy.updatedAtMs;
     mockFetch('/api/ops', { method: 'POST', body: JSON.stringify(copy) }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderOpList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshOpList();
     });
   }
 
@@ -862,8 +925,8 @@
     if (!op) return;
     if (!confirm('确认删除 OP「' + name + '」？')) return;
     mockFetch('/api/ops/' + op.opId, { method: 'DELETE' }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderOpList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshOpList();
     });
   }
 
@@ -883,6 +946,19 @@
   }
 
   /* ---------- 单次执行流程（Client 按 OP 类型过滤） ---------- */
+  /* G2：入参输入框带 data-name，提交时按名称收集实际值（不再恒提交空对象） */
+  function collectExecInputs() {
+    var out = {};
+    document.querySelectorAll('#execInputs input[data-name]').forEach(function (el) {
+      out[el.dataset.name] = el.value;
+    });
+    return out;
+  }
+  function formatInputs(inputs) {
+    var keys = Object.keys(inputs || {});
+    if (!keys.length) return '无';
+    return keys.map(function (k) { return k + ': ' + inputs[k]; }).join('；');
+  }
   function openExecute(opName) {
     var data = OP_DATA[opName] || { inputs: [], type: 'prompt' };
     currentOpName = opName;
@@ -898,37 +974,49 @@
       data.inputs.forEach(function (p) {
         inputsHtml +=
           '<div class="field">' +
-            '<label>' + p.name + (p.required === true || p.required === '是' ? '<span class="required">*</span>' : '') + '</label>' +
-            '<input type="text" value="' + ((p.default == null) ? '' : p.default) + '" />' +
+            '<label>' + escText(p.name) + (p.required === true || p.required === '是' ? '<span class="required">*</span>' : '') + '</label>' +
+            '<input type="text" data-name="' + escText(p.name) + '" value="' + escText(p.default == null ? '' : p.default) + '" />' +
           '</div>';
       });
     }
     document.getElementById('execInputs').innerHTML = inputsHtml;
 
+    // M8：工作区默认为空（手工输入），并刷新最近使用下拉
+    document.getElementById('execWorkspace').value = '';
+    loadRecentWorkspaces();
+
     // 按 OP 类型渲染 Client 下拉（value = clientId）
     var clients = clientsForType(data.type);
     var sel = document.getElementById('execClientSelect');
-    sel.innerHTML = clients.map(function (c) { return '<option value="' + c.clientId + '">' + c.name + '</option>'; }).join('');
+    sel.innerHTML = clients.map(function (c) { return '<option value="' + escText(c.clientId) + '">' + escText(c.name) + '</option>'; }).join('');
 
     showView('execute');
   }
 
   function openConfirm() {
+    // G2：二次确认展示真实入参与页面上的工作区（不再写占位文案）
+    var inputs = collectExecInputs();
+    var ws = document.getElementById('execWorkspace').value.trim();
     document.getElementById('confirmOpName').textContent =
       document.getElementById('execOpName').textContent;
     document.getElementById('confirmClient').textContent =
       (CLIENT_BY_ID[document.getElementById('execClientSelect').value] || {}).name || '—';
-    document.getElementById('confirmInputs').textContent = '（见执行表单）';
+    document.getElementById('confirmWorkspace').textContent = ws || '（未填写）';
+    document.getElementById('confirmInputs').textContent = formatInputs(inputs);
     openModal('confirmModal');
   }
 
   function doExecute() {
-    // POST /api/ops/{opId}/execute —— 单次执行（virtual Job）
+    // G2：POST /api/ops/{opId}/execute —— 提交表单实际入参与页面上的工作区（crud-02 3.2.6：{clientId, inputs, workspace}）
     var op = OP_BY_NAME[document.getElementById('execOpName').textContent];
     var cid = document.getElementById('execClientSelect').value || '';
-    var req = { method: 'POST', body: JSON.stringify({ clientId: cid, inputs: {}, workspace: '/path/to/workspace' }) };
+    var inputs = collectExecInputs();
+    var ws = document.getElementById('execWorkspace').value.trim();
+    if (!ws) { alert('请填写工作区'); return; }
+    var req = { method: 'POST', body: JSON.stringify({ clientId: cid, inputs: inputs, workspace: ws }) };
     var p = op ? mockFetch('/api/ops/' + op.opId + '/execute', req) : Promise.resolve(null);
-    p.then(function () {
+    p.then(function (res) {
+      if (res && res.error) { alert(errorText(res)); return; }
       closeModal('confirmModal');
       closeView('execute');
       window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
@@ -968,7 +1056,7 @@
     // crud-02 3.2.7：POST /api/ops/{opId}/export 返回 {yaml}，由前端写入所选目录
     mockFetch('/api/ops/' + (op ? op.opId : exportTargetName) + '/export', { method: 'POST' })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         return exportDirHandle.getFileHandle(fileName, { create: true })
           .then(function (fileHandle) { return fileHandle.createWritable(); })
           .then(function (writable) { writable.write(res.yaml || ''); return writable.close(); });
@@ -994,7 +1082,9 @@
   });
 
   /* ---------- 导入文件选择 ---------- */
+  var importFileText = '';   // R6-G2：所选 YAML 的**文本内容**（直接作为 POST /api/ops/import 的 yaml 字段提交）
   function openImportModal() {
+    importFileText = '';
     document.getElementById('importFileName').textContent = '未选择文件';
     document.getElementById('importFile').value = '';
     document.getElementById('confirmImportBtn').disabled = true;
@@ -1009,25 +1099,38 @@
     var file = input.files[0];
     if (!file) return;
     document.getElementById('importFileName').textContent = file.name;
-    document.getElementById('confirmImportBtn').disabled = false;
+    document.getElementById('confirmImportBtn').disabled = true;   // R6-G2：读到**文件内容**后才允许提交（不再用文件名拼 YAML）
     var tree = document.getElementById('importTree');
     tree.style.display = 'block';
-    if (/\.ya?ml$/.test(file.name)) {
-      var reader = new FileReader();
-      reader.onload = function (e) { tree.textContent = file.name + '\n' + e.target.result; };
-      reader.readAsText(file);
-    } else {
-      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    /* R6-G2：crud-02 3.2.8 的请求体 { yaml } 为 YAML 文本内容，故必须把所选文件的文本读出来再提交；
+       超过 op.op_import_max_bytes（crud-06 上限，与 mock 的 SETTING_LIMITS 同一份来源）→ 提示并保持禁用。 */
+    var maxBytes = (typeof SETTING_LIMITS !== 'undefined' && SETTING_LIMITS['op.op_import_max_bytes']) || 104857600;
+    if (file.size > maxBytes) {
+      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）\n超过上限 op_import_max_bytes（' + maxBytes + ' 字节）';
+      alert('导入失败：文件大小 ' + file.size + ' 字节，超过上限 op_import_max_bytes（' + maxBytes + ' 字节）');
+      return;
     }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      importFileText = String(e.target.result || '');
+      tree.textContent = file.name + '\n' + importFileText;
+      document.getElementById('confirmImportBtn').disabled = false;
+    };
+    reader.onerror = function () {
+      importFileText = '';
+      alert('读取文件失败，请重新选择');
+    };
+    reader.readAsText(file);
   }
   function confirmImport() {
-    var name = document.getElementById('importFileName').textContent;
-    // crud-02 3.2.8：POST /api/ops/import {yaml} —— 同名 409
-    mockFetch('/api/ops/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.ya?ml$/, '') + '\ntype: prompt\n' }) })
+    if (!importFileText) { alert('请先选择要导入的 YAML 文件'); return; }
+    // crud-02 3.2.8：POST /api/ops/import {yaml} —— yaml = 所选**文件内容**（R6-G2：导入结果由文件内容决定，不再用文件名构造 YAML）；同名 409
+    mockFetch('/api/ops/import', { method: 'POST', body: JSON.stringify({ yaml: importFileText }) })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         alert('已导入：' + (res.name || '') + '（导入成功）');
         closeModal('importModal');
+        refreshOpList();   // G7：UC-O6 —— 导入成功后列表刷新，新增 OP 可见
       })
       .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }

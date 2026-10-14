@@ -5,7 +5,7 @@ description: 构建产物
 content: |
   #!/usr/bin/env bash
   npm run build
-timeoutMs: 60000
+timeoutSeconds: 60
 inputs:
   - {name: target, type: string, required: false, default: null, description: 构建目标}
 outputs:

@@ -12,6 +12,7 @@
   :root{
     --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
     --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --text-dim:#9aa1ad;   /* N12：补充定义（取 --text-3 同值）；此前多处 var(--text-dim) 无定义 → 灰色层次丢失 */
     --accent:#3b6ef6;--accent-soft:#eaf0ff;
     --sidebar:#171b25;--sidebar-hover:#232838;
     --failed:#dc2626;--failed-bg:#fdecec;
@@ -230,6 +231,7 @@
   .check-list{display:flex;flex-direction:column;gap:9px;font-size:13px}
   .check-item{display:flex;align-items:flex-start;gap:9px}
   .ck-ok{color:var(--success);font-weight:700}
+  .ck-bad{color:var(--failed);font-weight:700}
   .ck-text{flex:1}
 
   .file-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px dashed #d3dae6;border-radius:9px;background:#fbfcfe;font-size:13px;color:var(--text-2)}
@@ -284,11 +286,11 @@
 
       <div class="card">
         <div class="toolbar">
-          <input class="search" placeholder="🔍 搜索..." />
-          <div class="filters">
-            <button class="chip active">全部</button>
-            <button class="chip">需要更新</button>
-            <button class="chip">已同步</button>
+          <input class="search" id="wfSearch" placeholder="🔍 搜索 Workflow 名称 / 描述..." oninput="applyWorkflowFilters()" />
+          <div class="filters" id="wfChips">
+            <button class="chip active" data-filter="all" onclick="selectWfChip(this)">全部</button>
+            <button class="chip" data-filter="needs_update" onclick="selectWfChip(this)">需要更新</button>
+            <button class="chip" data-filter="synced" onclick="selectWfChip(this)">已同步</button>
           </div>
         </div>
 
@@ -321,7 +323,7 @@
         <button class="back-link" onclick="closeView()">← 返回</button>
         <h2>编辑: <span id="editorName">deploy_workflow</span> <span class="tag tag-ver" id="editorVersion">v2</span></h2>
         <div class="topbar-spacer"></div>
-        <button class="btn" onclick="openModal('validateModal')">校验</button>
+        <button class="btn" onclick="openValidateDialog()">校验</button>
         <button class="btn btn-primary" onclick="openVersionDialog()">保存</button>
       </div>
 
@@ -335,7 +337,7 @@
         <div class="form-row">
           <div class="field">
             <label>名称<span class="required">*</span></label>
-            <input type="text" id="wfName" value="deploy_workflow" />
+            <input type="text" id="wfName" value="deploy_workflow" maxlength="512" />
           </div>
           <div class="field">
             <label>描述</label>
@@ -432,16 +434,16 @@
         <div class="field">
           <label>工作区<span class="required">*</span></label>
           <div style="display:flex;gap:8px">
-            <input type="text" value="/path/to/workspace" style="flex:1" />
-            <button class="btn">选择</button>
+            <input type="text" id="execWorkspace" value="" placeholder="手工输入工作区绝对路径" style="flex:1" />
+            <select class="select" id="execWorkspaceRecent" style="max-width:180px" onchange="pickRecentWorkspace('execWorkspace', this.value)">
+              <option value="">最近使用 ▾</option>
+            </select>
           </div>
+          <div class="hint">手工输入绝对路径，或从 [最近使用▾]（GET /api/workspaces）点选回填；不提供目录选择器</div>
         </div>
 
         <div class="section-title">Workflow 入参</div>
-        <div class="field">
-          <label>target_env<span class="required">*</span></label>
-          <input type="text" value="staging" />
-        </div>
+        <div id="execInputs"></div>
       </div>
 
       <div style="max-width:620px;display:flex;justify-content:flex-end;gap:8px">
@@ -460,8 +462,8 @@
     <div class="modal-body">
       <div class="summary">
         <div><span class="k">即将执行:</span><span class="v" id="confirmWfName">deploy_workflow</span></div>
-        <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
-        <div><span class="k">Workflow 入参:</span><span class="v">target_env: staging</span></div>
+        <div><span class="k">工作区:</span><span class="v mono" id="confirmWorkspace">/path/to/workspace</span></div>
+        <div><span class="k">Workflow 入参:</span><span class="v" id="confirmInputs">target_env: staging</span></div>
       </div>
       <div style="margin-top:14px;font-size:12.5px;color:#4a5a7a;background:#f7f9fd;border:1px solid #e2e9f7;border-radius:8px;padding:10px 13px">
         ℹ 确认后将创建虚拟 Job 并后台执行，执行记录进入运行历史。
@@ -487,14 +489,14 @@
         <label class="option-item" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="update" />
           <div>
-            <div class="opt-title">更新版本（v2 → v3）</div>
+            <div class="opt-title" id="verOptTitleUpdate">更新版本（v2 → v3）</div>
             <div class="opt-desc">创建新版本，历史运行记录保留旧版本快照</div>
           </div>
         </label>
         <label class="option-item selected" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="keep" checked />
           <div>
-            <div class="opt-title">不更新版本（覆盖 v2）</div>
+            <div class="opt-title" id="verOptTitleKeep">不更新版本（覆盖 v2）</div>
             <div class="opt-desc">默认选项，覆盖当前版本定义</div>
           </div>
         </label>
@@ -507,20 +509,13 @@
   </div>
 </div>
 
-<!-- ==================== 校验结果弹窗 ==================== -->
+<!-- ==================== 校验结果弹窗（R6-G1：标题取当前 Workflow 名，检查项按 POST /api/workflows/{workflowId}/validate 的 {valid, errors} 渲染） ==================== -->
 <div class="overlay" id="validateModal">
   <div class="modal" style="max-width:520px">
-    <div class="modal-head">校验结果: <span id="validateWfName">deploy_workflow</span></div>
+    <div class="modal-head">校验结果: <span id="validateWfName"></span></div>
     <div class="modal-body">
-      <div class="check-list" id="checkList">
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">有且仅有一个 Start 节点</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">有且仅有一个 End 节点</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">Start 节点无入边，End 节点无出边</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">所有 OP 节点从 Start 可达</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">所有 OP 节点能到达 End</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">DAG 无环（循环回跳除外）</span></div>
-        <div class="check-item"><span class="ck-ok">✓</span><span class="ck-text">所有 required 入参均有来源</span></div>
-      </div>
+      <div id="validateNotice" style="display:none;margin-bottom:10px;font-size:12.5px;color:#96660a;background:#fff8e9;border:1px solid #f3e4bd;border-radius:8px;padding:8px 12px"></div>
+      <div class="check-list" id="checkList"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('validateModal')">关闭</button>
@@ -559,9 +554,9 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="deploy_workflow-v2.zip" />
+        <input type="text" id="exportFileName" value="workflow-deploy_workflow-v2.zip" />
       </div>
-      <div class="tree" id="exportTree">deploy_workflow-v2.zip
+      <div class="tree" id="exportTree">workflow-deploy_workflow-v2.zip
 ├── manifest.json
 ├── workflow.yaml
 └── ops/
@@ -597,7 +592,7 @@
   var NODE_W = 130, NODE_H = 46;
 
   /* ==================== OP 库数据 ==================== */
-  /* OP 库数据：直接复用 mock-data.js 的 OPS（API 结构：opId / name / type / version / timeoutMs / inputs[] / outputs[]） */
+  /* OP 库数据：直接复用 mock-data.js 的 OPS（API 结构：opId / name / type / version / timeoutSeconds / inputs[] / outputs[]） */
   var OP_LIB = OPS;
 
   var TYPE_ICON = { prompt: '💬', bash: '🐚', python: '🐍', powershell: '⚡' };
@@ -669,6 +664,25 @@
     };
   });
 
+  /* N11：过期节点标注 —— /api/workflows/{id}/outdated-nodes 返回**裸数组**（需更新的 workflowNodeId，crud-03 3.3.11）。
+     原实现节点 outdated 恒为 false（赋值点只有 false）→ 画布 overdue 样式、⚠ 徽标与节点面板提示均为死代码。
+     这里把接口结果落到编辑态节点，并顺带回填「OP 最新版本」（供面板展示，不再硬编码 opVersion + 1）。 */
+  function refreshOutdatedNodes(wfName, wf) {
+    var d = WORKFLOW_DATA[wfName];
+    if (!d || !wf) return;
+    mockFetch('/api/workflows/' + wf.workflowId + '/outdated-nodes').then(function (outs) {
+      var list = Array.isArray(outs) ? outs : ((outs && outs.items) || []);
+      Object.keys(d.nodes).forEach(function (nid) {
+        var n = d.nodes[nid];
+        if (n.kind !== 'op') return;
+        n.outdated = list.indexOf(nid) >= 0;
+        var opDef = OP_BY_ID[n.opId];
+        n.opLatestVersion = opDef ? opDef.version : null;   // 无 OP（悬挂引用）→ null，面板回退原逻辑
+      });
+      if (currentWf === wfName) { renderCanvas(); renderNodePanel(selectedNodeId); }
+    });
+  }
+
   /* 新节点 workflowNodeId 生成：32 位 UUID（前端 mock 生成，与后端一致） */
   function genNodeId() {
     var chars = '0123456789abcdef';
@@ -718,8 +732,33 @@
   /* ==================== 渲染 Workflow 列表 ==================== */
   /* ---------- 分页状态 ---------- */
   var allWorkflows = [];
+  var fetchedWorkflows = [];   // 最近一次接口返回的全量列表（前端 mock 过滤的数据源）
   var currentPage = 1;
   var pageSize = 10;
+  var wfChipFilter = 'all';    // G12：状态 chip（全部 / 需要更新 / 已同步）
+
+  /* G12：搜索框 + chip 生效（proposal-01 §18.1.1：Workflow 搜索匹配 名称 / 描述；§18.1.2：状态 chip）
+     §18.1.3 注：原型阶段以前端 mock 过滤模拟，真实后端传 keyword / needsUpdate 参数 */
+  function applyWorkflowFilters() {
+    var kw = (document.getElementById('wfSearch').value || '').trim().toLowerCase();
+    allWorkflows = fetchedWorkflows.filter(function (w) {
+      if (wfChipFilter === 'needs_update' && !w.needsUpdate) return false;
+      if (wfChipFilter === 'synced' && w.needsUpdate) return false;
+      if (kw) {
+        var hay = [w.name, w.description || ''].join(' ').toLowerCase();
+        if (hay.indexOf(kw) < 0) return false;
+      }
+      return true;
+    });
+    currentPage = 1;
+    renderWorkflowList();
+  }
+  function selectWfChip(el) {
+    document.querySelectorAll('#wfChips .chip').forEach(function (c) { c.classList.remove('active'); });
+    el.classList.add('active');
+    wfChipFilter = el.dataset.filter || 'all';
+    applyWorkflowFilters();
+  }
 
   function changePageSize() {
     pageSize = parseInt(document.getElementById('pageSize').value);
@@ -761,20 +800,20 @@
       var warnTag = w.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
       var execBtn = w.needsUpdate
         ? '<button class="btn btn-sm" disabled>执行</button>'
-        : '<button class="btn btn-sm btn-ghost-primary" onclick="openExecute(\'' + w.name + '\')">执行</button>';
+        : '<button class="btn btn-sm btn-ghost-primary" data-action="execute" data-name="' + escText(w.name) + '">执行</button>';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + w.name + '\',\'v' + w.version + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + w.name + '</span> <span class="tag tag-ver">v' + w.version + '</span>' + warnTag +
+        '<td style="padding:10px 8px;cursor:pointer" data-action="toggle-detail" data-name="' + escText(w.name) + '" data-version="v' + escText(w.version) + '">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + escText(w.name) + '</span> <span class="tag tag-ver">v' + escText(w.version) + '</span>' + warnTag +
         '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + w.inputs.length + '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + w.outputs.length + '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px">' + nodeCount + '</td>' +
         '<td style="padding:10px 8px">' +
           execBtn +
-          '<button class="btn btn-sm" onclick="openEditor(\'' + w.name + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="dupWf(\'' + w.name + '\')">复制</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + w.name + '\',\'v' + w.version + '\')">导出</button>' +
-          '<button class="btn btn-sm btn-danger" onclick="delWf(\'' + w.name + '\')">删除</button>' +
+          '<button class="btn btn-sm" data-action="edit" data-name="' + escText(w.name) + '">编辑</button>' +
+          '<button class="btn btn-sm" data-action="dup" data-name="' + escText(w.name) + '">复制</button>' +
+          '<button class="btn btn-sm" data-action="export" data-name="' + escText(w.name) + '" data-version="v' + escText(w.version) + '">导出</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="del" data-name="' + escText(w.name) + '">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -792,10 +831,30 @@
     document.getElementById('prevPage').disabled = currentPage <= 1;
     document.getElementById('nextPage').disabled = currentPage >= totalPages;
   }
-  // 调用接口获取数据
-  mockFetch('/api/workflows').then(renderWorkflowList);
+  // 调用接口获取数据（crud-03 3.3.1：列表响应 { items, total, page, page_size }，用 listItems 取数组）
+  function refreshWorkflowList() {
+    mockFetch('/api/workflows').then(function (res) { fetchedWorkflows = listItems(res); applyWorkflowFilters(); });
+  }
+  refreshWorkflowList();
+
+  /* R6-S1：列表行一律用 data-* 传参 + 事件委托（name 允许任意 UTF-8 字符，不得拼进 onclick） */
+  document.getElementById('workflowList').addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) return;
+    var d = el.dataset;
+    switch (d.action) {
+      case 'toggle-detail': toggleDetail(el, d.name, d.version); break;
+      case 'execute': openExecute(d.name); break;
+      case 'edit': openEditor(d.name); break;
+      case 'dup': dupWf(d.name); break;
+      case 'export': openExport(d.name, d.version); break;
+      case 'del': delWf(d.name); break;
+    }
+  });
 
   /* ==================== 行内展开详情（列表） ==================== */
+  /* G2：行内展开画布的容器 id 必须与名称无关（名称允许任意 UTF-8 字符，含 `"` 时拼进 HTML 属性会被截断 → 画布不渲染） */
+  var dcViewSeq = 0;
   function toggleDetail(el, name, version) {
     var row = el.closest('tr');
     var detailRow = row.nextElementSibling;
@@ -813,8 +872,9 @@
       var panel = detailRow.querySelector('.detail-panel');
       panel.id = 'panel_' + name;
       if (!panel.dataset.loaded) {
-        panel.innerHTML = buildDetailPanel(name, version);
-        renderDcCanvas(name);
+        var canvasId = 'dcView' + (++dcViewSeq);   // G2：自增序号生成容器 id，不再用名称拼接
+        panel.innerHTML = buildDetailPanel(name, version, canvasId);
+        renderDcCanvas(name, canvasId);
         panel.dataset.loaded = '1';
       }
       panel.style.display = 'block';
@@ -823,7 +883,7 @@
     }
   }
 
-  function buildDetailPanel(name, version) {
+  function buildDetailPanel(name, version, canvasId) {
     var wf = WORKFLOW_BY_NAME[name];
     if (!wf) return '<div style="padding:20px">未找到 Workflow 数据</div>';
 
@@ -834,21 +894,22 @@
     html += '<tr><td style="color:var(--text-3);width:60px;padding:6px 10px;border-bottom:1px solid var(--border-soft)">入参</td><td style="padding:6px 10px;border-bottom:1px solid var(--border-soft)">';
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     (wf.inputs || []).forEach(function(i) {
-      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + i.name + ' (' + i.type + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + (i.description || '') + '</td></tr>';
+      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + escText(i.name) + ' (' + escText(i.type) + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + escText(i.description || '') + '</td></tr>';
     });
     html += '</table>';
     html += '</td><td style="color:var(--text-3);width:60px;padding:6px 10px;border-bottom:1px solid var(--border-soft)">出参</td><td style="padding:6px 10px;border-bottom:1px solid var(--border-soft)">';
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     (wf.outputs || []).forEach(function(o) {
-      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + o.name + ' (' + o.type + ')</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + (o.description || '') + '</td></tr>';
+      html += '<tr><td class="mono" style="padding:3px 8px;width:160px;border-bottom:1px solid var(--border-soft)">' + escText(o.name) + ((o.type == null || o.type === '') ? '' : ' (' + escText(o.type) + ')') + '</td><td style="padding:3px 8px;border-bottom:1px solid var(--border-soft)">' + escText(o.description || '') + '</td></tr>';
     });
     html += '</table>';
     html += '</td></tr>';
     html += '</table>';
     html += '</div>';
     html += '<div class="dc-body">';
-    html += '<div class="dc-left" id="dcLeft_' + name + '"></div>';
-    html += '<div class="dc-right" id="dcRight_' + name + '">';
+    var dcId = escText(canvasId);   // G2：id 值本身也经 escText 输出（画布容器不再依赖名称）
+    html += '<div class="dc-left" id="' + dcId + '"></div>';
+    html += '<div class="dc-right" id="' + dcId + '_right">';
     html += '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:40px 0">点击左侧节点<br>查看节点配置</div>';
     html += '</div>';
     html += '</div>';
@@ -857,10 +918,10 @@
   }
 
   /* 查看界面画布：由 workflow-canvas.js 统一渲染（只读模式） */
-  function renderDcCanvas(name) {
+  function renderDcCanvas(name, canvasId) {
     var wf = WORKFLOW_BY_NAME[name];
     if (!wf) return;
-    var container = document.getElementById('dcLeft_' + name);
+    var container = document.getElementById(canvasId);   // G2：与 buildDetailPanel 的 dcId 同一来源
     if (!container) return;
 
     var nodes = {};
@@ -903,10 +964,10 @@
     var opDef = n.opId ? OP_BY_ID[n.opId] : null;
     var opName = opDef ? opDef.name : '-';
     var label = n.kind === 'start' ? 'Start' : n.kind === 'end' ? 'End' : (n.label || opName || id);
-    var html = '<div style="font-weight:600;margin-bottom:12px">' + label + '</div>';
+    var html = '<div style="font-weight:600;margin-bottom:12px">' + escText(label) + '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">节点配置</div>';
     html += '<div style="font-size:13px;line-height:2">';
-    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + opName + '</span></div>';
+    html += '<div><span style="color:var(--text-3)">OP：</span><span class="mono">' + escText(opName) + '</span></div>';
     html += '<div><span style="color:var(--text-3)">版本：</span>v' + (n.opVersion || '-') + '</div>';
     html += '</div>';
     html += '<div style="font-size:12px;color:var(--text-3);margin:14px 0 8px">节点参数</div>';
@@ -921,7 +982,7 @@
         var desc = b.kind === 'node_output' ? ('前置出参 ' + (b.workflowNodeId || '') + '.' + (b.outputName || ''))
           : b.kind === 'workflow_input' ? ('Workflow 入参 ' + (b.inputName || ''))
           : ('字面量 ' + (b.value || ''));
-        html += '<div><span style="color:var(--text-3)">' + k + '：</span><span class="mono">' + desc + '</span></div>';
+        html += '<div><span style="color:var(--text-3)">' + escText(k) + '：</span><span class="mono">' + escText(desc) + '</span></div>';
       });
     }
     html += '</div>';
@@ -937,9 +998,23 @@
   }
 
   /* ==================== 编辑器 ==================== */
+  /* S2：按需构建编辑数据（复制 / 导入生成的 Workflow 也要能打开编辑器；原实现只认页面加载时的 4 个内置名称） */
+  function ensureWorkflowData(name) {
+    var wf = WORKFLOW_BY_NAME[name];
+    if (!wf) return null;
+    WORKFLOW_DATA[name] = {
+      nodes: buildNodesFromWf(name),
+      edges: buildEdgesFromWf(name),
+      version: 'v' + wf.version
+    };
+    return WORKFLOW_DATA[name];
+  }
+
   function openEditor(name) {
     var isNew = !name;
-    var isLog = (name === 'log_analysis');
+    var wf = isNew ? null : (WORKFLOW_BY_NAME[name] || null);   // S2：以 WORKFLOW_BY_NAME（接口数据）为准
+    if (!isNew && !wf) { alert('未找到 Workflow：' + name); return; }
+    var isLog = !!(wf && wf.needsUpdate);
 
     if (isNew) {
       currentWf = '__new__';
@@ -950,19 +1025,38 @@
       };
       currentVersion = 'v1';
     } else {
+      var data = ensureWorkflowData(name);
       currentWf = name;
-      currentVersion = WORKFLOW_DATA[name].version;
+      currentVersion = data.version;
     }
 
     document.getElementById('editorName').textContent = name || '（未命名）';
     document.getElementById('editorVersion').textContent = currentVersion;
     document.getElementById('wfName').value = name || '';
-    document.getElementById('wfDesc').value = isNew ? '' : '部署流程';
+    document.getElementById('wfDesc').value = isNew ? '' : (wf.description || '');   // S4：描述取自被编辑对象
 
-    document.getElementById('warnBar').style.display = isLog ? 'flex' : 'none';
+    // 需要更新提示条（proposal-01 §19.6）：文案按实际情况渲染，不再写死节点名
+    var warnBar = document.getElementById('warnBar');
+    warnBar.style.display = isLog ? 'flex' : 'none';
+    if (isLog) {
+      warnBar.innerHTML = '<span>⚠</span><span>该 Workflow 需要更新（needsUpdate）——请检查节点引用的 OP 版本与配置</span>';
+      mockFetch('/api/workflows/' + wf.workflowId + '/needs-update').then(function (nu) {
+        var outs = (nu && nu.outdatedNodes) || [];
+        if (!outs.length) return;
+        var labels = outs.map(function (nid) {
+          var hit = (wf.nodes || []).filter(function (x) { return x.workflowNodeId === nid; })[0];
+          return hit ? (hit.label || nid) : nid;
+        });
+        warnBar.innerHTML = '<span>⚠</span><span>该 Workflow 有 ' + outs.length + ' 个节点需要更新（' + labels.join('、') + '）</span>';
+      });
+    }
 
-    /* 渲染入参 / 出参：新建时为空，编辑时显示示例数据 */
-    renderWfParams(isNew);
+    /* S4：入参 / 出参必须来自被编辑对象本身（不得硬编码 target_env / deploy_url） */
+    renderWfParams(wf, isNew);
+
+    /* N11：画布过期节点标注 —— 取 GET /api/workflows/{id}/outdated-nodes（crud-03 3.3.11）的结果
+       标注对应节点的 outdated（workflow-canvas.js 的 .outdated 样式 + ⚠ 徽标）并回填 OP 最新版本 */
+    refreshOutdatedNodes(currentWf, isNew ? null : wf);
 
     /* 重置编辑状态 */
     selectedNodeId = null;
@@ -977,35 +1071,52 @@
     showView('editor');
   }
 
-  /* 渲染 Workflow 入参 / 出参表格 */
-  function renderWfParams(isNew) {
+  /* 渲染 Workflow 入参 / 出参表格：数据一律来自被编辑对象（S4） */
+  function renderWfParams(wf, isNew) {
     var inputTable = document.getElementById('wfInputTable');
     var outputTable = document.getElementById('wfOutputTable');
 
     var inputHead = '<div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>';
     var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from (workflowNodeId.outputName)</span><span>description</span><span></span></div>';
 
-    if (isNew) {
+    if (isNew || !wf) {
+      // 新建：入参 / 出参均为空（proposal-01 §10.9 新建默认值）
       inputTable.innerHTML = inputHead;
       outputTable.innerHTML = outputHead;
-    } else {
-      inputTable.innerHTML = inputHead +
-        '<div class="pt-row pt-in">' +
-          '<input type="text" value="target_env" />' +
-          '<select><option>string</option></select>' +
-          '<select><option>是</option><option>否</option></select>' +
-          '<input type="text" value="" placeholder="default" />' +
-          '<input type="text" value="目标环境" placeholder="description" />' +
-          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
-        '</div>';
-      outputTable.innerHTML = outputHead +
-        '<div class="pt-row pt-out">' +
-          '<input type="text" value="deploy_url" />' +
-          '<input type="text" value="4e5f60718293a4b5c6d7e8f9a1b2c3d4.url" />' +
-          '<input type="text" value="部署后的 URL" />' +
-          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
-        '</div>';
+      return;
     }
+
+    var inputHtml = inputHead;
+    (wf.inputs || []).forEach(function (p) {
+      inputHtml +=
+        '<div class="pt-row pt-in">' +
+          '<input type="text" value="' + escapeAttr(p.name || '') + '" />' +
+          '<select><option>string</option></select>' +
+          '<select>' +
+            '<option' + (p.required === true ? ' selected' : '') + '>是</option>' +
+            '<option' + (p.required !== true ? ' selected' : '') + '>否</option>' +
+          '</select>' +
+          '<input type="text" value="' + escapeAttr(p.default == null ? '' : p.default) + '" placeholder="default" />' +
+          '<input type="text" value="' + escapeAttr(p.description || '') + '" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+    });
+    if (!(wf.inputs || []).length) inputHtml += '<div class="pt-empty">无入参</div>';
+    inputTable.innerHTML = inputHtml;
+
+    var outputHtml = outputHead;
+    (wf.outputs || []).forEach(function (o) {
+      var fromVal = o.from ? ((o.from.workflowNodeId || '') + '.' + (o.from.outputName || '')) : '';
+      outputHtml +=
+        '<div class="pt-row pt-out">' +
+          '<input type="text" value="' + escapeAttr(o.name || '') + '" />' +
+          '<input type="text" value="' + escapeAttr(fromVal) + '" placeholder="workflowNodeId.outputName" />' +
+          '<input type="text" value="' + escapeAttr(o.description || '') + '" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
+    });
+    if (!(wf.outputs || []).length) outputHtml += '<div class="pt-empty">无出参</div>';
+    outputTable.innerHTML = outputHtml;
   }
 
   function addWorkflowInput() {
@@ -1055,8 +1166,8 @@
       item.draggable = true;
       item.dataset.opName = op.name;
       item.innerHTML =
-        '<div class="ol-name"><span>' + (TYPE_ICON[op.type] || '📦') + '</span>' + op.name + '</div>' +
-        '<div class="ol-meta">' + op.type + ' · v' + op.version + '</div>';
+        '<div class="ol-name"><span>' + (TYPE_ICON[op.type] || '📦') + '</span>' + escText(op.name) + '</div>' +
+        '<div class="ol-meta">' + escText(op.type) + ' · v' + escText(op.version) + '</div>';
 
       item.addEventListener('dragstart', function (e) {
         dragOp = op;
@@ -1081,7 +1192,7 @@
       selectedId: selectedNodeId,
       nodeMeta: function (id, n) {
         var def = OP_BY_ID[n.opId];
-        return 'OP v' + n.opVersion + ' · ' + (def ? (def.timeoutMs / 1000) : '—') + 's';
+        return 'OP v' + n.opVersion + ' · ' + (def ? def.timeoutSeconds : '—') + 's';
       },
       onNodeClick: function (id) { selectNode(id); },
       beforeAddEdge: function (from, to, condition) {
@@ -1303,7 +1414,7 @@
 
     var opDef = OP_BY_ID[n.opId];
     var opName = opDef ? opDef.name : '(已删除)';
-    var opTimeoutS = opDef ? (opDef.timeoutMs / 1000) : '—';
+    var opTimeoutS = opDef ? opDef.timeoutSeconds : '—';
 
     var html = '';
 
@@ -1317,9 +1428,13 @@
     html += '</div>';
 
     if (n.outdated) {
+      // N11：「OP 最新」优先取 OP 定义当前版本（接口数据），其次取 outdated-nodes 回填值；
+      // 两者都没有（如 OP 已删除的悬挂引用）时回退原逻辑（opVersion + 1）
+      var opLatestVer = (opDef && opDef.version != null) ? opDef.version
+        : ((n.opLatestVersion != null) ? n.opLatestVersion : (parseInt(n.opVersion, 10) + 1));
       html += '<div class="panel-note warn">⚠ 该 OP 已更新，请确认配置<br/>' +
               '<span style="font-size:11.5px">当前引用: v' + n.opVersion +
-              ' · OP 最新: v' + (n.opVersion + 1) + '</span></div>';
+              ' · OP 最新: v' + opLatestVer + '</span></div>';
     }
 
     /* Client（value = clientId，label = name） */
@@ -1328,7 +1443,7 @@
     html += '<select class="ps-select" onchange="setNodeClient(this.value)">';
     html += '<option value="">— 未指定（执行时回退 Job.target.clientId） —</option>';
     CLIENTS.forEach(function (c) {
-      html += '<option value="' + c.clientId + '"' + (draft.clientId === c.clientId ? ' selected' : '') + '>' + c.name + '</option>';
+      html += '<option value="' + escText(c.clientId) + '"' + (draft.clientId === c.clientId ? ' selected' : '') + '>' + escText(c.name) + '</option>';
     });
     html += '</select>';
     html += '</div>';
@@ -1342,26 +1457,28 @@
     } else {
       bindNames.forEach(function (pname) {
         var b = draft.bindings[pname] || { kind: 'literal', value: '' };
+        var pn = escText(pname);     // R6-S1：参数名允许任意 UTF-8 字符 → 文本/属性一律转义
+        var pj = escJsStr(pname);    // 内联处理器中的字符串字面量
         html += '<div class="binding-item">';
-        html += '<div class="bi-name">' + pname + '</div>';
+        html += '<div class="bi-name">' + pn + '</div>';
         html += '<div class="bi-opts">';
 
         /* 前置节点出参 */
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'node_output' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + pname + '\',\'node_output\')" />' +
+                  '<input type="radio" name="bk_' + pn + '"' + (b.kind === 'node_output' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pj + '\',\'node_output\')" />' +
                   '<span>前置节点出参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingNodeOutput(\'' + pname + '\',this.value)">' +
+                  '<span class="bi-field"><select onchange="setBindingNodeOutput(\'' + pj + '\',this.value)">' +
                     buildNodeOutputOptions(id, b) +
                   '</select></span>' +
                 '</label>';
 
         /* Workflow 入参 */
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + pname + '\',\'workflow_input\')" />' +
+                  '<input type="radio" name="bk_' + pn + '"' + (b.kind === 'workflow_input' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pj + '\',\'workflow_input\')" />' +
                   '<span>Workflow 入参</span>' +
-                  '<span class="bi-field"><select onchange="setBindingInput(\'' + pname + '\',this.value)">' +
+                  '<span class="bi-field"><select onchange="setBindingInput(\'' + pj + '\',this.value)">' +
                     buildWorkflowInputOptions(b) +
                   '</select></span>' +
                 '</label>';
@@ -1369,11 +1486,11 @@
         /* 字面量 */
         var litVal = (b.kind === 'literal' ? (b.value || '') : '');
         html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + pname + '"' + (b.kind === 'literal' ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + pname + '\',\'literal\')" />' +
+                  '<input type="radio" name="bk_' + pn + '"' + (b.kind === 'literal' ? ' checked' : '') +
+                  ' onchange="setBindingKind(\'' + pj + '\',\'literal\')" />' +
                   '<span>字面量</span>' +
                   '<span class="bi-field"><input type="text" value="' + escapeAttr(litVal) +
-                    '" placeholder="输入字面量" oninput="setBindingLiteral(\'' + pname + '\',this.value)" /></span>' +
+                    '" placeholder="输入字面量" oninput="setBindingLiteral(\'' + pj + '\',this.value)" /></span>' +
                 '</label>';
 
         html += '</div></div>';
@@ -1414,7 +1531,7 @@
   }
 
   function escapeAttr(s) {
-    return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return escText(s);   // R6-S1：统一复用 mock-data.js 的 escText（& < > " ' 全部转义），不再只处理 " 与 <
   }
 
   function buildNodeOutputOptions(currentId, binding) {
@@ -1430,7 +1547,7 @@
       outs.forEach(function (out) {
         var val = nid + '.' + out.name;
         var sel = (binding.kind === 'node_output' && binding.workflowNodeId === nid && binding.outputName === out.name) ? ' selected' : '';
-        html += '<option value="' + val + '"' + sel + '>' + val + '</option>';
+        html += '<option value="' + escText(val) + '"' + sel + '>' + escText(val) + '</option>';
       });
     });
 
@@ -1442,7 +1559,7 @@
     var wfInputs = ((wf && wf.inputs) || []).map(function (i) { return i.name; });
     return wfInputs.map(function (w) {
       var sel = (binding.kind === 'workflow_input' && binding.inputName === w) ? ' selected' : '';
-      return '<option value="' + w + '"' + sel + '>' + w + '</option>';
+      return '<option value="' + escText(w) + '"' + sel + '>' + escText(w) + '</option>';
     }).join('');
   }
 
@@ -1529,27 +1646,187 @@
   })();
 
   /* ==================== 单次执行 ==================== */
+  /* G2：入参输入框带 data-name，提交时按名称收集实际值（不再恒提交空对象） */
+  function collectExecInputs() {
+    var out = {};
+    document.querySelectorAll('#execInputs input[data-name]').forEach(function (el) {
+      out[el.dataset.name] = el.value;
+    });
+    return out;
+  }
+  function formatInputs(inputs) {
+    var keys = Object.keys(inputs || {});
+    if (!keys.length) return '无';
+    return keys.map(function (k) { return k + ': ' + inputs[k]; }).join('；');
+  }
+  /* M8：工作区选择器 = 手工输入 + [最近使用▾]（GET /api/workspaces 回填；proposal-01 §10.12 / §19.6） */
+  function loadRecentWorkspaces() {
+    mockFetch('/api/workspaces').then(function (res) {
+      var items = (res && res.items) || [];
+      var sel = document.getElementById('execWorkspaceRecent');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">最近使用 ▾</option>' + items.map(function (w) {
+        return '<option value="' + escText(w) + '">' + escText(w) + '</option>';
+      }).join('');
+    });
+  }
+  function pickRecentWorkspace(inputId, value) {
+    if (!value) return;
+    var input = document.getElementById(inputId);
+    if (input) input.value = value;
+  }
+
+  /* ==================== 校验（R6-G1） ====================
+     crud-03 3.3.6 `POST /api/workflows/{workflowId}/validate` → `{valid, errors}`；规则集与失败文案见 proposal-01-界面设计.md §10.14
+     （**11 条规则** / **8 条失败提示**）。弹窗标题取当前 Workflow 名，检查项按接口返回逐条渲染（valid=false 时 ✗ 并附接口文案）。 */
+  var WF_CHECK_RULES = [
+    { key: 'start',     text: '有且仅有一个 Start 节点' },
+    { key: 'end',       text: '有且仅有一个 End 节点' },
+    { key: 'start_in',  text: 'Start 节点无入边' },
+    { key: 'end_out',   text: 'End 节点无出边' },
+    { key: 'start_out', text: 'Start 节点至少一条出边' },
+    { key: 'end_in',    text: 'End 节点至少一条入边' },
+    { key: 'reach',     text: '所有 OP 节点从 Start 可达' },
+    { key: 'toward',    text: '所有 OP 节点能到达 End' },
+    { key: 'acyclic',   text: 'DAG 无环（循环回跳除外）' },
+    { key: 'required',  text: '所有 required 入参必须有来源' },
+    { key: 'converge',  text: '有多条入边的节点必须有明确汇聚' }
+  ];
+
+  /* 接口 errors 文案 → 规则 key（§10.14 的 8 条失败文案 + 其余 3 条规则的补充文案） */
+  function wfErrRuleKey(msg) {
+    var m = String(msg || '');
+    if (m.indexOf('从 Start 不可达') >= 0) return 'reach';
+    if (m.indexOf('无法到达 End') >= 0) return 'toward';
+    if (m.indexOf('Start 节点不能有入边') >= 0) return 'start_in';
+    if (m.indexOf('End 节点不能有出边') >= 0) return 'end_out';
+    if (m.indexOf('Start 节点至少需要一条出边') >= 0) return 'start_out';
+    if (m.indexOf('End 节点至少需要一条入边') >= 0) return 'end_in';
+    if (m.indexOf('缺少 Start') >= 0 || m.indexOf('只能有一个 Start') >= 0) return 'start';
+    if (m.indexOf('缺少 End') >= 0 || m.indexOf('只能有一个 End') >= 0) return 'end';
+    if (m.indexOf('环') >= 0) return 'acyclic';
+    if (m.indexOf('汇聚') >= 0) return 'converge';
+    if (m.indexOf('没有来源') >= 0 || m.indexOf('缺少来源') >= 0) return 'required';
+    return '';
+  }
+
+  /* 渲染校验结果：逐条渲染 11 条规则；接口判失败的规则置 ✗ 并附接口文案，其余 ✓；
+     不在 11 条内的 errors（如「引用的 OP 不存在」）作为附加条目列出，不丢信息。 */
+  function renderValidateResult(wfName, res, notice) {
+    var errors = (res && res.errors) || [];
+    document.getElementById('validateWfName').textContent = wfName;
+    var hit = {}, extra = [];
+    errors.forEach(function (e) {
+      var k = wfErrRuleKey(e);
+      if (k) { if (!hit[k]) hit[k] = e; } else extra.push(e);
+    });
+    var html = '';
+    WF_CHECK_RULES.forEach(function (r) {
+      var bad = !!hit[r.key];
+      html += '<div class="check-item">' +
+        '<span class="' + (bad ? 'ck-bad' : 'ck-ok') + '">' + (bad ? '✗' : '✓') + '</span>' +
+        '<span class="ck-text">' + escText(r.text) + (bad ? ' —— ' + escText(hit[r.key]) : '') + '</span>' +
+        '</div>';
+    });
+    extra.forEach(function (e) {
+      html += '<div class="check-item"><span class="ck-bad">✗</span><span class="ck-text">' + escText(e) + '</span></div>';
+    });
+    document.getElementById('checkList').innerHTML = html;
+    var nb = document.getElementById('validateNotice');
+    if (nb) {
+      nb.textContent = notice || '';
+      nb.style.display = notice ? 'block' : 'none';
+    }
+  }
+
+  /* 调用校验接口（crud-03 3.3.6）：opts.alwaysShow = 校验通过也弹窗（[校验] 按钮）；
+     opts.failNotice = 校验未通过时的提示语（保存 / 执行前调用 → 阻止后续动作）；opts.onValid = 通过后的后续动作。 */
+  function runWorkflowValidate(wfName, opts) {
+    opts = opts || {};
+    var wf = WORKFLOW_BY_NAME[wfName];
+    if (!wf) {   // 新建未保存：无 workflowId 可校验
+      if (opts.onUnsaved) opts.onUnsaved();
+      else alert('请先保存后再校验');
+      return;
+    }
+    mockFetch('/api/workflows/' + wf.workflowId + '/validate', { method: 'POST' }).then(function (res) {
+      if (res && res.error) { alert(errorText(res)); return; }
+      var valid = !(res && res.valid === false);
+      if (valid && !opts.alwaysShow) {
+        if (opts.onValid) opts.onValid();
+        return;
+      }
+      renderValidateResult(wf.name || wfName, res, valid ? '' : (opts.failNotice || ''));
+      if (!valid && opts.onFail) opts.onFail();
+      openModal('validateModal');
+    });
+  }
+
+  /* [校验] 按钮：新建（未保存）的 Workflow 提示「请先保存后再校验」 */
+  function openValidateDialog() {
+    runWorkflowValidate(currentWf, { alwaysShow: true });
+  }
+
   function openExecute(name) {
+    var wf = WORKFLOW_BY_NAME[name];
     document.getElementById('execWfName').textContent = name;
+    // G2：按 Workflow 定义的入参渲染输入框（含默认值）
+    var html = '';
+    var inputs = (wf && wf.inputs) || [];
+    if (!inputs.length) {
+      html = '<div class="hint" style="margin-bottom:12px">该 Workflow 无入参</div>';
+    } else {
+      inputs.forEach(function (p) {
+        html +=
+          '<div class="field">' +
+            '<label>' + escText(p.name) + (p.required === true ? '<span class="required">*</span>' : '') + '</label>' +
+            '<input type="text" data-name="' + escText(p.name) + '" value="' + escText(p.default == null ? '' : p.default) + '" />' +
+          '</div>';
+      });
+    }
+    document.getElementById('execInputs').innerHTML = html;
+    document.getElementById('execWorkspace').value = '';
+    loadRecentWorkspaces();
     showView('execute');
   }
 
   function openConfirm() {
+    // G2：二次确认展示真实入参与页面上的工作区
     document.getElementById('confirmWfName').textContent =
       document.getElementById('execWfName').textContent;
+    document.getElementById('confirmWorkspace').textContent =
+      document.getElementById('execWorkspace').value.trim() || '（未填写）';
+    document.getElementById('confirmInputs').textContent = formatInputs(collectExecInputs());
     openModal('confirmModal');
   }
 
   function doExecute() {
-    // POST /api/workflows/{workflowId}/execute —— 单次执行（virtual Job）
+    // G2：POST /api/workflows/{workflowId}/execute —— 提交表单实际入参与页面上的工作区（crud-03 3.3.6）
     var name = document.getElementById('execWfName').textContent;
     var wf = WORKFLOW_BY_NAME[name];
-    var req = { method: 'POST', body: JSON.stringify({ inputs: {}, workspace: '/path/to/workspace' }) };
-    var p = wf ? mockFetch('/api/workflows/' + wf.workflowId + '/execute', req) : Promise.resolve(null);
-    p.then(function () {
+    var inputs = collectExecInputs();
+    var ws = document.getElementById('execWorkspace').value.trim();
+    if (!ws) { alert('请填写工作区'); return; }
+    var submit = function () {
+      var req = { method: 'POST', body: JSON.stringify({ inputs: inputs, workspace: ws }) };
+      mockFetch('/api/workflows/' + wf.workflowId + '/execute', req).then(function (res) {
+        if (res && res.error) { alert(errorText(res)); return; }
+        closeModal('confirmModal');
+        closeView();
+        window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+      });
+    };
+    if (!wf) {   // 找不到定义（不应发生）：保持原行为（直接跳转运行历史）
       closeModal('confirmModal');
       closeView();
-      window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
+      window.location.href = 'index.html';
+      return;
+    }
+    // R6-G1：执行前调用校验接口（crud-03 3.3.6「前端在保存或执行前调用」）——拓扑不合法则取消执行
+    runWorkflowValidate(name, {
+      failNotice: '校验未通过，已取消执行（请先修复上述拓扑错误）',
+      onFail: function () { closeModal('confirmModal'); },
+      onValid: submit
     });
   }
 
@@ -1558,6 +1835,10 @@
     document.getElementById('versionWfName').textContent =
       document.getElementById('wfName').value || '(未命名)';
     document.getElementById('versionCurrent').textContent = currentVersion;
+    // N9：选项文案里的版本号按**当前版本**动态生成（与 #versionCurrent 同源，不再硬编码）
+    var curVerNum = parseInt(String(currentVersion).replace(/^v/, ''), 10) || 1;
+    document.getElementById('verOptTitleUpdate').textContent = '更新版本（v' + curVerNum + ' → v' + (curVerNum + 1) + '）';
+    document.getElementById('verOptTitleKeep').textContent = '不更新版本（覆盖 v' + curVerNum + '）';
     var items = document.querySelectorAll('#versionModal .option-item');
     items.forEach(function (el, i) {
       el.classList.toggle('selected', i === 1);
@@ -1579,33 +1860,56 @@
     var bump = opt && opt.value === 'update';
     var existing = WORKFLOW_BY_NAME[currentWf] || null;
     var ns = curNodes();
+    // 名称取编辑器输入框：新建时 currentWf = '__new__' 只是编辑态哨兵值，不能当提交名称（否则新建的 Workflow 名就叫 __new__）
+    var wfName = (document.getElementById('wfName').value || '').trim();
+    if (!wfName) { alert('请填写 Workflow 名称'); return; }
+    if (wfName.length > 512) { alert('名称长度不能超过 512 字符'); return; }   // R6-G3：proposal-01:78 —— name ≤ 512 字符（后端同样校验）
     var payload = {
-      name: currentWf,
+      name: wfName,
       description: document.getElementById('wfDesc').value,
       inputs: collectWfParams('#wfInputTable', true),
       outputs: collectWfParams('#wfOutputTable', false),
       nodes: Object.keys(ns).map(function (id) { return ns[id]; }),
       edges: curEdges()
     };
-    // 编辑：PUT {workflow, bumpVersion}（crud-03 3.3.4）；新建：POST
-    var req = existing
-      ? mockFetch('/api/workflows/' + existing.workflowId, { method: 'PUT', body: JSON.stringify({ workflow: payload, bumpVersion: !!bump }) })
-      : mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(payload) });
-    req.then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      closeModal('versionModal');
-      closeView();
-      renderWorkflowList();
-    });
+    var submit = function () {
+      // 编辑：PUT {workflow, bumpVersion}（crud-03 3.3.4）；新建：POST
+      var req = existing
+        ? mockFetch('/api/workflows/' + existing.workflowId, { method: 'PUT', body: JSON.stringify({ workflow: payload, bumpVersion: !!bump }) })
+        : mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(payload) });
+      req.then(function (res) {
+        if (res && res.error) { alert(errorText(res)); return; }
+        closeModal('versionModal');
+        closeView();
+        refreshWorkflowList();   // 保存后重新拉取列表（新建的 Workflow 才会出现在列表里）
+      });
+    };
+    // R6-G1：保存前调用校验接口（crud-03 3.3.6「前端在保存或执行前调用，以提示拓扑错误」）——拓扑不合法则取消保存
+    if (existing) {
+      runWorkflowValidate(currentWf, { failNotice: '校验未通过，已取消保存（请先修复上述拓扑错误）', onValid: submit });
+      return;
+    }
+    submit();
   }
 
-  /* 从工作流入参 / 出参表格收集参数（行结构与 OP 编辑器一致） */
+  /* 从工作流入参 / 出参表格收集参数（行结构与 OP 编辑器一致）
+     —— 出参按 API 结构输出 { name, from: { workflowNodeId, outputName }, description }（crud-03 Workflow 对象） */
   function collectWfParams(sel, isInput) {
     var out = [];
     document.querySelectorAll(sel + ' .pt-row').forEach(function (r) {
       var cells = r.querySelectorAll('input, select');
-      if (isInput) out.push({ name: cells[0].value, type: cells[1].value, required: cells[2].value === '是', default: cells[3].value || null, description: cells[4].value });
-      else out.push({ name: cells[0].value, type: cells[1].value, description: cells[2].value });
+      var name = (cells[0].value || '').trim();
+      if (!name) return;   // 空行不提交
+      if (isInput) {
+        out.push({ name: name, type: cells[1].value, required: cells[2].value === '是', default: cells[3].value || null, description: cells[4].value });
+      } else {
+        var parts = String(cells[1].value || '').split('.');
+        out.push({
+          name: name,
+          from: { workflowNodeId: parts[0] || '', outputName: parts[1] || '' },
+          description: cells[2].value
+        });
+      }
     });
     return out;
   }
@@ -1620,8 +1924,8 @@
       createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
     });
     mockFetch('/api/workflows', { method: 'POST', body: JSON.stringify(copy) }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderWorkflowList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshWorkflowList();
     });
   }
 
@@ -1631,8 +1935,8 @@
     if (!wf) return;
     if (!confirm('确认删除 Workflow「' + name + '」？')) return;
     mockFetch('/api/workflows/' + wf.workflowId, { method: 'DELETE' }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderWorkflowList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshWorkflowList();
     });
   }
 
@@ -1683,7 +1987,7 @@
     // crud-03 3.3.8：POST /api/workflows/{workflowId}/export 返回 {zip: base64}，由前端写入所选目录
     mockFetch('/api/workflows/' + (wf ? wf.workflowId : exportTargetName) + '/export', { method: 'POST' })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         return exportDirHandle.getFileHandle(fileName, { create: true })
           .then(function (fileHandle) { return fileHandle.createWritable(); })
           .then(function (writable) { writable.write(base64ToBlob(res.zip || '')); return writable.close(); });
@@ -1705,7 +2009,9 @@
   });
 
   /* ==================== 导入文件选择 ==================== */
+  var importFileB64 = null;   // 所选 .zip 的 base64（导入请求体为 { zip: <base64> }，见 crud-03 3.3.9）
   function openImportModal() {
+    importFileB64 = null;
     document.getElementById('importFileName').textContent = '未选择文件';
     document.getElementById('importFile').value = '';
     document.getElementById('confirmImportBtn').disabled = true;
@@ -1719,20 +2025,34 @@
   function onImportFileChange(input) {
     var file = input.files[0];
     if (!file) return;
+    importFileB64 = null;
     document.getElementById('importFileName').textContent = file.name;
-    document.getElementById('confirmImportBtn').disabled = false;
+    document.getElementById('confirmImportBtn').disabled = true;   // 读到 base64 后才可提交
     var tree = document.getElementById('importTree');
     tree.style.display = 'block';
-    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）\n正在读取…';
+    // 导入请求体是 { zip: <base64> }，故先在浏览器内把所选 .zip 读成 base64（取 data URL 逗号后的部分）
+    var reader = new FileReader();
+    reader.onload = function () {
+      var s = String(reader.result || '');
+      importFileB64 = s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s;
+      document.getElementById('confirmImportBtn').disabled = false;
+      tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    };
+    reader.onerror = function () {
+      alert('读取文件失败，请重新选择');
+    };
+    reader.readAsDataURL(file);
   }
   function confirmImport() {
-    var name = document.getElementById('importFileName').textContent;
-    // crud-03 3.3.9：POST /api/workflows/import {yaml} —— 同名 409
-    mockFetch('/api/workflows/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.zip$/, '') + '\n' }) })
+    if (!importFileB64) { alert('请先选择要导入的 ZIP 文件'); return; }
+    // crud-03 3.3.9：POST /api/workflows/import {zip: base64} —— 同名 409
+    mockFetch('/api/workflows/import', { method: 'POST', body: JSON.stringify({ zip: importFileB64 }) })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         alert('已导入：' + (res.name || '') + '（导入成功）');
         closeModal('importModal');
+        refreshWorkflowList();   // 导入后刷新列表
       })
       .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }

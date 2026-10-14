@@ -10,6 +10,7 @@
   :root{
     --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
     --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --text-dim:#9aa1ad;   /* N12：补充定义（取 --text-3 同值）；此前多处 var(--text-dim) 无定义 → 灰色层次丢失 */
     --accent:#3b6ef6;--accent-soft:#eaf0ff;
     --sidebar:#171b25;--sidebar-hover:#232838;
     --failed:#dc2626;--success:#16a34a;--success-bg:#e8f7ee;
@@ -194,13 +195,13 @@
 
       <div class="card">
         <div class="toolbar">
-          <input class="search" placeholder="🔍 搜索..." />
-          <div class="filters">
-            <button class="chip active">全部类型</button>
-            <button class="chip">prompt</button>
-            <button class="chip">bash</button>
-            <button class="chip">python</button>
-            <button class="chip">powershell</button>
+          <input class="search" id="clientSearch" placeholder="🔍 搜索 Client 名称 / 类型 / 二进制路径..." oninput="applyClientFilters()" />
+          <div class="filters" id="clientChips">
+            <button class="chip active" data-type="" onclick="selectClientChip(this)">全部类型</button>
+            <button class="chip" data-type="prompt" onclick="selectClientChip(this)">prompt</button>
+            <button class="chip" data-type="bash" onclick="selectClientChip(this)">bash</button>
+            <button class="chip" data-type="python" onclick="selectClientChip(this)">python</button>
+            <button class="chip" data-type="powershell" onclick="selectClientChip(this)">powershell</button>
           </div>
         </div>
 
@@ -240,7 +241,7 @@
           <div class="form-row">
             <div class="field">
               <label>名称<span class="required">*</span></label>
-              <input type="text" id="clientName" value="Claude Code" />
+              <input type="text" id="clientName" value="Claude Code" maxlength="512" />
             </div>
             <div class="field">
               <label>描述</label>
@@ -318,10 +319,7 @@
             <div class="section-title">Bash 类型配置</div>
             <div class="field">
               <label>二进制路径<span class="required">*</span></label>
-              <div style="display:flex;gap:8px">
-                <input type="text" id="bashPath" value="/usr/bin/bash" style="flex:1" />
-                <button class="btn">浏览</button>
-              </div>
+              <input type="text" id="bashPath" value="/usr/bin/bash" />
             </div>
             <div class="info-box">
               <span>ℹ</span>
@@ -334,10 +332,7 @@
             <div class="section-title">Python 类型配置</div>
             <div class="field">
               <label>二进制路径<span class="required">*</span></label>
-              <div style="display:flex;gap:8px">
-                <input type="text" id="pythonPath" value="/usr/bin/python3" style="flex:1" />
-                <button class="btn">浏览</button>
-              </div>
+              <input type="text" id="pythonPath" value="/usr/bin/python3" />
             </div>
             <div class="info-box">
               <span>ℹ</span>
@@ -350,10 +345,7 @@
             <div class="section-title">PowerShell 类型配置</div>
             <div class="field">
               <label>二进制路径<span class="required">*</span></label>
-              <div style="display:flex;gap:8px">
-                <input type="text" id="psPath" value="C:\Program Files\PowerShell\7\pwsh.exe" style="flex:1" />
-                <button class="btn">浏览</button>
-              </div>
+              <input type="text" id="psPath" value="C:\Program Files\PowerShell\7\pwsh.exe" />
             </div>
             <div class="info-box">
               <span>ℹ</span>
@@ -426,7 +418,7 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="claude_code.yaml" />
+        <input type="text" id="exportFileName" value="client-claude_code.yaml" />
       </div>
       <div class="field">
         <label>导出目录</label>
@@ -465,6 +457,31 @@
     renderClientList();
   }
 
+  var fetchedClients = [];   // 最近一次接口返回的全量列表（前端 mock 过滤的数据源）
+  var clientChipType = '';   // G12：类型 chip（全部 / prompt / bash / python / powershell）
+
+  /* G12：搜索框 + 类型 chip 生效（proposal-01 §18.1.1：Client 搜索匹配 名称 / 类型 / 二进制路径；§18.1.2：类型 chip）
+     §18.1.3 注：原型阶段以前端 mock 过滤模拟 */
+  function applyClientFilters() {
+    var kw = (document.getElementById('clientSearch').value || '').trim().toLowerCase();
+    allClients = fetchedClients.filter(function (c) {
+      if (clientChipType && c.type !== clientChipType) return false;
+      if (kw) {
+        var hay = [c.name, c.type, c.binaryPath || ''].join(' ').toLowerCase();
+        if (hay.indexOf(kw) < 0) return false;
+      }
+      return true;
+    });
+    currentPage = 1;
+    renderClientList();
+  }
+  function selectClientChip(el) {
+    document.querySelectorAll('#clientChips .chip').forEach(function (c) { c.classList.remove('active'); });
+    el.classList.add('active');
+    clientChipType = el.dataset.type || '';
+    applyClientFilters();
+  }
+
   function changePage(delta) {
     currentPage += delta;
     renderClientList();
@@ -497,33 +514,33 @@
 
     pageData.forEach(function(c) {
       var tagClass = 'tag-' + c.type;
-      var inputMethod = c.argsTemplate ? '参数模板: ' + c.argsTemplate : (c.inputMode ? '输入方式: ' + c.inputMode : '固定调用方式');
+      var inputMethod = c.argsTemplate ? '参数模板: ' + c.argsTemplate : '固定调用方式';   // M6：§8.4 —— 无参数模板时显示「固定调用方式」（不再显示 inputMode）
       var detailRows = '';
-      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + c.type + '</td><td class="dt-k">描述</td><td class="dt-v" colspan="3">' + c.description + '</td></tr>';
+      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + escText(c.type) + '</td><td class="dt-k">描述</td><td class="dt-v" colspan="3">' + escText(c.description) + '</td></tr>';   // R6-S1：转义后再拼 HTML
       if (c.type === 'prompt') {
-        detailRows += '<tr><td class="dt-k">command</td><td class="dt-v mono" colspan="5">' + (c.command || '-') + '</td></tr>';
-        detailRows += '<tr><td class="dt-k">inputMode</td><td class="dt-v mono" colspan="5">' + (c.inputMode || '-') + '</td></tr>';
-        detailRows += '<tr><td class="dt-k">outputMode</td><td class="dt-v mono" colspan="5">' + (c.outputMode || '-') + (c.outputJsonPath ? ' / ' + c.outputJsonPath : '') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">command</td><td class="dt-v mono" colspan="5">' + escText(c.command || '-') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">inputMode</td><td class="dt-v mono" colspan="5">' + escText(c.inputMode || '-') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">outputMode</td><td class="dt-v mono" colspan="5">' + escText(c.outputMode || '-') + (c.outputJsonPath ? ' / ' + escText(c.outputJsonPath) : '') + '</td></tr>';
       } else {
         /* 脚本类（bash / python / powershell）无输出模式字段（恒为空） */
-        detailRows += '<tr><td class="dt-k">binaryPath</td><td class="dt-v mono" colspan="5">' + (c.binaryPath || '-') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">binaryPath</td><td class="dt-v mono" colspan="5">' + escText(c.binaryPath || '-') + '</td></tr>';
       }
       if (c.argsTemplate) {
-        detailRows += '<tr><td class="dt-k">argsTemplate</td><td class="dt-v mono" colspan="5">' + c.argsTemplate + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">argsTemplate</td><td class="dt-v mono" colspan="5">' + escText(c.argsTemplate) + '</td></tr>';
       }
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer" onclick="toggleDetail(this,\'' + c.clientId + '\',\'' + c.type + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + c.name + '</span>' +
+        '<td style="padding:10px 8px;cursor:pointer" data-action="toggle-detail" data-client-id="' + escText(c.clientId) + '" data-type="' + escText(c.type) + '">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + escText(c.name) + '</span>' +
         '</td>' +
-        '<td style="padding:10px 8px"><span class="tag ' + tagClass + '">' + c.type + '</span></td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (c.binaryPath || c.command || '-') + '</td>' +
-        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim)">' + inputMethod + '</td>' +
-        '<td style="padding:10px 8px">' + (c.outputMode || '-') + '</td>' +
+        '<td style="padding:10px 8px"><span class="tag ' + escText(tagClass) + '">' + escText(c.type) + '</span></td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escText(c.binaryPath || c.command || '-') + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim)">' + escText(inputMethod) + '</td>' +
+        '<td style="padding:10px 8px">' + escText(c.outputMode || '-') + '</td>' +
         '<td style="padding:10px 8px">' +
-          '<button class="btn btn-sm" onclick="editClient(\'' + c.clientId + '\',\'' + c.type + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + c.name + '\',\'' + c.type + '\',\'' + c.clientId + '\')">导出</button>' +
-          '<button class="btn btn-sm" onclick="dupClient(\'' + c.clientId + '\')">复制</button>' +
-          '<button class="btn btn-sm btn-danger" onclick="delClient(\'' + c.clientId + '\')">删除</button>' +
+          '<button class="btn btn-sm" data-action="edit" data-client-id="' + escText(c.clientId) + '" data-type="' + escText(c.type) + '">编辑</button>' +
+          '<button class="btn btn-sm" data-action="export" data-name="' + escText(c.name) + '" data-type="' + escText(c.type) + '" data-client-id="' + escText(c.clientId) + '">导出</button>' +
+          '<button class="btn btn-sm" data-action="dup" data-client-id="' + escText(c.clientId) + '">复制</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="del" data-client-id="' + escText(c.clientId) + '">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -544,10 +561,10 @@
       '<div style="display:flex;align-items:center;gap:8px">' +
         '<span>每页</span>' +
         '<select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' +
-          '<option value="10">10</option>' +
-          '<option value="50">50</option>' +
-          '<option value="100">100</option>' +
-          '<option value="1000">1000</option>' +
+          '<option value="10"' + (pageSize === 10 ? ' selected' : '') + '>10</option>' +
+          '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50</option>' +
+          '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100</option>' +
+          '<option value="1000"' + (pageSize === 1000 ? ' selected' : '') + '>1000</option>' +
         '</select>' +
         '<span id="totalCount">共 ' + total + ' 条</span>' +
       '</div>' +
@@ -559,8 +576,25 @@
     '</div>';
     container.insertAdjacentHTML('afterend', paginationHtml);
   }
-  // 调用接口获取数据
-  mockFetch('/api/clients').then(renderClientList);
+  // 调用接口获取数据（crud-01 3.1.1：列表响应 { items, total, page, page_size }，用 listItems 取数组）
+  function refreshClientList() {
+    mockFetch('/api/clients').then(function (res) { fetchedClients = listItems(res); applyClientFilters(); });
+  }
+  refreshClientList();
+
+  /* R6-S1：列表行一律用 data-* 传参 + 事件委托（name 允许任意 UTF-8 字符，不得拼进 onclick） */
+  document.getElementById('clientList').addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) return;
+    var d = el.dataset;
+    switch (d.action) {
+      case 'toggle-detail': toggleDetail(el, d.clientId, d.type); break;
+      case 'edit': editClient(d.clientId, d.type); break;
+      case 'export': openExport(d.name, d.type, d.clientId); break;
+      case 'dup': dupClient(d.clientId); break;
+      case 'del': delClient(d.clientId); break;
+    }
+  });
 
   // ---------- 行内展开详情 ----------
   function toggleDetail(el, name, type) {
@@ -604,6 +638,16 @@
     document.getElementById('psPath').value = '';
     switchType('prompt');
     document.querySelector('input[name="clientType"][value="prompt"]').checked = true;
+    // G5：新建（未保存）的 Client 无 clientId，禁用「测试命令」（后端测试接口需 clientId，crud-01 3.1.6）
+    setTestEnabled(false);
+  }
+
+  /* G5：测试按钮可用性（新建未保存 → 禁用） */
+  function setTestEnabled(on) {
+    var btn = document.getElementById('testBtn');
+    if (!btn) return;
+    btn.disabled = !on;
+    btn.title = on ? '' : '未保存的 Client 不可测试，请先保存后再测试';
   }
 
   function editClient(clientIdOrName, type) {
@@ -638,6 +682,7 @@
     updateArgHint();
     document.querySelector('input[name="clientType"][value="' + (c.type || type) + '"]').checked = true;
     switchType(c.type || type);
+    setTestEnabled(true);   // G5：已保存的 Client 可测试
   }
 
   function closeEditor() {
@@ -649,6 +694,7 @@
     // 简易校验
     var name = document.getElementById('clientName').value.trim();
     if (!name) { alert('请填写名称'); return; }
+    if (name.length > 512) { alert('名称长度不能超过 512 字符'); return; }   // R6-G3：proposal-01:78 —— name ≤ 512 字符（后端同样校验）
     var type = document.querySelector('input[name="clientType"]:checked').value;
     if (type === 'prompt' && !document.getElementById('promptCommand').value.trim()) {
       alert('请填写命令'); return;
@@ -679,9 +725,11 @@
     var p = isNewClient
       ? mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(payload) })
       : mockFetch('/api/clients/' + editingClientId, { method: 'PUT', body: JSON.stringify(payload) });
-    p.then(function () {
+    p.then(function (res) {
+      // G3：检查错误响应（同名 409 CLIENT_NAME_EXISTS / 字段校验失败 → 提示并保持编辑器打开）
+      if (res && res.error) { alert('保存失败：' + errorText(res)); return; }
       closeEditor();
-      mockFetch('/api/clients').then(renderClientList);
+      refreshClientList();
     });
   }
 
@@ -694,8 +742,8 @@
       createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
     });
     mockFetch('/api/clients', { method: 'POST', body: JSON.stringify(copy) }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderClientList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshClientList();
     });
   }
 
@@ -705,8 +753,8 @@
     if (!cl) return;
     if (!confirm('确认删除 Client「' + cl.name + '」？')) return;
     mockFetch('/api/clients/' + clientId, { method: 'DELETE' }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderClientList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshClientList();
     });
   }
 
@@ -771,10 +819,15 @@
   }
 
   function runTest() {
-    // POST /api/clients/{clientId}/test（同步执行，见 crud-01 3.1.6）
-    var cid = (typeof editingClientId !== 'undefined' && editingClientId) ? editingClientId : (CLIENTS[0] && CLIENTS[0].clientId);
+    // POST /api/clients/{clientId}/test（同步执行，见 crud-01 3.1.6）—— G5：只测当前编辑中的 Client
+    var cid = editingClientId || '';
     var result = document.getElementById('testResult');
-    if (!cid) { result.className = 'test-result show err'; result.textContent = '✗ 未选择 Client'; return; }
+    if (!cid) {
+      // G5：未保存（新建）的 Client 无 clientId，不可测试（原实现会错测列表第一个 Client）
+      result.className = 'test-result show fail';
+      result.textContent = '✗ 未保存的 Client 不可测试，请先保存后再测试';
+      return;
+    }
     result.className = 'test-result';
     result.textContent = '测试中...';
     mockFetch('/api/clients/' + cid + '/test', { method: 'POST' }).then(function (r) {
@@ -782,8 +835,8 @@
         result.className = 'test-result show ok';
         result.textContent = '✓ 命令可用（exitCode=' + r.exitCode + '，' + r.durationMs + 'ms）';
       } else {
-        result.className = 'test-result show err';
-        result.textContent = '✗ 测试失败：' + ((r && r.error) || 'unknown');
+        result.className = 'test-result show fail';
+        result.textContent = '✗ 测试失败：' + (errorText(r) || 'unknown');
       }
     });
   }
@@ -823,22 +876,31 @@
     document.getElementById('confirmImportBtn').disabled = false;
     var tree = document.getElementById('importTree');
     tree.style.display = 'block';
-    if (/\.ya?ml$/.test(file.name)) {
-      var reader = new FileReader();
-      reader.onload = function (e) { importFileText = e.target.result; tree.textContent = file.name + '\n' + importFileText; };
-      reader.readAsText(file);
-    } else {
-      importFileText = 'name: ' + file.name.replace(/\.ya?ml$/, '') + '\ntype: prompt\n';
-      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
-    }
+    /* M2：导入一律提交文件的**真实文本**（crud-01 3.1.8 请求体 yaml = YAML 文本内容），不再按扩展名用文件名伪造 YAML */
+    importFileText = '';
+    tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      importFileText = (e.target && e.target.result != null) ? String(e.target.result) : '';
+      tree.textContent = file.name + '\n' + importFileText;
+    };
+    reader.onerror = function () {
+      importFileText = '';
+      tree.textContent = file.name + '\n（文件读取失败，请重新选择）';
+      document.getElementById('confirmImportBtn').disabled = true;
+      alert('读取文件失败：' + file.name);
+    };
+    reader.readAsText(file);
   }
   function confirmImport() {
+    if (!importFileText) { alert('请先选择要导入的 YAML 文件'); return; }   // M2：内容未读到（未选/读取失败）不允许提交
     // crud-01 3.1.8：POST /api/clients/import {yaml} —— 同名 409
     mockFetch('/api/clients/import', { method: 'POST', body: JSON.stringify({ yaml: importFileText }) })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         alert('已导入：' + (res.name || '') + '（导入成功）');
         closeModal('importModal');
+        refreshClientList();   // G6：UC-C3 —— 导入成功后列表刷新，新增 Client 可见
       })
       .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }
@@ -852,14 +914,8 @@
     exportTargetName = name;
     exportTargetType = type;
     exportTargetId = clientId;
-    var fileNameMap = {
-      'Claude Code': 'claude_code',
-      'Codex CLI': 'codex_cli',
-      '本地 Bash': 'local_bash',
-      '本地 Python': 'local_python',
-      '本地 PowerShell': 'local_powershell'
-    };
-    document.getElementById('exportFileName').value = 'client-' + (fileNameMap[name] || 'client') + '.yaml';
+    // G4：默认文件名用**真实 name 的 slug**（crud-01 3.1.7 `client-<name>.yaml`），不再依赖内置名称硬编码映射
+    document.getElementById('exportFileName').value = 'client-' + slugName(name) + '.yaml';
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');
@@ -884,7 +940,7 @@
     // crud-01 3.1.7：POST /api/clients/{clientId}/export 返回 {yaml}，由前端写入所选目录
     mockFetch('/api/clients/' + exportTargetId + '/export', { method: 'POST' })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         return exportDirHandle.getFileHandle(fileName, { create: true })
           .then(function (fileHandle) { return fileHandle.createWritable(); })
           .then(function (writable) { writable.write(res.yaml || ''); return writable.close(); });

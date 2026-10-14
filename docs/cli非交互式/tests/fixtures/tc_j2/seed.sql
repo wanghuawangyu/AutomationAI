@@ -8,6 +8,7 @@
 --   * 运行历史是“执行产物”，前端无法新建；此处直接 INSERT job_runs / step_records。
 --   * job_id / op_id 均按 **名称解析**（jobs.name / ops.name），不依赖随机 uuid，可重复执行。
 --   * 仅为 3 个 target=op_always_fail 的 Job 注入 failed 运行；其余 Job 保持无运行记录。
+--   * 为可读性与用例引用，本夹具使用非 UUID 的可读占位 id（如 run-tc-j2-01）；仅用于测试注入，不代表接口返回的 id 形态（生产为 32 位无连字符 UUID）。
 -- ============================================================
 PRAGMA foreign_keys = ON;
 

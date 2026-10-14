@@ -4,7 +4,7 @@ type: powershell
 description: 重启服务
 content: |
   Restart-Service $svc
-timeoutMs: 60000
+timeoutSeconds: 60
 inputs:
   - {name: svc, type: string, required: true, default: null, description: 服务名}
 outputs:

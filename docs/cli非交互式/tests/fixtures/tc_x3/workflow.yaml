@@ -4,12 +4,12 @@ description: TC-X3 多类型节点（prompt + bash）
 inputs:
   - {name: env, type: string, required: true, description: 目标环境}
 outputs:
-  - {name: artifact, from: {nodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d2, outputName: artifact}, description: 构建产物}
+  - {name: artifact, from: {workflowNodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d2, outputName: artifact}, description: 构建产物}
 nodes:
-  - {nodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0, label: node_start, kind: start, position: {x: 40, y: 120}}
-  - {nodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d1, label: node_review, kind: op, opName: op_prompt_review, opVersion: 1, bindings: {code: {kind: literal, value: sample}}, position: {x: 240, y: 120}}
-  - {nodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d2, label: node_build, kind: op, opName: op_bash_build, opVersion: 1, bindings: {target: {kind: workflow_input, inputName: env}}, position: {x: 440, y: 120}}
-  - {nodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d3, label: node_end, kind: end, position: {x: 640, y: 120}}
+  - {workflowNodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d1, label: node_review, kind: op, opName: op_prompt_review, opVersion: 1, clientName: Claude Code, bindings: {code: {kind: literal, value: sample}}, position: {x: 240, y: 120}}
+  - {workflowNodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d2, label: node_build, kind: op, opName: op_bash_build, opVersion: 1, clientName: bash-build, bindings: {target: {kind: workflow_input, inputName: env}}, position: {x: 440, y: 120}}
+  - {workflowNodeId: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d3, label: node_end, kind: end, position: {x: 640, y: 120}}
 edges:
   - {from: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0, to: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d1, condition: on_success}
   - {from: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d1, to: d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d2, condition: on_success}

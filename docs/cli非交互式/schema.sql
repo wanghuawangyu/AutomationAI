@@ -13,6 +13,8 @@
 
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
+-- DB 结构版本（= 接口附加返回的 db_version，见 crud-06 3.3）；结构变更时同步 +1 并在 db/migrate.rs 做幂等升级
+PRAGMA user_version = 1;
 
 -- ============================================================
 -- 1. clients —— Client 管理
@@ -124,7 +126,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_id          TEXT PRIMARY KEY,                    -- 32 位 UUID
     name            TEXT NOT NULL UNIQUE,                 -- 全局唯一; 边界: 长度 ≤ 512 字符, 字符集不限(任意 UTF-8 字符)
     description     TEXT,
-    kind            TEXT NOT NULL DEFAULT 'persistent' CHECK (kind IN ('persistent','virtual')),
+    kind            TEXT NOT NULL DEFAULT 'persistent' CHECK (kind = 'persistent'),  -- 恒为 persistent; virtual Run 只存于 job_runs.job_kind, 不落 jobs 表
     version         INTEGER NOT NULL DEFAULT 1,
 
     -- target: {"kind":"op","opId":"...","opVersion":2,"clientId":"..."} 或 {"kind":"workflow","workflowId":"...","workflowVersion":1}
@@ -152,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_name ON jobs(name);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS job_runs (
     run_id          TEXT PRIMARY KEY,                    -- 32 位 UUID
-    job_id          TEXT NOT NULL,                       -- 所属 job (jobs.job_id)
+    job_id          TEXT NOT NULL,                       -- 所属 job (jobs.job_id); virtual Run (single_op/single_workflow) 无对应 jobs 行 -> 写后端生成的一次性占位 UUID (32 位, 仅作快照/关联键, 与 jobs.job_id 无对应关系)
     job_kind        TEXT NOT NULL CHECK (job_kind IN ('persistent','virtual')),
     job_version     INTEGER,                             -- Job 修订号; virtual Run (单次执行) 无此值 -> NULL
     triggered_by    TEXT NOT NULL CHECK (triggered_by IN ('manual','schedule','single_op','single_workflow','retry')),
@@ -190,7 +192,8 @@ CREATE TABLE IF NOT EXISTS job_runs (
     -- 状态最后更新时间（每次 job_runs 状态/结果写入刷新；供 3.5.3 status 轮询返回）
     updated_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000')
 
-    -- job_id 为快照引用（允许 Job 删除后保留历史），不加强外键约束（见 crud-04 3.4.5）
+    -- job_id 为快照引用（允许 Job 删除后保留历史），不加强外键约束（见 crud-04 3.4.5）；
+    -- virtual Run 的 job_id 为一次性占位 UUID（无对应 jobs 行，不加强外键，见 crud-05 3.5.1）
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_status ON job_runs(status);
@@ -253,7 +256,7 @@ CREATE INDEX IF NOT EXISTS idx_steps_run ON step_records(run_id);
 CREATE INDEX IF NOT EXISTS idx_steps_op ON step_records(op_id);
 CREATE INDEX IF NOT EXISTS idx_steps_status ON step_records(status);
 CREATE INDEX IF NOT EXISTS idx_steps_waiting ON step_records(status, created_at_ms) WHERE status = 'waiting'; -- WorkerPool 调度线程轮询 waiting 队列
-CREATE INDEX IF NOT EXISTS idx_steps_activation ON step_records(run_id, step_id, activation_seq, retry_seq); -- 定位一次实际执行 / 重试计数 / 循环上限判定
+CREATE UNIQUE INDEX IF NOT EXISTS uq_steps_execution ON step_records(run_id, step_id, activation_seq, retry_seq); -- 四元组唯一标识一次实际执行（DB 层强制；已覆盖同列序的普通索引）
 
 -- ============================================================
 -- 8. engine_events —— Engine 调度事件流 (调度过程记录, 事件溯源)

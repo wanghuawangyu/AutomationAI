@@ -86,17 +86,17 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T2.1 | 前端资源组织与构建：以 `原型图/*` 为基线，整理为可嵌入的静态资源目录 | proposal-01 §4 | 产出 `ui/`（HTML/JS/CSS），无外部依赖 |
 | T2.2 | **构建内嵌 + 运行时释放**：`build.rs`/`rust-embed` 将 `ui/` 编入二进制；启动时在**二进制所在目录**把静态文件重写到磁盘（目录名待定，如 `<exe_dir>/ui/`） | 需求（构建打包进二进制、运行写到二进制目录） | 双击二进制即得完整前端，无需外部文件 |
 | T2.3 | 两栏布局 + 左侧固定菜单（五一级项 + 左下角设置）+ 路由 | proposal-01 §4.1 | 启动默认进入运行历史 |
-| T2.4 | 通用组件：分页条、搜索框、筛选 chip、二次确认、版本确认对话框、自动刷新开关 | proposal-01 §17 | 组件复用 |
-| T2.5 | 前端 API 客户端层（base `/api`、分页/筛选参数、错误提示） | proposal-01 §17.1.3 | 统一 fetch 封装 |
+| T2.4 | 通用组件：分页条、搜索框、筛选 chip、二次确认、版本确认对话框、自动刷新开关 | proposal-01 §18.0.1~18.0.3（分页）/§18.1（搜索与筛选）/§19.6（通用组件） | 组件复用 |
+| T2.5 | 前端 API 客户端层（base `/api`、分页/筛选参数、错误提示） | proposal-01 §18.1.3 | 统一 fetch 封装 |
 | T2.6 | Client 列表 + 行内展开 + 编辑器(prompt/脚本) + 测试/导入/导出对话框 | proposal-01 §8 | 对齐 T6 接口 |
 | T2.7 | OP 列表 + 行内展开 + 编辑器 + 单次执行对话框 + 导入/导出 | proposal-01 §9 | 对齐 T7 接口 |
-| T2.8 | 共享画布模块 `workflow-canvas.css/js`（只读 + 编辑模式，三色锚点/箭头/状态色） | proposal-01 §10.6/§17.9 | 三处画布复用同一实现 |
+| T2.8 | 共享画布模块 `workflow-canvas.css/js`（只读 + 编辑模式，三色锚点/箭头/状态色） | proposal-01 §10.6/§19.9 | 三处画布复用同一实现 |
 | T2.9 | Workflow 列表 + 行内展开（只读画布） + 三栏编辑器（OP 库/画布/节点详情常驻）+ 校验面板 | proposal-01 §10 | 对齐 T8 接口 |
 | T2.10 | Job 列表 + 行内展开 + 编辑器 + 手动运行确认弹窗 + 导入/导出 | proposal-01 §11 | 对齐 T10 接口 |
 | T2.11 | 运行历史（首页）：列表 + 筛选（类型/来源/触发/状态/工作区/版本/时间）+ OP 详情 + Workflow 详情（只读画布）+ 终止/重跑/重试 + 全部导出 | proposal-01 §12 | Job 列表不给终止入口（终止仅在运行历史） |
 | T2.12 | 设置界面 `settings.html`（分组导航 + 表单 + 只读项 + 恢复默认） | proposal-01 §4.2 / crud-06 | 对齐 T5 接口；`db_version` 不展示 |
-| T2.13 | 轮询与自动刷新（读 `general.poll_interval_ms`，默认 2000） | proposal-01 §7.8/§12.10 | 不误读 `runner.poll_interval_ms` |
-| T2.14 | 导入/导出前端交互（YAML/ZIP 选文件、选目录；运行历史导出走后端接口） | proposal-01 §8.9/§8.10/§16.7 | 与后端 T6/T7/T8/T10/T9 口径一致 |
+| T2.13 | 轮询与自动刷新（读 `general.poll_interval_ms`，默认 2000） | proposal-01 §7.8/§12.10 | 不误读后端 `runner.runner_poll_interval_ms`（Task Runner 调度轮询，crud-06 一） |
+| T2.14 | 导入/导出前端交互（YAML/ZIP 选文件、选目录；运行历史导出走后端接口） | proposal-01 §8.10/§17.7 | 与后端 T6/T7/T8/T10/T9 口径一致 |
 | T2.15 | 工作区选择器（`GET /api/workspaces`） | crud-06 3.6 | 数据源 = `job_runs.workspace` 去重倒序 |
 
 ---
@@ -112,10 +112,10 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T3.2 | 建表脚本集成与迁移（`PRAGMA user_version` = `db_version`） | schema.sql | 空库初始化 + 幂等升级 |
 | T3.3 | 实体结构体与列映射（camelCase ↔ snake_case） | 各 crud 的"字段映射"表 | `FromRow`/serde 双向一致 |
 | T3.4 | `ClientRepo` / `OpRepo` / `WorkflowRepo` / `JobRepo` / `RunRepo` / `StepRepo` / `EngineEventRepo` trait + 实现 | proposal-02 §6 | 业务代码零裸 SQL |
-| T3.5 | JSON 字段序列化/反序列化（inputs/outputs/target/trigger/bindings/retry/edges/position） | proposal-02 §6 | TEXT 存取一致 |
+| T3.5 | JSON 字段序列化/反序列化（inputs/outputs/target/trigger/bindings/retry/edges；`position` 为 `position_x`/`position_y` 两列，不入 JSON） | proposal-02 §6 | TEXT 存取一致 |
 | T3.6 | 事务封装（`BEGIN IMMEDIATE`，先查后写原子性） | crud-04 3.4.5/3.4.6、crud-05 3.5.7/3.5.8 | 并发检查+创建/删除同事务 |
 | T3.7 | 通用列表查询构造（keyword LIKE + 多条件 AND + 排序 + 分页） | proposal-02 §11 | 复用于各列表接口 |
-| T3.8 | 运行历史清理 SQL（`history_max_per_job/total/age_days`，仅终态） | crud-06「保存策略」 | 三条任一超限即清理 |
+| T3.8 | 运行历史清理 SQL（`history_max_per_job/total/age_days`，仅终态） | crud-06「保存策略」 | 三条任一超限即清理；清理时同步删 Run 日志 |
 | T3.9 | Repository 单元测试（含唯一约束、快照引用、级联删除） | schema.sql | `cargo test` 通过 |
 
 ---
@@ -148,8 +148,8 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T5.1 | `Config` 结构 + 分组 + 内置默认值常量 | crud-06 一 | 覆盖通用/Client/OP/Workflow/运行历史/Engine/Worker/Task Runner/Scheduler/日志 |
 | T5.2 | `ConfigRepo`：读 `ai-automation.json` → `Arc<RwLock<Config>>` | crud-06 〇 | 唯一事实来源 |
 | T5.3 | 原子写回（写 `.tmp` → `rename`） | crud-06 〇/3.4 | 防半写损坏 |
-| T5.4 | 首次启动/缺失→写默认；损坏→报错或备份 `.bak` 重建 | crud-06 〇 | 不静默残缺运行 |
-| T5.5 | `config_version` 迁移 + 失败回退（备份、不递增、`migrate_error`） | crud-06 3.4（P6） | 见 K 侧规则 |
+| T5.4 | 首次启动/缺失→写默认；损坏→备份 `.bak` 并按内置默认重建 + 显式告警（**不拒绝启动**） | crud-06 〇 | 不静默残缺运行 |
+| T5.5 | `config_version` 迁移 + 失败回退（备份、不递增、`migrate_error`） | crud-06 3.4（P6） | 见 crud-06 3.4（P6） |
 | T5.6 | `GET /api/settings`：全部配置 + `runDir` + 只读派生项（`db_path`/`workspace_root` 后端拼接） | crud-06 3.3 | 值为 string；`db_version` 附加返回 |
 | T5.7 | `PUT /api/settings`：校验（key/value/上限、**只读项拒绝**）→ 更新内存 → 原子写回；写失败回滚内存并 500 | crud-06 3.4 | 只读项 `db_path/workspace_root/config_version/db_version` 明确拒绝 |
 | T5.8 | 数值上限校验表落地 | crud-06「数值项上限」 | `max_loop_multiplier` 0 或 1..10000；`history_max_age_days` 硬上限 180 |
@@ -183,6 +183,8 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T6.13 | 子进程启动（`current_dir=workspace`、独立进程组 `setsid/process_group=0`） + **spawn 起算超时** + 超时按进程组 kill 整树 | crud-01 5.1；proposal-01 §14.2 | 排队时长不计入 |
 | T6.14 | 结果回收（stdout_file/stderr_file/rc_file/outputs.json → `ExecuteResult`） | crud-01 5.1/5.4 | `status=success/failed/timeout` |
 | T6.15 | 四类 Client 联调（bash/python/powershell/prompt 各跑通 test） | crud-01 5.0 | 端到端可测 |
+| T6.16 | `POST /api/clients/{clientId}/export`（返回 YAML 文本；默认名 `client-<name>.yaml`） | crud-01 3.1.7 | `{yaml}`；404 `CLIENT_NOT_FOUND` |
+| T6.17 | `POST /api/clients/import`（YAML 解析与字段校验、`client_import_max_bytes` 上限、同名 409） | crud-01 3.1.8 | 400/409；`clientId` 后端重新生成 |
 
 ---
 
@@ -214,13 +216,13 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 |-|-|-|-|
 | T8.1 | `GET /api/workflows`（含 `nodeCount`、needsUpdate 过滤、分页/排序） | crud-03 3.3.1 | — |
 | T8.2 | `GET /api/workflows/{workflowId}`（含 nodes/edges） | crud-03 3.3.2 | 400/404 |
-| T8.3 | `POST /api/workflows`（默认 Start+End 骨架；position 必填否则 400） | crud-03 3.3.3 | 400/409 |
-| T8.4 | `PUT /api/workflows/{workflowId}`（`{workflow,bumpVersion}`） | crud-03 3.3.4 | 400/404/409 |
+| T8.3 | `POST /api/workflows`（默认 Start+End 骨架；position 必填否则 400） | crud-03 3.3.3 | 400/409；节点数 > settings `workflow_max_nodes` → 400 `VALIDATION_ERROR` |
+| T8.4 | `PUT /api/workflows/{workflowId}`（`{workflow,bumpVersion}`） | crud-03 3.3.4 | 400/404/409；节点数 > settings `workflow_max_nodes` → 400 `VALIDATION_ERROR` |
 | T8.5 | `DELETE /api/workflows/{workflowId}`（被 Job 引用 → 409 `WORKFLOW_REFERENCED`） | crud-03 3.3.5 | — |
 | T8.6 | `POST /validate`：Start/End 唯一、start→end 可达、允许回跳环、Start 无 on_failure、op 节点绑定 opId+opVersion、bindings 引用存在 | crud-03 3.3.6/校验规则 | `{valid,errors[]}` |
 | T8.7 | `POST /execute`（组装 `WorkflowRunRequest` → `add_workflow`，`needsUpdate` 拦截） | crud-03 3.3.7/§4.2 | 投递即结束 |
-| T8.8 | `POST /export`（ZIP：manifest + workflow.yaml + ops/*.yaml；依赖以 **名称** 表达） | crud-03 3.3.8 | `{zip:base64}` |
-| T8.9 | `POST /import`（按 name 重映射 opName→opId / clientName→clientId；节点 workflowNodeId 重新生成 UUID 并重写 edges/outputs.from；同名 409；单事务原子；`warnings`） | crud-03 3.3.9 | 缺 client → 409 `CLIENT_NOT_FOUND` |
+| T8.8 | `POST /export`（ZIP：manifest（含 `clients[]`）+ 根级 workflow.yaml + ops/*.yaml；依赖以 **名称** 表达） | crud-03 3.3.8 | `{zip:base64}` |
+| T8.9 | `POST /import`（按 name 重映射 opName→opId / clientName→clientId；节点 workflowNodeId 重新生成 UUID 并重写 edges/outputs.from；同名 409；单事务原子；`warnings`） | crud-03 3.3.9 | 缺 client → 409 `CLIENT_NOT_FOUND`；同名 client 类型不符 → 400 `CLIENT_TYPE_MISMATCH`；节点数 > settings `workflow_max_nodes` → 400 `VALIDATION_ERROR` |
 | T8.10 | needs-update 内核 + `GET /needs-update` / `GET /outdated-nodes`（落后/超前/悬挂） | crud-03 3.3.10/3.3.11 | 动态计算不落库 |
 | T8.11 | Engine 事件模型：`engine_events` 七类事件 + `process_event` **写即处理**（无循环/无信号） | crud-03 §4.3 | 事件先落库再处理 |
 | T8.12 | 全局完成回调冻结：`JobComplete` / `StepComplete`（按 `source=job/step` 分发） | proposal-02 §1.2；crud-03 4.4 | 与 T9 对齐 |
@@ -235,7 +237,7 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T8.21 | WorkerPool 调度线程：轮询 waiting（跳过未到 `not_before_ms`、跳过所属 run 已终态）、CAS 置 running、指派空闲 Worker（小队列） | crud-03 4.4 | `UPDATE ... WHERE status='waiting'` affected=0 即跳过 |
 | T8.22 | Worker 执行循环：`Executor::execute` → 写终态 + 调全局完成实现（job→JobComplete / step→StepComplete） | crud-03 4.4 | 池大小 = `ceil(job_queue_running_max×1.5)` |
 | T8.23 | 崩溃恢复：启动扫 `status=running` 残留重新指派（复用 record_id） | crud-03 4.4 | — |
-| T8.24 | waiting 任务直接 cancel（terminate 时），running 不可外部 cancel（唯一 kill = 自身 timeoutMs） | crud-03 4.4；proposal-01 §1 约束 22 | Job/Workflow 一致 |
+| T8.24 | step 仍 waiting 排队时直接 cancel（terminate 时），step 已开始执行（`running`）不可外部 cancel（唯一 kill = 自身 `timeoutSeconds`） | crud-03 4.4；crud-05 3.5.6 | Job/Workflow 一致 |
 | T8.25 | 失败走边前置（V11-B）：失败且有 activated 出边才走边，否则整 Run failed | crud-03 4.3.1 | — |
 | T8.26 | import 缺坐标默认排布（`workflow_auto_layout`） | crud-06 一 | 后端生成并持久化 |
 
@@ -251,7 +253,7 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T9.1 | TaskRunner 单例 + `add_op/add_job/add_workflow`：写 `job_runs(status=waiting)` 返回 runId | crud-05 4.6；crud-02/03 接口 | 创建即返回 |
 | T9.2 | 常驻轮询调度线程：`runner_poll_interval_ms` 扫描、`job_queue_running_max` 并发阈值、`runner_batch_size` 批数、FIFO；OP 直接派 WorkerPool，Job/Workflow 调 `engine.notify(EngineStart)` | crud-05 4.6；proposal-02 §1.2 | waiting→running |
 | T9.3 | 全局 waiting 上限检查（`job_queue_waiting_max`）**全入口统一**（手动/cron/单次/重跑/重试） | crud-04 3.4.6 #3 | 触顶 409 `CONCURRENCY_CONFLICT` |
-| T9.4 | `GET /api/runs`：筛选（keyword/targetKind/triggeredBy/status/workspace/jobKind/version/timeRange）+ 分页/排序 | crud-05 3.5.1 | timeRange 固定枚举 6 档（无 custom） |
+| T9.4 | `GET /api/runs`：筛选（keyword/targetKind/triggeredBy/status/workspace/jobKind/version/timeRange）+ 分页/排序 | crud-05 3.5.1 | timeRange 固定枚举 7 档（无 custom） |
 | T9.5 | `GET /api/runs/{runId}`（含 steps；`result` 由 steps 聚合、不落库） | crud-05 3.5.2 | 400/404 |
 | T9.6 | `GET /api/runs/{runId}/status`（`{status,updatedAtMs}`） | crud-05 3.5.3 | 轻量轮询 |
 | T9.7 | `GET /api/runs/{runId}/steps`（按 `(activation_seq,retry_seq)` 升序） | crud-05 3.5.4 | — |
@@ -260,9 +262,9 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T9.10 | `POST /api/runs/{runId}/rerun`（仅终态；同事务查上限+建 Run） | crud-05 3.5.7 | 409 `RERUN_NOT_ALLOWED` |
 | T9.11 | `POST /api/runs/{runId}/retry`（target=Workflow + 五条件 + 存在失败/超时 step） | crud-05 3.5.8/4.8 | 409 `RETRY_NOT_ALLOWED` |
 | T9.12 | `GET /api/runs/{runId}/can-retry`（reason 枚举） | crud-05 3.5.9 | 前端据此显示重试/重跑 |
-| T9.13 | `POST /api/runs/export`：按筛选生成两 sheet `.xlsx`，以 base64 返回 `{xlsx}`，**不落盘** | crud-05 3.5.10 | 前端解码 base64 后写入所选目录；文件名默认 `job_result-{ts}-{count}.xlsx` 可自定义（D7） |
+| T9.13 | `POST /api/runs/export`：按筛选生成两 sheet `.xlsx`，以 base64 返回 `{xlsx, count}`，**不落盘** | crud-05 3.5.10 | 前端解码 base64 后写入所选目录；文件名默认 `job_result-{ts}-{count}.xlsx` 可自定义（D7） |
 | T9.14 | JobRun/StepRecord 快照落库（name/target 拆列/版本/入参/工作区；Job 删除后历史保留） | crud-04 3.4.5；crud-05 3.5 | 快照引用不强外键 |
-| T9.15 | 历史清理任务（复用轮询线程，三条件任一超限清理，仅终态，同步删 Run 日志） | crud-06「保存策略」 | — |
+| T9.15 | 历史清理任务（复用轮询线程，三条件任一超限清理，仅终态，同步删 Run 日志）；**同一任务内顺带处理 `engine_events` 与可选 checkpoint 表**：成功 run 完成即物理删本 run 事件；失败 run 最终不重试 → 1 天软删（置 `soft_deleted_at_ms`）/ 2 天硬删（`engine_event_retention_days`，crud-06 一） | crud-06「保存策略」/ crud-03 4.3 | 仅终态；不消费 `step_records` 明细 |
 | T9.16 | Runner 常驻 + 启动 `recover`（Engine 事件、WorkerPool running 残留） | proposal-02 §1.2 | 重启重建 |
 
 ---
@@ -283,7 +285,7 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T10.7 | `POST /api/jobs/{jobId}/enable` / `/disable` | crud-04 | 返回 Job |
 | T10.8 | `GET /api/jobs/{jobId}/last-run` | crud-04 | JobRun\|null |
 | T10.9 | `GET /api/jobs/{jobId}/needs-update` | crud-04 | 动态计算 |
-| T10.10 | `POST /api/jobs/{jobId}/export` / `POST /api/jobs/import`（ZIP：manifest + job.yaml + [workflow.yaml + ops/*.yaml ｜ op.yaml]（按 target.kind 二选一）；导入 version 重置为 1、依赖按 manifest 名称锚重映射） | crud-04 3.4.9/3.4.10 | `{zip:base64}` |
+| T10.10 | `POST /api/jobs/{jobId}/export` / `POST /api/jobs/import`（ZIP：manifest + job.yaml + [`workflows/<name>.yaml` + `ops/<name>.yaml` ｜ `ops/<name>.yaml`]（按 `target.kind` 二选一，**无根级 `workflow.yaml`/`op.yaml`**）；导入按 `manifest.target.file` + `job.yaml.target.kind` 定位目标实体、version 重置为 1、依赖按 manifest 名称锚重映射） | crud-04 3.4.9/3.4.10 | `{zip:base64}` |
 | T10.11 | Scheduler 单例（`tokio-cron-scheduler`，时区固定 Local，`scheduler_max_jobs` 上限） | proposal-02 §1.1；crud-04 4.5 | 启动加载 cron Job |
 | T10.12 | cron 到点触发：检查 `enabled` / `needsUpdate` / 全局 waiting 上限；跳过不触发 | crud-04 4.5.2 | 触顶本轮跳过 |
 | T10.13 | `nextRunAtMs` 计算（schedule+enabled+非 needsUpdate 才有值） | crud-04 3.4 字段说明 | 列表/详情返回 |

@@ -4,7 +4,7 @@ type: python
 description: 生成报表
 content: |
   print("report")
-timeoutMs: 300000
+timeoutSeconds: 300
 inputs:
   - {name: source, type: string, required: true, default: null, description: 数据源}
 outputs:

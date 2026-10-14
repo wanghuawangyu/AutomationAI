@@ -4,7 +4,7 @@ type: python
 description: 同步数据
 content: |
   print("sync")
-timeoutMs: 300000
+timeoutSeconds: 300
 inputs:
   - {name: source, type: string, required: true, default: null, description: 数据源}
 outputs:

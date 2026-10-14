@@ -3,7 +3,7 @@ version: 1
 type: prompt
 description: 静态检查
 content: 运行静态检查
-timeoutMs: 60000
+timeoutSeconds: 60
 inputs:
   - {name: target, type: string, required: true, default: null, description: 检查目标}
 outputs:

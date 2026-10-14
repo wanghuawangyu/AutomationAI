@@ -4,9 +4,9 @@ description: 生成报表
 inputs: []
 outputs: []
 nodes:
-  - {nodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b00, label: node_start, kind: start, position: {x: 40, y: 120}}
-  - {nodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
-  - {nodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b02, label: node_end, kind: end, position: {x: 440, y: 120}}
+  - {workflowNodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b00, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
+  - {workflowNodeId: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b02, label: node_end, kind: end, position: {x: 440, y: 120}}
 edges:
   - {from: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b00, to: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01, condition: on_success}
   - {from: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01, to: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b02, condition: on_success}

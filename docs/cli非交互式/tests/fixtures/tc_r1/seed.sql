@@ -4,8 +4,10 @@
 -- 用法:   sqlite3 "{run}/data/data.db" ".read seed.sql"
 -- 说明:
 --   * 运行历史是“执行产物”，前端无法新建；此处直接 INSERT job_runs / step_records。
---   * started_at_ms / finished_at_ms 以“写入时刻”为基准按偏移生成，保证 timeRange 相对当前。
+--   * started_at_ms / finished_at_ms 以“写入时刻”为基准按偏移生成，保证 timeRange 相对当前（timeRange 按 started_at_ms 过滤，见 crud-05 3.5.1）。
+--   * 第 10 条为 waiting（尚未开始）→ started_at_ms / finished_at_ms 均为 NULL（与 crud-05 3.5「waiting 时均 null」一致），故不匹配任何 timeRange 档。
 --   * 共注入 11 条 job_runs + 11 条 step_records（S = 11）。
+--   * 为可读性与用例引用，本夹具使用非 UUID 的可读占位 id（如 run-tc-r1-01）；仅用于测试注入，不代表接口返回的 id 形态（生产为 32 位无连字符 UUID）。
 --   * 全新运行目录可先清空（见下方 DELETE）；测试库请勿在生产数据上执行。
 -- ============================================================
 PRAGMA foreign_keys = ON;
@@ -19,7 +21,7 @@ CREATE TEMP TABLE IF NOT EXISTS _now AS SELECT CAST(strftime('%s','now') AS INTE
 
 -- ------------------------------------------------------------
 -- 11 条 job_runs
---   offset(ms): 1=10m 2=30m 3=2h 4=3h 5=6h 6=20h 7=40h 8=50h 9=5m 10=1m 11=4d
+--   offset(ms): 1=10m 2=30m 3=2h 4=3h 5=6h 6=20h 7=40h 8=50h 9=5m 10=NULL(waiting, 无 started_at) 11=4d
 -- ------------------------------------------------------------
 INSERT INTO job_runs
 (run_id, job_id, job_kind, job_version, triggered_by,
@@ -54,9 +56,9 @@ VALUES
 -- 9 notify (op/persistent/v2/manual/running) 5m
 ('run-tc-r1-09','job-r1-09','persistent',2,'manual','op','10000001',1,'notify','notify','{}','/path/ws-004','running',NULL,
  (SELECT ms FROM _now)-300000, NULL, NULL, (SELECT ms FROM _now)-300000, (SELECT ms FROM _now)-300000),
--- 10 log_analysis (workflow/persistent/v1/schedule/waiting) 1m
+-- 10 log_analysis (workflow/persistent/v1/schedule/waiting) started_at=NULL
 ('run-tc-r1-10','job-r1-10','persistent',1,'schedule','workflow','f0001',1,'log_analysis','log_analysis','{}','/path/ws-005','waiting',NULL,
- (SELECT ms FROM _now)-60000, NULL, NULL, (SELECT ms FROM _now)-60000, (SELECT ms FROM _now)-60000),
+ NULL, NULL, NULL, (SELECT ms FROM _now)-60000, (SELECT ms FROM _now)-60000),
 -- 11 clean_logs (op/persistent/v1/manual/success) 4d
 ('run-tc-r1-11','job-r1-11','persistent',1,'manual','op','10000001',1,'clean_logs','clean_logs','{}','/path/ws-005','success',NULL,
  (SELECT ms FROM _now)-345600000, (SELECT ms FROM _now)-345600000+3200, 3200, (SELECT ms FROM _now)-345600000, (SELECT ms FROM _now)-345600000+3200);
@@ -88,6 +90,6 @@ VALUES
 ('rec-tc-r1-09','run-tc-r1-09','step-tc-r1-09',1,1,'10000001',1,'op_prompt_review',NULL,'job','running','{}',
  (SELECT ms FROM _now)-300000, NULL, NULL),
 ('rec-tc-r1-10','run-tc-r1-10','step-tc-r1-10',1,1,'10000001',1,'op_prompt_review',NULL,'step','waiting','{}',
- (SELECT ms FROM _now)-60000, NULL, NULL),
+ NULL, NULL, NULL),
 ('rec-tc-r1-11','run-tc-r1-11','step-tc-r1-11',1,1,'10000001',1,'op_prompt_review',NULL,'job','success','{}',
  (SELECT ms FROM _now)-345600000, (SELECT ms FROM _now)-345600000+3200, 3200);

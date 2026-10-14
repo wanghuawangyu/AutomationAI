@@ -10,6 +10,7 @@
   :root{
     --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
     --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --text-dim:#9aa1ad;   /* N12：补充定义（取 --text-3 同值）；此前多处 var(--text-dim) 无定义 → 灰色层次丢失 */
     --accent:#3b6ef6;--accent-soft:#eaf0ff;
     --sidebar:#171b25;--sidebar-hover:#232838;
     --failed:#dc2626;--failed-bg:#fdecec;
@@ -233,12 +234,12 @@
 
       <div class="card">
         <div class="toolbar">
-          <input class="search" placeholder="🔍 搜索..." />
-          <div class="filters">
-            <button class="chip active">全部</button>
-            <button class="chip">需要更新</button>
-            <button class="chip">已同步</button>
-            <button class="chip">最近执行失败</button>
+          <input class="search" id="jobSearch" placeholder="🔍 搜索 Job 名称 / Target 名称 / 描述..." oninput="applyJobFilters()" />
+          <div class="filters" id="jobChips">
+            <button class="chip active" data-filter="all" onclick="selectJobChip(this)">全部</button>
+            <button class="chip" data-filter="needs_update" onclick="selectJobChip(this)">需要更新</button>
+            <button class="chip" data-filter="synced" onclick="selectJobChip(this)">已同步</button>
+            <button class="chip" data-filter="last_failed" onclick="selectJobChip(this)">最近执行失败</button>
           </div>
         </div>
 
@@ -279,7 +280,7 @@
           <div class="form-row">
             <div class="field">
               <label>名称<span class="required">*</span></label>
-              <input type="text" id="jobName" value="hourly_check" />
+              <input type="text" id="jobName" value="hourly_check" maxlength="512" />
             </div>
             <div class="field">
               <label>描述</label>
@@ -329,9 +330,12 @@
           <div class="field">
             <label>工作区<span class="required">*</span></label>
             <div style="display:flex;gap:8px">
-              <input type="text" id="jobWorkspace" value="" placeholder="请选择或填写工作区" style="flex:1" />
-              <button class="btn">选择</button>
+              <input type="text" id="jobWorkspace" value="" placeholder="手工输入工作区绝对路径" style="flex:1" />
+              <select class="select" id="jobWorkspaceRecent" style="max-width:180px" onchange="pickRecentWorkspace('jobWorkspace', this.value)">
+                <option value="">最近使用 ▾</option>
+              </select>
             </div>
+            <div class="hint">手工输入绝对路径，或从 [最近使用▾]（GET /api/workspaces）点选回填（proposal-01 §19.6）</div>
           </div>
 
           <!-- 初始入参：name 来源于 OP/Workflow，value 由用户填写 -->
@@ -351,7 +355,7 @@
           <div class="cron-row" id="cronRow" style="display:none">
             <input type="text" id="cronInput" value="" placeholder="Cron 表达式，如 0 * * * *" />
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-2);cursor:pointer">
-              <input type="checkbox" checked style="accent-color:var(--accent);width:14px;height:14px" /> 启用
+              <input type="checkbox" id="cronEnabled" checked style="accent-color:var(--accent);width:14px;height:14px" /> 启用
             </label>
           </div>
 
@@ -390,8 +394,8 @@
         <div class="editor-body">
           <div class="summary" id="runSummary">
             <div><span class="k">即将执行:</span><span class="v" id="runTarget">Workflow: deploy_workflow v2</span></div>
-            <div><span class="k">工作区:</span><span class="v mono">/path/to/workspace</span></div>
-            <div><span class="k">入参:</span><span class="v" id="runInputs">endpoint: https://...</span></div>
+            <div><span class="k">工作区:</span><span class="v mono" id="runWorkspace">/path/to/workspace</span></div>
+            <div><span class="k">入参:</span><span class="v" id="runInputs">（无）</span></div>
             <div><span class="k">触发来源:</span><span class="v" id="runTrigger">手动</span></div>
           </div>
           <div class="info-box" style="margin-top:14px">
@@ -422,14 +426,14 @@
         <label class="option-item" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="update" />
           <div>
-            <div class="opt-title">更新版本（v1 → v2）</div>
+            <div class="opt-title" id="verOptTitleUpdate">更新版本（v1 → v2）</div>
             <div class="opt-desc">创建新版本，历史运行记录保留旧版本快照</div>
           </div>
         </label>
         <label class="option-item selected" onclick="selectVersionOption(this)">
           <input type="radio" name="versionOpt" value="keep" checked />
           <div>
-            <div class="opt-title">不更新版本（覆盖 v1）</div>
+            <div class="opt-title" id="verOptTitleKeep">不更新版本（覆盖 v1）</div>
             <div class="opt-desc">默认选项，覆盖当前版本定义</div>
           </div>
         </label>
@@ -474,9 +478,9 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="hourly_check-v1.zip" />
+        <input type="text" id="exportFileName" value="job-hourly_check-v1.zip" />
       </div>
-      <div class="tree" id="exportTree">hourly_check-v1.zip
+      <div class="tree" id="exportTree">job-hourly_check-v1.zip
 ├── manifest.json
 ├── job.yaml
 ├── workflows/
@@ -521,8 +525,54 @@
 
   /* ==================== 分页状态 ==================== */
   var allJobs = [];
+  var fetchedJobs = [];   // 最近一次接口返回的全量列表（前端 mock 过滤的数据源）
   var currentPage = 1;
   var pageSize = 10;
+  var jobChipFilter = 'all';   // G12：Job 状态 chip（全部 / 需要更新 / 已同步 / 最近执行失败）
+
+  /* G12：搜索框 + chip 生效（proposal-01 §18.1.1：Job 搜索匹配 名称 / Target 名称 / 描述；§18.1.2：状态 chip）
+     §18.1.3 注：原型阶段以前端 mock 过滤模拟；needsUpdate / 最近执行失败维度与 crud-04 3.4.1 查询参数同义 */
+  function applyJobFilters() {
+    var kw = (document.getElementById('jobSearch').value || '').trim().toLowerCase();
+    allJobs = fetchedJobs.filter(function (j) {
+      if (jobChipFilter === 'needs_update' && !j.needsUpdate) return false;
+      if (jobChipFilter === 'synced' && j.needsUpdate) return false;
+      if (jobChipFilter === 'last_failed') {
+        var lr = j.lastRun;
+        if (!lr || !(lr.status === 'failed' || lr.status === 'timeout' || lr.status === 'cancelled')) return false;   // crud-04 failed=true 口径
+      }
+      if (kw) {
+        var hay = [j.name, targetNameOf(j), j.description || ''].join(' ').toLowerCase();
+        if (hay.indexOf(kw) < 0) return false;
+      }
+      return true;
+    });
+    currentPage = 1;
+    renderJobList();
+  }
+  function selectJobChip(el) {
+    document.querySelectorAll('#jobChips .chip').forEach(function (c) { c.classList.remove('active'); });
+    el.classList.add('active');
+    jobChipFilter = el.dataset.filter || 'all';
+    applyJobFilters();
+  }
+
+  /* M8：工作区选择器 = 手工输入 + [最近使用▾]（GET /api/workspaces 回填；proposal-01 §19.6） */
+  function loadRecentWorkspaces() {
+    mockFetch('/api/workspaces').then(function (res) {
+      var items = (res && res.items) || [];
+      var sel = document.getElementById('jobWorkspaceRecent');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">最近使用 ▾</option>' + items.map(function (w) {
+        return '<option value="' + escText(w) + '">' + escText(w) + '</option>';
+      }).join('');
+    });
+  }
+  function pickRecentWorkspace(inputId, value) {
+    if (!value) return;
+    var input = document.getElementById(inputId);
+    if (input) input.value = value;
+  }
 
   function changePageSize() {
     pageSize = parseInt(document.getElementById('pageSize').value);
@@ -567,11 +617,14 @@
         ? '<span class="badge badge-success">✅ 启用</span>'
         : '<span class="badge badge-off">⏸ 已禁用</span>';
       var warnTag = j.needsUpdate ? ' <span class="tag tag-warn">⚠ 需要更新</span>' : '';
-      var cronText = j.trigger.kind === 'schedule' ? 'Cron: ' + j.trigger.cron : '手动';
-      var targetType = j.target.kind === 'op' ? 'OP' : 'Workflow';
+      // S3：trigger / target 为 null 时列表渲染必须容错（crud-04 3.4.3 已在接口侧拦截，前端不再抛 TypeError）
+      var cronText = (j.trigger && j.trigger.kind === 'schedule') ? 'Cron: ' + (j.trigger.cron || '') : '手动';
+      var targetType = (j.target && j.target.kind === 'op') ? 'OP' : 'Workflow';
       var targetName = targetNameOf(j);
+      var targetVersion = j.target ? (j.target.kind === 'op' ? j.target.opVersion : j.target.workflowVersion) : null;
       var workspace = j.workspace || '-';
-      var lr = lastRunOfJob(j.jobId);
+      // G10：直接用列表项返回的 lastRun 摘要（crud-04 3.4.1 固定 5 字段），不再前端 join 全量 Run
+      var lr = j.lastRun || null;
       var lastStatus = !lr ? '<span class="badge badge-off">—</span>'
         : lr.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>'
         : lr.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>'
@@ -583,33 +636,28 @@
       var lastDuration = (!lr || lr.durationMs == null) ? '' : ' ' + (lr.durationMs / 1000).toFixed(1) + 's';
       var runBtn = j.needsUpdate
         ? '<button class="btn btn-sm" disabled title="需要更新后才能运行">运行</button>'
-        : '<button class="btn btn-sm btn-ghost-primary" onclick="openRun(\'' + j.name + '\',\'' + targetType + '\',\'' + targetName + '\',\'v' + (j.target.opVersion || j.target.workflowVersion) + '\',\'手动\')">运行</button>';
-      /* 重试：可用性严格按 can-retry 五条件（与运行历史一致）；点击跳转到运行历史执行 */
-      var retryInfo = lr ? canRetryOf(lr) : { ok: false, reason: '无运行历史' };
-      var retryBtn = retryInfo.ok
-        ? '<button class="btn btn-sm btn-ghost-primary" onclick="location.href=\'index.html\'">重试</button>'
-        : '<button class="btn btn-sm" disabled title="' + (retryInfo.reason || '不满足重试条件') + '">重试</button>';
+        : '<button class="btn btn-sm btn-ghost-primary" data-action="run" data-name="' + escText(j.name) + '" data-target-type="' + escText(targetType) + '" data-target-name="' + escText(targetName) + '" data-target-version="v' + escText(targetVersion) + '">运行</button>';   // R6-S1：data-* 传参
       var toggleBtn = j.enabled
-        ? '<button class="btn btn-sm" onclick="toggleJob(\'' + j.name + '\')">禁用</button>'
-        : '<button class="btn btn-sm" onclick="toggleJob(\'' + j.name + '\')">启用</button>';
+        ? '<button class="btn btn-sm" data-action="toggle-job" data-name="' + escText(j.name) + '">禁用</button>'
+        : '<button class="btn btn-sm" data-action="toggle-job" data-name="' + escText(j.name) + '">启用</button>';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="toggleDetail(this,\'' + j.name + '\',\'v' + j.version + '\',\'' + j.target.kind + '\')">' +
-          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + j.name + '</span> <span class="tag tag-ver">v' + j.version + '</span>' + warnTag +
+        '<td style="padding:10px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-action="toggle-detail" data-name="' + escText(j.name) + '" data-version="v' + escText(j.version) + '" data-target-kind="' + escText(j.target ? j.target.kind : '') + '">' +
+          '<span class="expand-arrow">▶</span> <span style="font-weight:500">' + escText(j.name) + '</span> <span class="tag tag-ver">v' + escText(j.version) + '</span>' + warnTag +
         '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          '<span class="tag ' + (j.target.kind === 'op' ? 'tag-op' : 'tag-wf') + '">' + targetType + '</span> ' + targetName + ' v' + (j.target.opVersion || j.target.workflowVersion) +
+          '<span class="tag ' + ((j.target && j.target.kind === 'op') ? 'tag-op' : 'tag-wf') + '">' + escText(targetType) + '</span> ' + escText(targetName) + ' v' + escText(targetVersion) +
         '</td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + workspace + '</td>' +
-        '<td style="padding:10px 8px;font-size:12px">' + cronText + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escText(workspace) + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px">' + escText(cronText) + '</td>' +
         '<td style="padding:10px 8px">' + enabledBadge + '</td>' +
         '<td style="padding:10px 8px;font-size:12px">' + lastStatus + lastDuration + '</td>' +
         '<td style="padding:10px 8px">' +
-          runBtn + retryBtn +
-          '<button class="btn btn-sm" onclick="openEditor(\'' + j.name + '\',\'' + j.target.kind + '\')">编辑</button>' +
-          '<button class="btn btn-sm" onclick="openExport(\'' + j.name + '\',\'v' + j.version + '\',\'' + j.target.kind + '\')">导出</button>' +
-          '<button class="btn btn-sm" onclick="copyJob(\'' + j.name + '\')">复制</button>' +
+          runBtn +
+          '<button class="btn btn-sm" data-action="edit" data-name="' + escText(j.name) + '" data-target-kind="' + escText(j.target ? j.target.kind : '') + '">编辑</button>' +
+          '<button class="btn btn-sm" data-action="export" data-name="' + escText(j.name) + '" data-version="v' + escText(j.version) + '" data-target-kind="' + escText(j.target ? j.target.kind : '') + '">导出</button>' +
+          '<button class="btn btn-sm" data-action="copy" data-name="' + escText(j.name) + '">复制</button>' +
           toggleBtn +
-          '<button class="btn btn-sm btn-danger" onclick="delJob(\'' + j.name + '\')">删除</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="del" data-name="' + escText(j.name) + '">删除</button>' +
         '</td>' +
       '</tr>' +
       '<tr class="detail-row" style="display:none">' +
@@ -627,8 +675,28 @@
     document.getElementById('prevPage').disabled = currentPage <= 1;
     document.getElementById('nextPage').disabled = currentPage >= totalPages;
   }
-  // 调用接口获取数据
-  mockFetch('/api/jobs').then(renderJobList);
+  // 调用接口获取数据（crud-04 3.4.1：列表响应 { items, total, page, page_size }，用 listItems 取数组）
+  function refreshJobList() {
+    mockFetch('/api/jobs').then(function (res) { fetchedJobs = listItems(res); applyJobFilters(); });
+  }
+  refreshJobList();
+  loadRecentWorkspaces();
+
+  /* R6-S1：列表行一律用 data-* 传参 + 事件委托（name 允许任意 UTF-8 字符，不得拼进 onclick） */
+  document.getElementById('jobList').addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) return;
+    var d = el.dataset;
+    switch (d.action) {
+      case 'toggle-detail': toggleDetail(el, d.name, d.version, d.targetKind); break;
+      case 'run': openRun(d.name, d.targetType, d.targetName, d.targetVersion, '手动'); break;
+      case 'edit': openEditor(d.name, d.targetKind); break;
+      case 'export': openExport(d.name, d.version, d.targetKind); break;
+      case 'copy': copyJob(d.name); break;
+      case 'toggle-job': toggleJob(d.name); break;
+      case 'del': delJob(d.name); break;
+    }
+  });
 
   /* ==================== 行内展开详情（列表） ==================== */
   function toggleDetail(el, name, version, type) {
@@ -660,13 +728,14 @@
     var job = JOB_BY_NAME[name];
     if (!job) return '<div class="dt-empty">无数据</div>';
     var t = job.target;
+    if (!t) return '<table class="detail-table"><tr><td class="dt-k">目标</td><td class="dt-v">未配置</td></tr></table>';   // S3：target 缺失时容错
     var targetText = t.kind === 'op'
-      ? 'OP ' + (OP_BY_ID[t.opId] ? OP_BY_ID[t.opId].name : '(已删除)') + ' v' + t.opVersion
-      : 'Workflow ' + (WORKFLOW_BY_ID[t.workflowId] ? WORKFLOW_BY_ID[t.workflowId].name : '(已删除)') + ' v' + t.workflowVersion;
+      ? 'OP ' + escText(OP_BY_ID[t.opId] ? OP_BY_ID[t.opId].name : '(已删除)') + ' v' + escText(t.opVersion)
+      : 'Workflow ' + escText(WORKFLOW_BY_ID[t.workflowId] ? WORKFLOW_BY_ID[t.workflowId].name : '(已删除)') + ' v' + escText(t.workflowVersion);
     var clientName = (t.kind === 'op' && t.clientId)
-      ? (CLIENT_BY_ID[t.clientId] ? CLIENT_BY_ID[t.clientId].name : '(已删除)')
+      ? escText(CLIENT_BY_ID[t.clientId] ? CLIENT_BY_ID[t.clientId].name : '(已删除)')
       : null;
-    var cronText = job.trigger.kind === 'schedule' ? 'Cron: ' + job.trigger.cron : '手动触发';
+    var cronText = (job.trigger && job.trigger.kind === 'schedule') ? 'Cron: ' + (job.trigger.cron || '') : '手动触发';
     var note = job.needsUpdate ? '需要更新' : '';
     var params = job.inputs || {};
 
@@ -676,18 +745,18 @@
       '<td class="dt-k">状态</td><td class="dt-v">' + (job.enabled ? '✅ 启用' : '⏸ 禁用') + '</td>' +
       '<td class="dt-k">备注</td><td class="dt-v">' + (note || '-') + '</td>' +
       '</tr>';
-    html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + targetText + '</td></tr>';
+    html += '<tr><td class="dt-k">目标</td><td class="dt-v mono" colspan="5">' + escText(targetText) + '</td></tr>';
     if (clientName) {
-      html += '<tr><td class="dt-k">Client</td><td class="dt-v mono" colspan="5">' + clientName + '（OP 专有，存放于 target）</td></tr>';
+      html += '<tr><td class="dt-k">Client</td><td class="dt-v mono" colspan="5">' + escText(clientName) + '（OP 专有，存放于 target）</td></tr>';
     }
-    html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + cronText + '</td></tr>';
-    html += '<tr><td class="dt-k">并发策略</td><td class="dt-v mono" colspan="5">' + (job.concurrency || 'skip') + '</td></tr>';
+    html += '<tr><td class="dt-k">触发方式</td><td class="dt-v mono" colspan="5">' + escText(cronText) + '</td></tr>';
+    html += '<tr><td class="dt-k">并发策略</td><td class="dt-v mono" colspan="5">' + escText(job.concurrency || 'skip') + '</td></tr>';
 
     if (Object.keys(params).length) {
       html += '<tr><td class="dt-k">入参</td><td colspan="5">';
       html += '<table class="sub-table">';
       Object.keys(params).forEach(function(k) {
-        html += '<tr><td class="st-name">' + k + '</td><td>' + params[k] + '</td></tr>';
+        html += '<tr><td class="st-name">' + escText(k) + '</td><td>' + escText(params[k]) + '</td></tr>';
       });
       html += '</table>';
       html += '</td></tr>';
@@ -706,10 +775,11 @@
   /* 保留的入参值（切换目标时按 name 保留已有的 value） */
   var inputValues = {};
 
+  /* G13：复制 Job = 以现有配置为模板新建（按 id 定位后回填 target / 触发 / 工作区 / 入参 / 并发，用作新建而不落旧 id） */
   function copyJob(name) {
     var job = JOB_BY_NAME[name];
     if (!job) return;
-    openEditor(name + '_copy', job.target.kind);
+    openEditor(name + '_copy', (job.target && job.target.kind) || 'workflow', name);
   }
 
   /* 启用 / 禁用：POST /api/jobs/{jobId}/enable|disable（仅停/开定时，不影响手动运行） */
@@ -717,7 +787,7 @@
     var job = JOB_BY_NAME[name];
     if (!job) return;
     var action = job.enabled ? 'disable' : 'enable';
-    mockFetch('/api/jobs/' + job.jobId + '/' + action, { method: 'POST' }).then(function () { renderJobList(); });
+    mockFetch('/api/jobs/' + job.jobId + '/' + action, { method: 'POST' }).then(function () { refreshJobList(); });
   }
 
   /* 删除 Job：确认后 DELETE /api/jobs/{jobId}（有在途实例时后端返回 409 JOB_HAS_ACTIVE_RUNS） */
@@ -726,27 +796,33 @@
     if (!job) return;
     if (!confirm('确认删除 Job「' + name + '」？运行历史保留，已删 Job 的 Run 不可跳转定义')) return;
     mockFetch('/api/jobs/' + job.jobId, { method: 'DELETE' }).then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
-      renderJobList();
+      if (res && res.error) { alert(errorText(res)); return; }
+      refreshJobList();
     });
   }
 
-  function openEditor(name, targetKind) {
-    var isNew = !name;
+  /* openEditor(name, targetKind, copyFromName)
+     - name 为空 → 新建（各字段空，目标类型 / 触发方式无勾选）
+     - name 为已有 Job 名 → 编辑（editingJobId 非空 → PUT）
+     - copyFromName 非空 → 复制（以该 Job 配置回填，name 为新名，editingJobId 保持空 → POST 新建） */
+  function openEditor(name, targetKind, copyFromName) {
+    var copySrc = copyFromName ? (JOB_BY_NAME[copyFromName] || null) : null;
+    var jobDef = copySrc || (name ? JOB_BY_NAME[name] : null);   // 编辑 / 复制时按 mock（API 结构）回填，不硬编码
+    var isNew = !jobDef;   // 无任何配置来源 = 全新（复制有来源，但仍是新建：走 POST）
     isNewJob = isNew;
-    editingJobId = (name && JOB_BY_NAME[name]) ? JOB_BY_NAME[name].jobId : null;
+    editingJobId = (jobDef && !copySrc) ? jobDef.jobId : null;
 
     document.getElementById('editorName').textContent = name || '（未命名）';
-    var ver = (name === 'daily_cleanup' || name === 'manual_deploy' || name === 'data_sync') ? 'v2' : 'v1';
-    if (isNew) ver = 'v1';
+    var ver = 'v' + (isNew ? 1 : (jobDef ? jobDef.version : 1));
     document.getElementById('editorVersion').textContent = ver;
     currentVersion = ver;
 
     document.getElementById('jobName').value = name || '';
-    document.getElementById('jobDesc').value = isNew ? '' : (name + ' 作业');
+    inputValues = (!jobDef) ? {} : Object.assign({}, jobDef.inputs || {});
+    document.getElementById('jobDesc').value = jobDef ? (jobDef.description || '') : '';
 
     // 目标类型
-    if (isNew) {
+    if (!jobDef) {
       // 新建：不勾选
       document.querySelectorAll('input[name="targetKind"]').forEach(function(r) { r.checked = false; });
       switchTarget('');
@@ -754,44 +830,44 @@
       document.getElementById('clientSelect').value = '';
       document.getElementById('wfSelect').value = '';
     } else {
-      var kind = targetKind || 'workflow';
-      var job = JOB_BY_NAME[name];
+      var kind = (jobDef.target && jobDef.target.kind) || targetKind || 'workflow';
       document.querySelector('input[name="targetKind"][value="' + kind + '"]').checked = true;
       switchTarget(kind);
       if (kind === 'op') {
-        // 编辑已有 Job：按 API 结构回填（target.opId / target.clientId）
-        document.getElementById('opSelect').value = (job && job.target.opId) || '';
-        document.getElementById('clientSelect').value = (job && job.target.clientId) || '';
+        // 编辑 / 复制：按 API 结构回填（target.opId / target.clientId）
+        document.getElementById('opSelect').value = (jobDef.target.opId) || '';
+        document.getElementById('clientSelect').value = (jobDef.target.clientId) || '';
         onOpSelected();
       } else {
-        document.getElementById('wfSelect').value = (job && job.target.workflowId) || '';
+        document.getElementById('wfSelect').value = (jobDef.target.workflowId) || '';
         onWfSelected();
       }
     }
 
     // 工作区
-    document.getElementById('jobWorkspace').value = isNew ? '' : '/path/to/workspace';
+    document.getElementById('jobWorkspace').value = jobDef ? (jobDef.workspace || '') : '';
 
     // 触发方式
-    if (isNew) {
+    if (!jobDef) {
       document.querySelectorAll('input[name="triggerKind"]').forEach(function(r) { r.checked = false; });
       document.getElementById('cronRow').style.display = 'none';
       document.getElementById('cronInput').value = '';
       document.getElementById('concurrency').value = '';
+      document.getElementById('cronEnabled').checked = true;   // crud-04 3.4.3：enabled 默认 true
     } else {
-      // 编辑已有 Job
-      var trig = 'schedule';
-      if (name === 'manual_deploy') trig = 'manual';
+      // 编辑 / 复制
+      var trig = (jobDef.trigger && jobDef.trigger.kind) || 'manual';
+      // trigger / cron / enabled / concurrency 均取自数据源
       document.querySelector('input[name="triggerKind"][value="' + trig + '"]').checked = true;
       switchTrigger(trig);
       if (trig === 'schedule') {
-        var cronMap = { daily_cleanup: '0 2 * * *', hourly_check: '0 * * * *', weekly_report: '0 9 * * 1', data_sync: '0 3 * * *' };
-        document.getElementById('cronInput').value = cronMap[name] || '0 * * * *';
+        document.getElementById('cronInput').value = (jobDef.trigger && jobDef.trigger.cron) || '0 * * * *';
       }
-      document.getElementById('concurrency').value = 'skip';
+      document.getElementById('cronEnabled').checked = jobDef.enabled !== false;   // M10：cron 行启用勾选框回填真实 enabled
+      document.getElementById('concurrency').value = jobDef.concurrency || 'skip';
     }
 
-    inputValues = {};
+    /* inputValues 已在函数开头按 mock 回填，此处不清空（避免覆盖已有入参值） */
     showView('editor');
   }
 
@@ -813,11 +889,11 @@
   /* 下拉选项统一由 mock 数据（API 结构）生成：value = id，label = name */
   function initSelects() {
     document.getElementById('opSelect').innerHTML = '<option value="">— 请选择 OP —</option>' +
-      OPS.map(function (o) { return '<option value="' + o.opId + '">' + o.name + '</option>'; }).join('');
+      OPS.map(function (o) { return '<option value="' + escText(o.opId) + '">' + escText(o.name) + '</option>'; }).join('');
     document.getElementById('clientSelect').innerHTML = '<option value="">— 请选择 Client —</option>' +
-      CLIENTS.map(function (c) { return '<option value="' + c.clientId + '">' + c.name + '</option>'; }).join('');
+      CLIENTS.map(function (c) { return '<option value="' + escText(c.clientId) + '">' + escText(c.name) + '</option>'; }).join('');
     document.getElementById('wfSelect').innerHTML = '<option value="">— 请选择 Workflow —</option>' +
-      WORKFLOWS.map(function (w) { return '<option value="' + w.workflowId + '">' + w.name + '</option>'; }).join('');
+      WORKFLOWS.map(function (w) { return '<option value="' + escText(w.workflowId) + '">' + escText(w.name) + '</option>'; }).join('');
   }
   initSelects();
 
@@ -846,8 +922,8 @@
     names.forEach(function(nm) {
       var val = inputValues[nm] != null ? inputValues[nm] : '';
       html += '<div class="it-row">' +
-        '<span class="it-name">' + nm + '</span>' +
-        '<input type="text" data-name="' + nm + '" value="' + escapeAttr(val) + '" placeholder="填写参数值" oninput="onInputValue(this)" />' +
+        '<span class="it-name">' + escText(nm) + '</span>' +
+        '<input type="text" data-name="' + escText(nm) + '" value="' + escapeAttr(val) + '" placeholder="填写参数值" oninput="onInputValue(this)" />' +
       '</div>';
     });
     table.innerHTML = html;
@@ -858,22 +934,42 @@
   }
 
   function escapeAttr(s) {
-    return String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return escText(s);   // R6-S1：统一复用 mock-data.js 的 escText（& < > " ' 全部转义），不再只处理 " 与 <
   }
 
   /* ==================== 手动运行 ==================== */
   function openRun(name, type, target, version, trigger) {
+    // M9：运行确认弹窗展示**已配置的参数**（proposal-01 §19.4）：工作区与初始入参取自 Job 配置
+    var job = JOB_BY_NAME[name];
     document.getElementById('runJobName').textContent = name;
     document.getElementById('runTarget').textContent = type + ': ' + target + ' ' + version;
     document.getElementById('runTrigger').textContent = trigger;
+    var ws = job ? (job.workspace || '') : '';
+    document.getElementById('runWorkspace').textContent = ws || '（未配置）';
+    var inputs = (job && job.inputs) || {};
+    var keys = Object.keys(inputs);
+    document.getElementById('runInputs').textContent = keys.length
+      ? keys.map(function (k) { return k + ': ' + inputs[k]; }).join('；')
+      : '（无）';
     showView('run');
   }
 
   function doRun() {
     // POST /api/jobs/{jobId}/run —— 手动运行（created 后返回 runId，异步执行）
+    // crud-04 3.4.6：手动运行前先校验 needsUpdate（true → 禁止运行）；校验经 GET /api/jobs/{jobId}/needs-update
     var job = JOB_BY_NAME[document.getElementById('runJobName').textContent];
-    var p = job ? mockFetch('/api/jobs/' + job.jobId + '/run', { method: 'POST' }) : Promise.resolve(null);
-    p.then(function () {
+    var p = job
+      ? mockFetch('/api/jobs/' + job.jobId + '/needs-update').then(function (nu) {
+          // M5：needsUpdate 拦截 → 返回哨兵值，终止后续流程（不得继续执行 / 跳转）
+          if (nu && nu.needsUpdate) { alert('该 Job 需要更新，请先更新后再运行'); return { __aborted: true }; }
+          return mockFetch('/api/jobs/' + job.jobId + '/run', { method: 'POST' });
+        })
+      : Promise.resolve({ __aborted: true });
+    p.then(function (res) {
+      // M5：先判定是否被拦截 / 接口是否报错，均不跳转；只有拿到 runId 才关闭视图并跳转运行历史
+      if (res && res.__aborted) return;
+      if (res && res.error) { alert(errorText(res)); return; }
+      if (!res || !res.runId) return;
       closeView();
       window.location.href = 'index.html';   // 异步投递后自动跳转运行历史
     });
@@ -884,6 +980,10 @@
     document.getElementById('versionJobName').textContent =
       document.getElementById('jobName').value || '(未命名)';
     document.getElementById('versionCurrent').textContent = currentVersion;
+    // N9：选项文案里的版本号按**当前版本**动态生成（与 #versionCurrent 同源，不再硬编码）
+    var curVerNum = parseInt(String(currentVersion).replace(/^v/, ''), 10) || 1;
+    document.getElementById('verOptTitleUpdate').textContent = '更新版本（v' + curVerNum + ' → v' + (curVerNum + 1) + '）';
+    document.getElementById('verOptTitleKeep').textContent = '不更新版本（覆盖 v' + curVerNum + '）';
 
     var items = document.querySelectorAll('#versionModal .option-item');
     items.forEach(function (el, i) {
@@ -904,17 +1004,39 @@
   function doSave() {
     var opt = document.querySelector('#versionModal input[name="versionOpt"]:checked');
     var bump = !!(opt && opt.value === 'update');
+    // S3：保存前先在客户端做必填校验（未选目标 / 触发方式 / 未填名称 / 未选目标对象 / 未填工作区 / 定时未填 cron 均阻止提交）
+    var err = validateJobForm();
+    if (err) { alert(err); return; }
     var job = collectJobForm();
     // 编辑：PUT /api/jobs/{jobId} {job, bumpVersion}；新建 / 复制：POST /api/jobs
     var req = editingJobId
       ? mockFetch('/api/jobs/' + editingJobId, { method: 'PUT', body: JSON.stringify({ job: job, bumpVersion: bump }) })
       : mockFetch('/api/jobs', { method: 'POST', body: JSON.stringify(job) });
     req.then(function (res) {
-      if (res && res.error) { alert(res.message || res.error); return; }
+      if (res && res.error) { alert(errorText(res)); return; }
       closeModal('versionModal');
       closeView();
-      renderJobList();
+      refreshJobList();   // 保存后重新拉取列表（新建 / 复制的 Job 才会出现在列表里）
     });
+  }
+
+  /* S3：Job 表单必填校验（crud-04 3.4.3：name / target（target=op 须含 clientId）/ trigger / workspace 缺失→ 400 VALIDATION_ERROR） */
+  function validateJobForm() {
+    if (!document.getElementById('jobName').value.trim()) return '请填写 Job 名称';
+    if (document.getElementById('jobName').value.trim().length > 512) return '名称长度不能超过 512 字符';   // R6-G3：proposal-01:78（与后端 400 同口径）
+    var kindEl = document.querySelector('input[name="targetKind"]:checked');
+    if (!kindEl) return '请选择目标类型（单个 OP / 整个 Workflow）';
+    if (kindEl.value === 'op') {
+      if (!document.getElementById('opSelect').value) return '请选择要执行的 OP';
+      if (!document.getElementById('clientSelect').value) return '请选择 Client（target=OP 时必选）';
+    } else if (!document.getElementById('wfSelect').value) {
+      return '请选择要执行的 Workflow';
+    }
+    var trigEl = document.querySelector('input[name="triggerKind"]:checked');
+    if (!trigEl) return '请选择触发方式（手动 / 定时）';
+    if (trigEl.value === 'schedule' && !document.getElementById('cronInput').value.trim()) return '请填写 Cron 表达式';
+    if (!document.getElementById('jobWorkspace').value.trim()) return '请填写工作区';
+    return '';
   }
 
   /* 编辑器表单 → JobCreateRequest（crud-04 3.4.3） */
@@ -941,7 +1063,12 @@
       trigger: trigger,
       workspace: document.getElementById('jobWorkspace').value,
       inputs: inputs,
-      concurrency: document.getElementById('concurrency').value || 'skip'
+      concurrency: document.getElementById('concurrency').value || 'skip',
+      // crud-04 3.4.4：PUT 的 job 是**完整 JobCreateRequest**（全量替换），故编辑时把当前启用状态一并提交；
+      // M10：定时触发时以 cron 行的「启用」勾选框（#cronEnabled）为准（enabled 默认 true；manual Job 恒视为 true）
+      enabled: (trigEl && trigEl.value === 'schedule')
+        ? document.getElementById('cronEnabled').checked
+        : (editingJobId && JOB_BY_ID[editingJobId] ? !!JOB_BY_ID[editingJobId].enabled : true)
     };
   }
 
@@ -1003,7 +1130,7 @@
     // crud-04 3.4.9：POST /api/jobs/{jobId}/export 返回 {zip: base64}，由前端写入所选目录
     mockFetch('/api/jobs/' + (job ? job.jobId : exportTargetName) + '/export', { method: 'POST' })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         return exportDirHandle.getFileHandle(fileName, { create: true })
           .then(function (fileHandle) { return fileHandle.createWritable(); })
           .then(function (writable) { writable.write(base64ToBlob(res.zip || '')); return writable.close(); });
@@ -1029,7 +1156,9 @@
   });
 
   /* ==================== 导入文件选择 ==================== */
+  var importFileB64 = null;   // 所选 .zip 的 base64（导入请求体为 { zip: <base64> }，见 crud-04 3.4.10）
   function openImportModal() {
+    importFileB64 = null;
     document.getElementById('importFileName').textContent = '未选择文件';
     document.getElementById('importFile').value = '';
     document.getElementById('confirmImportBtn').disabled = true;
@@ -1043,20 +1172,34 @@
   function onImportFileChange(input) {
     var file = input.files[0];
     if (!file) return;
+    importFileB64 = null;
     document.getElementById('importFileName').textContent = file.name;
-    document.getElementById('confirmImportBtn').disabled = false;
+    document.getElementById('confirmImportBtn').disabled = true;   // 读到 base64 后才可提交
     var tree = document.getElementById('importTree');
     tree.style.display = 'block';
-    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）\n正在读取…';
+    // 导入请求体是 { zip: <base64> }，故先在浏览器内把所选 .zip 读成 base64（取 data URL 逗号后的部分）
+    var reader = new FileReader();
+    reader.onload = function () {
+      var s = String(reader.result || '');
+      importFileB64 = s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s;
+      document.getElementById('confirmImportBtn').disabled = false;
+      tree.textContent = file.name + '\n（ZIP 压缩包，大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    };
+    reader.onerror = function () {
+      alert('读取文件失败，请重新选择');
+    };
+    reader.readAsDataURL(file);
   }
   function confirmImport() {
-    var name = document.getElementById('importFileName').textContent;
-    // crud-04 3.4.10：POST /api/jobs/import {yaml} —— 同名 409
-    mockFetch('/api/jobs/import', { method: 'POST', body: JSON.stringify({ yaml: 'name: ' + name.replace(/\.zip$/, '') + '\n' }) })
+    if (!importFileB64) { alert('请先选择要导入的 ZIP 文件'); return; }
+    // crud-04 3.4.10：POST /api/jobs/import {zip: base64} —— 同名 409
+    mockFetch('/api/jobs/import', { method: 'POST', body: JSON.stringify({ zip: importFileB64 }) })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         alert('已导入：' + (res.name || '') + '（导入成功）');
         closeModal('importModal');
+        refreshJobList();   // 导入后刷新列表
       })
       .catch(function (err) { alert('导入失败：' + (err && err.message ? err.message : '未知错误')); });
   }

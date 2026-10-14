@@ -107,7 +107,7 @@
 - **允许环路**：回跳边形成的环由 Engine 在运行时以计数终止（循环回跳上限 min(max × 3, max_loop_multiplier)，见 4.3.0），拓扑校验不拒绝环。
 - **Start 出边约束**：Start 无失败语义，不允许 `on_failure` 出边（恒 `on_success` / `always`；Start 仅 🟢 单出边锚点）。
 - 每个 op 节点必须绑定 opId + opVersion。
-- **op 节点绑定 `clientId` 时，Client 类型须与节点 OP 类型匹配**（bash/python/powershell/prompt 须同类对应；不匹配 → 400 `CLIENT_TYPE_MISMATCH`，与 crud-02 3.2.6 同一校验口径）；`clientId` 为空则运行前由调用方指定（执行时同样校验）。
+- **op 节点绑定 `clientId` 时，Client 类型须与节点 OP 类型匹配**（bash/python/powershell/prompt 须同类对应；不匹配 → 400 `CLIENT_TYPE_MISMATCH`，与 crud-02 3.2.6 同一校验口径）；`clientId` 为空则不在此处校验——运行前由 Engine 组装 ExecuteRequest 时回退 `Job.target.clientId`（仅 Job target=op 时存在；单次执行无 Job → 回退为空），仍空则走 `run_failed`；运行期类型不匹配由 Worker 执行前校验拦截（step 落 `failed`，`error=CLIENT_TYPE_MISMATCH`，见 4.4）。
 - bindings 引用的前置节点出参必须存在。
 
 ---
@@ -115,7 +115,7 @@
 ### 3.3.0 通用约定
 
 > 以下为 Workflow 管理全部 API 的完整 HTTP 定义。通用约定：
-> - 基础路径 `/api`；路径参数中的 `workflowId` 为 32 位无连字符 UUID。
+> - 基础路径 `/api`；路径参数中的 `workflowId` 为 32 位无连字符 UUID；**路径参数格式非法**（非 32 位无连字符 UUID）→ 400 `VALIDATION_ERROR`。
 > - 时间字段 JSON 中统一为 string（毫秒时间戳）。
 > - 列表分页 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
@@ -130,9 +130,14 @@
 | `Workflow.createdAtMs` | `workflows.created_at_ms` | 毫秒时间戳 |
 | `Workflow.updatedAtMs` | `workflows.updated_at_ms` | 毫秒时间戳 |
 | `Workflow.name` | `workflows.name` | 名称（全局唯一） |
+| `Workflow.description` | `workflows.description` | 描述（可空） |
+| `Workflow.inputs` | `workflows.inputs` | 入参定义，JSON 数组 |
+| `Workflow.outputs` | `workflows.outputs` | 出参定义，JSON 数组 |
 | `Workflow.version` | `workflows.version` | 版本号 |
 | `Workflow.edges[].{from,to,condition}` | `workflows.edges` | JSON 字段整体存储 |
 | `WorkflowNode.label` | `workflow_nodes.label` | 画布展示名 |
+| `WorkflowNode.kind` | `workflow_nodes.kind` | start / op / end |
+| `WorkflowNode.workflowId` | `workflow_nodes.workflow_id` | 所属 Workflow（列名 `workflow_id`） |
 | `WorkflowNode.opId` | `workflow_nodes.op_id` | 绑定 OP |
 | `WorkflowNode.opVersion` | `workflow_nodes.op_version` | 绑定 OP 版本快照 |
 | `WorkflowNode.clientId` | `workflow_nodes.client_id` | 执行 Client |
@@ -229,7 +234,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、position 缺失、拓扑非法、节点字段约束不满足 |
+| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、position 缺失、拓扑非法、节点字段约束不满足、**节点总数超过 settings `workflow_max_nodes`（默认 200、上限 1000）** |
 | 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定的 `clientId` 类型与节点 OP 类型不匹配**（见 3.3 校验规则；同一校验口径见 crud-02 3.2.6） |
 | 409 | `WORKFLOW_NAME_EXISTS` | name 已存在 |
 
@@ -251,7 +256,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | 请求体字段非法、拓扑非法 |
+| 400 | `VALIDATION_ERROR` | 请求体字段非法、拓扑非法、**节点总数超过 settings `workflow_max_nodes`（默认 200）** |
 | 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定的 `clientId` 类型与节点 OP 类型不匹配**（同一校验口径见 3.3.3） |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NAME_EXISTS` | name 与其他 Workflow 冲突 |
@@ -336,7 +341,7 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | workspace 缺失、inputs 含未定义参数 |
-| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定 `clientId`（或节点未绑定、按 Engine 运行前指派）的 Client 类型与节点 OP 类型不匹配**（Client 可被编辑更换类型，故运行时仍须校验；同一校验口径见 3.3.3） |
+| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点显式绑定 `clientId`，且该 Client 类型与节点 OP 类型不匹配**（Client 可被编辑更换类型，故提交时按定义再校一次；同一校验口径见 3.3.3）；**节点未绑定 `clientId` 的情形不在提交时校验**——运行前由 Engine 组装 ExecuteRequest 时回退 `Job.target.clientId`（仅 Job target=op 时存在；单次执行无 Job），仍空则走 `run_failed`，类型不匹配则执行前校验失败、该 step 落 `failed`（`error=CLIENT_TYPE_MISMATCH`，不启动子进程、不消耗超时，见 4.4） |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NEEDS_UPDATE` | needsUpdate=true，需更新后才能执行 |
 | 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
@@ -365,11 +370,11 @@
 
 > ZIP 结构：`manifest.json` + `workflow.yaml` + `ops/*.yaml`。
 
-**`workflow.yaml`（导出格式；与 3.4.9 Job 包内 `workflow.yaml` 同一格式）**：
+**`workflow.yaml`（导出格式；与 3.4.9 Job 包内 `workflows/<name>.yaml` 同一格式）**：
 
 ```yaml
 name: deploy_workflow
-version: 1
+version: 2
 description: 部署流水线
 inputs:  [{name: env, type: string, required: true, default: prod, description: 环境}]
 outputs: [{name: status, from: {workflowNodeId: n2, outputName: result}, description: 部署结果}]
@@ -392,17 +397,19 @@ edges:
 
 > 关键差异：**依赖引用（OP / Client）在包内以名称表达**（`opName` / `clientName`），不以 uuid 表达，以便导入到新环境时按名称解析并重映射为新 uuid（见 3.3.9）。`workflowNodeId` 在包内以**短别名**（`n1` / `n2` / `n3` …）表达——导出时由后端生成（按节点顺序 n1、n2…），edges / outputs.from 引用同一短别名；**导入时为每个节点重新生成 32 位 UUID**，并按短别名映射重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（不沿用导出环境的 UUID，避免跨环境主键冲突）。
 
-**完整 ZIP 目录结构**：
+**完整 ZIP 目录结构**（**Workflow 包保持根级 `workflow.yaml`**，不套 `workflows/` 子目录）：
 
 ```text
 workflow-deploy_workflow-v2.zip
 ├── manifest.json
 ├── workflow.yaml
 └── ops/
-    ├── check_tests.yaml
-    ├── review.yaml
-    └── deploy.yaml
+    └── check_tests.yaml
 ```
+
+> （树仅示意层级，**成员顺序以下条为准**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`）
+> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`（按 `manifest.ops` 顺序）。导入端**不依赖成员顺序**，按 `manifest.ops[].file` 定位。
+> **与 Job 包的形态差异（拍板：ZIP 目录形态 + `manifest.target`，见 `crud-04` 3.4.9）**：Workflow 包的目标实体就是包根级 `workflow.yaml`（无 `target` 字段）；Job 包因需同时携带 Job + 目标实体，改用 `workflows/` + `ops/` **目录形态**并以 `manifest.target.file` 名称锚定位（见 crud-04 3.4.9）。两者 `manifest` 的 `clients[]` / `ops[]` 字段口径一致。
 
 **`manifest.json`（包描述）**：
 
@@ -413,6 +420,7 @@ workflow-deploy_workflow-v2.zip
   "appVersion": "0.1.0",
   "exportedAtMs": "1728000000000",
   "workflow": { "name": "deploy_workflow", "version": 2 },
+  "clients": [ { "name": "my-bash", "clientId": "a1b2..." } ],
   "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
 }
 ```
@@ -423,8 +431,9 @@ workflow-deploy_workflow-v2.zip
 | schemaVersion | integer | 包格式版本，当前 1 |
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
-| workflow | object | 包内 Workflow 的名称与版本（锚定 `workflow.yaml`） |
-| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 为包内相对路径） |
+| workflow | object | 包内 Workflow 的名称与版本（锚定根级 `workflow.yaml`） |
+| clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.3.9）；无节点绑定时为 `[]` |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`） |
 
 **`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；仅包含 OP 定义字段，不含 `opId` / 时间戳。
 
@@ -435,7 +444,7 @@ workflow-deploy_workflow-v2.zip
 | name / version / description | Workflow 定义（version 为导出时快照，导入沿用） |
 | inputs | 入参 `[{name, type, required, default, description}]` |
 | outputs | 出参 `[{name, from:{workflowNodeId, outputName}, description}]`（`from.workflowNodeId` 引用节点短别名；导入时按节点 UUID 映射重写） |
-| nodes | 节点数组：`workflowNodeId`（短别名 n1/n2/…，导出时按节点顺序生成；导入时重新生成 UUID）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
+| nodes | 节点数组：`workflowNodeId`（短别名 n1/n2/…，导出时按节点顺序生成；导入时重新生成 UUID；**导入端只要求包内别名唯一，不校验形如 `n1`；32 位 UUID 值同样合法**）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
 | edges | 边数组 `[{from, to, condition}]`（`from`/`to` 引用节点短别名；导入时按节点 UUID 映射重写） |
 
 > 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `workflow.yaml` 的 `opName` / `clientName` 重映射为新 uuid；`workflowNodeId` 不沿用导出环境值——导入时为每个节点生成新的 32 位 UUID，建立 `短别名 → 新UUID` 映射，并同步重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（避免跨环境主键冲突）。
@@ -473,7 +482,8 @@ workflow-deploy_workflow-v2.zip
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**等字段非法） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`** 等字段非法） |
+| 400 | `CLIENT_TYPE_MISMATCH` | 节点 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理；显式类型校验口径见 3.3.3 / 3.3.4） |
 | 409 | `WORKFLOW_NAME_EXISTS` | 同名 Workflow 已存在（导入冲突） |
 | 409 | `CLIENT_NOT_FOUND` | 节点 `clientName` 在目标环境不存在（响应体列出缺失名称） |
 
@@ -576,7 +586,7 @@ outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结
 ```text
 POST /api/workflows/{workflowId}/execute {inputs, workspace}
   │
-  ├─ 1. 校验 workflow: needsUpdate=true → 409 WORKFLOW_NEEDS_UPDATE
+  ├─ 1. 校验 workflow: needsUpdate=true → 409 WORKFLOW_NEEDS_UPDATE；显式绑定 clientId 的 op 节点类型不匹配 → 400 CLIENT_TYPE_MISMATCH（同 3.3.3）
   ├─ 2. 解析 workflow 入参: 校验 required, 缺省项应用 default → 最终入参集
   ├─ 3. 组装 WorkflowRunRequest (结构见 crud-05 4.6 Task Runner):
   │     run_id       = 后端生成的 runId (workflow 单次执行, virtual JobRun)
@@ -641,7 +651,7 @@ Engine 采用**事件驱动 + 调度事件流**：每次"节点完成 → 决定
 | `apply_retry` | `activation_seq` | integer | 是 | 同 step 的 activation（不变） | |
 | `apply_retry` | `retry_seq` | integer | 是 | 即将进入的 attempt 序号（= 当前 +1） | 其处理即写 dispatch_step |
 | `apply_retry` | `not_before_ms` | string \| null | 否 | 退避后最早可执行时间（毫秒）；无退避则 null | WorkerPool 据此延迟指派 |
-| `apply_retry` | `reason` | enum | 是 | `on_failure` / `on_timeout`（命中的 retry.on 条件） | |
+| `apply_retry` | `reason` | enum | 是 | `on_failure` / `on_success`（命中的 retry.on 条件；timeout 不走 retry、直接 terminate，故无 `on_timeout`） | |
 | `walk_edge` | `result` | enum | 是 | 节点结果（`success` / `failed` / `timeout`），与列 `step_status` 同值 | |
 | `walk_edge` | `edges` | array | 是 | 出边判定结果：`[{to: workflow_node_id, condition: "on_success"\|"on_failure"\|"always", state: "activated"\|"dropped"}]` | 边状态审计/重放依据 |
 | `walk_edge` | `reentry_targets` | array | 否 | 本次判定出的回跳目标节点 id 列表（已执行过的目标）；用于推导 pending_reentry | |
@@ -742,7 +752,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
   ├─ step_completed{run, step, activation_seq, retry_seq, result}   ← StepComplete 钩子写库后立即调用
   │     → 读取 step_records 该次执行终态（**终态由 Worker 执行完写入**；此处据此推进；缺失时补写，**纯防御**：正常终态由 Worker 写、recover 补齐的是“终态已有、事件缺失”）
   │     → **若已置 `run_terminate_requested` / `run_failed`（Z）**：**跳过 `pending_reentry` 消费与决策链 ②③（不重入、不重试、不 dispatch 任何新执行）**，仅做收敛判定（见 ②）
-  │     → 否则若存在 `pending_reentry[step]`：消费之（**消费前先查执行总次数上限 min(max×3, max_loop_multiplier)：已达则不再重入、整个 Run 失败**）→ activation_seq+1, retry_seq=1 → dispatch 重入 N；**本次完成不再走决策链**（不 retry、不走边；N 的出边留待重入的那次完成时再走，见 4.3.0 ③ / P2）
+  │     → 否则若存在 `pending_reentry[step]`：消费之（**消费前先查执行总次数上限 min(max×3, max_loop_multiplier)：已达则不再重入、整个 Run 失败**）→ activation_seq+1, retry_seq=1 → dispatch 重入 N；**本次完成不再走决策链**（不 retry、不走边；N 的出边留待重入的那次完成时再走，见 4.3.0 ③）
   │     → 否则进入固定决策链（次序不可换，见下方「step_completed 决策链」）：
   │           ① 超时 / 用户终止 → 写 terminate（不走边、不重试）
   │           ② 若将再次执行同一节点（重试/回跳）且该步执行总次数达上限 min(max×3, max_loop_multiplier) → 写 terminate（整个 Run 失败，循环上限）
@@ -781,7 +791,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
               → Runner 常驻轮询自动感知并调度下一个
         ※ 单 OP 的 Job：OP 一旦开始运行即**不可终止**（无可停止的后续调度）——终止请求被拒（见 crud-05 4.7）
 **step_completed 决策链（次序不可换）**：
-  ① 结果 = timeout / cancelled → terminate（不走边、不重试）
+  ① 结果 = timeout / 用户终止 → terminate（不走边、不重试）
   ② 若本次结果将触发**再次执行同一节点**（重试或回跳重入）且该 step 执行总次数已达上限 min(max×3, max_loop_multiplier) → terminate（Run 失败，循环上限）
   ③ should_retry（on 匹配 + 本 activation 的 attempt 未达 max）→ apply_retry + dispatch_step（同一 activation）
   ④ 否则 → walk_edge
@@ -1129,6 +1139,25 @@ for 每条 activated 边的目标节点 N:
   2. **运维 / 诊断**：需 SQL 直接观察某 run 的边状态与就绪计数时使用。
 - 若不采用（纯内存 + 全量重放），这两张表可**不建**，功能不受影响。
 
+**可选 checkpoint 表列定义（与 schema.sql 第 9/10 节一致）**
+
+| 表 | 列 | 类型 | 说明 |
+|-|-|-|-|
+| `run_edge_state` | `run_id` | TEXT NOT NULL | 所属 run（`job_runs.run_id`）；主键 `(run_id, edge_key)` |
+| | `edge_key` | TEXT NOT NULL | `"<from_workflow_node_id>|<to_workflow_node_id>|<condition>"`（edges 无独立 id） |
+| | `from_workflow_node_id` | TEXT NOT NULL | 源节点 id（便于按节点批量更新其出边） |
+| | `state` | TEXT NOT NULL DEFAULT 'pending' | `pending` / `activated` / `dropped` |
+| | `updated_at_ms` | TEXT NOT NULL | 毫秒时间戳（快照写入时间） |
+| `run_node_state` | `run_id` | TEXT NOT NULL | 所属 run；主键 `(run_id, workflow_node_id)` |
+| | `workflow_node_id` | TEXT NOT NULL | = `workflow_nodes.workflow_node_id`（start / op / end） |
+| | `activation_seq` | INTEGER NOT NULL DEFAULT 1 | 当前 activation（回跳重入时 +1 并重置计数） |
+| | `pending_in_edges` | INTEGER NOT NULL | 尚未决定的入边数（0 = 已全部决定） |
+| | `activated_in_edges` | INTEGER NOT NULL DEFAULT 0 | 已 activated 的入边数（≥1 且 pending=0 即就绪） |
+| | `status` | TEXT NOT NULL DEFAULT 'pending' | `pending` / `running` / `done` / `skipped` |
+| | `updated_at_ms` | TEXT NOT NULL | 毫秒时间戳（快照写入时间） |
+
+> 说明：两张表均为**可选快照**（恢复加速 / 运维诊断用）；即便建表，**`engine_events` 仍是唯一事实来源**，快照丢失或陈旧时可重放事件重建。
+
 **复杂度对照**
 
 | 指标 | 内存 RunContext（推荐） | 每步直读运行态表 |
@@ -1163,7 +1192,7 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
 - **成功入队的判定**：JobRun 在**入队成功之后**才 `waiting → running`（界面「等待中」→「运行中」）。
 - **调度（WorkerPool 调度线程，常驻轮询）**：定期扫描 step_records 中 waiting 任务（按 created_at 顺序；**跳过 `not_before_ms` 未到点者**，即重试退避尚未到期；**并跳过所属 run 已终态的 waiting 任务**），
   查询 Worker 忙闲（busy 标志），发现空闲即**指派**（push 到该 Worker 的小队列）：**置 running 用 CAS —— `UPDATE step_records SET status='running' WHERE record_id=? AND status='waiting'`**；`affected=0` 表示已被 terminate 置 `cancelled`（或已被处理），**跳过不执行**——消除与 terminate 的竞态（P4）；
-- **执行（Worker 池）**：池大小 = **`ceil(job_queue_running_max × 1.5)`**（`worker_pool_size`，只读派生；**与 Task Runner 并发阈值 `job_queue_running_max` 是两个独立概念**，见 crud-06 一）；
+- **执行（Worker 池）**：池大小 = **`ceil(job_queue_running_max × 1.5)`**（`worker_pool_size`，只读派生；**数值派生自同一配置（`job_queue_running_max`）、语义不同**——阈值为 running 的 JobRun 数上限，池大小为常驻执行体数，见 crud-06 一）；
   自子进程 spawn（waiting → running 之后的实际执行起点）始计 `op.timeoutSeconds`（排队时长与 spawn 前准备期不计入，见 crud-01 5.1）；
   每个 Worker 一个**常驻执行循环 + 小队列**（WorkerPool 经小队列触发执行），**数量固定、运行期不新增**，
   内存有上界；收任务 → **执行前校验：step 绑定的 Client 类型与 OP 类型匹配（Client 可被编辑更换类型，故每次执行前校验；不匹配 → step 直接写 failed 终态，`error=CLIENT_TYPE_MISMATCH`，不启动子进程、不消耗超时）** → `Executor::execute(req).await`（见 crud-01 5.1）→ **更新 step_records 终态 + 结果**
@@ -1186,7 +1215,8 @@ WorkerPool 是真正的执行者，**入口只入队、调度在 WorkerPool 线�
 - **池满 = 任务留在 DB 排队**：`run_job` / `run_step` **总是**写 waiting 记录并返回，**不因“无空闲 Worker”而报错**；WorkerPool 调度线程扫到 waiting 且发现空闲 Worker 时才指派（`waiting → running` CAS）。重启后 waiting 任务继续调度、running 任务重跑，**不丢任务**。
 - **为何“执行体并发”（15）> “Job 级并发”（10）（U1）**：两者是**不同维度**的限制——一个 JobRun 内可**多个 step 并行**（如并行分支），故 Worker 池按 JobRun 上界的 1.5 倍预留；否则池太小会让大量 step 长时间停在 waiting，拖慢调度。
 - **超时计时起点（D1 拍板）**：`op.timeoutSeconds` 自**子进程实际启动（spawn）**起算（`waiting → running` 置位仅表示已指派，spawn 前的准备期**不计入**），**排队时长不计入**——step 在 `step_records` waiting（等池空或重试退避 `not_before_ms`）期间**不会超时**（也正是“唯一 kill = 自身 timeoutSeconds”指的是**已开始执行**的 OP）。
-- **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"；**观测指标**：关注 step 在 `waiting` 状态的**停留时长**（waiting → running 的时间差）——正常应远小于 OP 自身执行时长；若普遍持续数分钟以上即触发下方运维动作。**运维提示（C7）**：若界面长期出现大量 step 停在 `waiting（排队中）`（占比高或持续数分钟），说明 Worker 池相对并行度偏小——优先**调大 `job_queue_running_max`**（池大小 = `ceil(running_max × 1.5)` 随其联动，见 crud-05 4.6 / crud-06 一）；若受机器资源限制不能调大，则**调小 `workflow_max_nodes`**（限制单 Workflow 最大节点数）以压缩排队上界；单个 Workflow 内并行分支过多也可拆分为多个顺序 Workflow 降低单 Run 并行 step 峰值。
+- **池满即 waiting 积压的边界（S1，定稿：有界且可接受）**：池满时 step 在 waiting 排队（JobRun 已 running，crud-05 4.6）；**边界** = 同时 running 的 JobRun 数（≤ `job_queue_running_max`）× 单 Run 最大并行 step 数（≤ `workflow_max_nodes`——单 Workflow 节点总数上限，故也是单 Run 并行 step 数的上界），**有界、不占内存、不丢任务**。**不另做兜底控制**（不设 step 级等待上限）；**可观测性**：运行历史界面中 step 显式展示 `waiting（排队中）`，用户可凭此判定"等 Worker"而非"卡住"；**观测指标**：关注 step 在 `waiting` 状态的**停留时长**（waiting → running 的时间差）——正常应远小于 OP 自身执行时长；若普遍持续数分钟以上即触发下方运维动作。**运维提示（C7）**：若界面长期出现大量 step 停在 `waiting（排队中）`（占比高或持续数分钟），说明 Worker 池相对并行度偏小。**注意 `job_queue_running_max` 默认 10 即为其**上限**（crud-06 一/三），无法调大**，故扩容手段只有两条：① **调小 `workflow_max_nodes`**（单 Workflow 最大节点数）以压缩单 Run 并行 step 峰值；② 单个 Workflow 内并行分支过多时，**拆分为多个顺序 Workflow** 降低峰值（池大小 = `ceil(running_max × 1.5)` 随配置联动，见 crud-05 4.6 / crud-06 一）。
+- **waiting 队列上界的运维结论（D4，定稿：已接受、无需额外运维动作）**：全局 waiting 队列深度达 settings `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**）时，**触顶即拒新建**——所有创建 `job_runs` 的入口统一校验（手动 / cron / 单次 / 重跑 / 重试）并返回 **409 `CONCURRENCY_CONFLICT`**（cron 路径为「本轮跳过、不报 409、下个周期重试」，见 crud-04 3.4.6 #3 / 4.5.2）。**结论（已接受）**：这是**预期行为**（排队能力显式有界，避免无界积压占内存/DB），不视为故障，**无需额外运维动作**（不需扩容该上限、不需人工清队）。**如需观测（排查用）**：① `job_runs` 中 `status='waiting'` 计数（= 当前队列深度；长期贴近 `job_queue_waiting_max` 说明提交速率 > 消化速率）；② `step_records` 中 `status='waiting'` 记录的**等待时长分布**（`started_at_ms - created_at_ms`，用于区分「等 Worker 池」与「等 Job 级并发配额」）。若 waiting 长期贴近上限，按上方 S1/C7 的运维手段处理（调小 `workflow_max_nodes`、把并行分支过多的工作流拆为多个顺序 Workflow），而非调大 `job_queue_waiting_max`。
 - **可 cancel 范围**：waiting（排队中）的 step **可直接置 cancelled**；running 的 step **不可外部 cancel**（仅等其自然结束或自身超时 kill）。
 
 - **为何数据库排队而非内存队列**：内存有界队列在 **App 重启时队列内容丢失**；step_records 排队把任务
@@ -1247,8 +1277,9 @@ impl WorkerPool {
     fn recover_running(&self);
 
     /// 终止某 run 的全部在飞步骤（Engine 的 terminate 调用，实例方法 &self）：
-    /// **不 kill 在跑 OP**（OP 是最小执行单位，运行中不可外部终止）；仅将该 run 仍在 waiting 的任务置 cancelled（跳过执行），
-    /// 并置终止意图——等在跑 OP 自然结束后由 Engine 收尾落终态。
+    /// **不 kill 在跑 OP**（OP 是最小执行单位，运行中不可外部终止）；停止派发新任务（不再 dispatch，包括清 pending_reentry）。
+    /// **唯一实现归属**：将 waiting 步骤置 cancelled 的条件更新只在 `process_event(terminate)` 内执行一次（含 inflight_count 递减，见 4.3），
+    /// `abort_run` **不重复执行该 UPDATE**，避免 inflight_count 双次递减；等在跑 OP 自然结束后由 Engine 收尾落终态。
     pub fn abort_run(&self, run_id: &str);
 }
 

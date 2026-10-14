@@ -4,9 +4,9 @@ description: 通知
 inputs: []
 outputs: []
 nodes:
-  - {nodeId: 08080808080808080808080808080800, label: node_start, kind: start, position: {x: 40, y: 120}}
-  - {nodeId: 08080808080808080808080808080801, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
-  - {nodeId: 08080808080808080808080808080802, label: node_end, kind: end, position: {x: 440, y: 120}}
+  - {workflowNodeId: 08080808080808080808080808080800, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: 08080808080808080808080808080801, label: node_op, kind: op, opName: op_prompt_review, opVersion: 1, position: {x: 240, y: 120}}
+  - {workflowNodeId: 08080808080808080808080808080802, label: node_end, kind: end, position: {x: 440, y: 120}}
 edges:
   - {from: 08080808080808080808080808080800, to: 08080808080808080808080808080801, condition: on_success}
   - {from: 08080808080808080808080808080801, to: 08080808080808080808080808080802, condition: on_success}

@@ -326,8 +326,8 @@
 
 **功能说明**：对 4 种类型（prompt / bash / python / powershell）均可执行测试，用于验证该 Client 在**第5章 Executor 体系下的完整执行能力**——不是仅探测命令是否可用，而是按 `client.type` 构造一个最小测试用例，**完整走一遍 `Executor.execute` 流程**（生成 main 文件 → 选定 run.xxx → 注入执行上下文 → 启动子进程并重定向 → 回收 stdout/stderr/rc）。**测试内容由后端根据 `client.type` 决定，前端不感知测试细节**，因此本接口**无请求体**（前端仅发起测试请求即可）。
 
-> **同步实时返回**：本接口直接调用 `Executor::execute` 并**阻塞等待**其 `ExecuteResult`，请求结束即返回测试结果——前端点击「测试」可立即看到成败，**不走异步任务队列**。
-> **不写入运行历史**：test 是验证 Client 执行能力的动作，**不创建 JobRun / step_record、不进入运行历史**——它是同步探测而非一次真实运行，避免污染运行历史。
+> **实时返回（在同一 Worker 任务内 `await`）**：本接口直接调用 `Executor::execute`——**在同一 Worker 任务内 `await`（对该 Worker 语义上阻塞，不占用额外线程）**其 `ExecuteResult`，请求结束即返回测试结果——前端点击「测试」可立即看到成败，**不走异步任务队列**。
+> **不写入运行历史**：test 是验证 Client 执行能力的动作，**不创建 JobRun / step_record、不进入运行历史**——它是一次即时探测（不排队、不占队列）而非一次真实运行，避免污染运行历史。
 
 **路径参数**：
 
@@ -337,7 +337,7 @@
 
 **查询参数**：无　**请求体**：无
 
-**后端实现**：本接口**直接同步调用 `Executor::execute`**——test 已具备该 `client` 的全部执行能力，**无需异步队列、也无需一个正式 OP**：按 `client.type` **自组装一个测试用最小执行描述**（结构类似 OP，仅含测试所需字段：`content`=下方最小测试内容、默认 `timeoutSeconds`、空 `inputs`、空 `outputs`），连同该 Client 实例组装成 `ExecuteRequest`（`run_id` 由后端生成）同步调用 `Executor::execute`，返回其 `ExecuteResult`。**不重复实现执行细节**（写 main 文件、选 run.xxx、注入上下文、启动子进程、重定向、回收出参与退出码，均由 Executor 内部完成）。
+**后端实现**：本接口**直接调用 `Executor::execute`（在同一 Worker 任务内 `await`，对该 Worker 语义上阻塞，不占用额外线程）**——test 已具备该 `client` 的全部执行能力，**无需异步队列、也无需一个正式 OP**：按 `client.type` **自组装一个测试用最小执行描述**（结构类似 OP，仅含测试所需字段：`content`=下方最小测试内容、默认 `timeoutSeconds`、空 `inputs`、空 `outputs`），连同该 Client 实例组装成 `ExecuteRequest`（`run_id` 由后端生成）`await` `Executor::execute`，返回其 `ExecuteResult`。**不重复实现执行细节**（写 main 文件、选 run.xxx、注入上下文、启动子进程、重定向、回收出参与退出码，均由 Executor 内部完成）。
 
 测试用例最小化（仅用于验证 Executor 流程跑通）：
 
@@ -426,7 +426,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command、**name 超 512 字符**等） |
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command、**name 超 512 字符**、**请求体字节数超 settings `client_import_max_bytes`**（默认 1 MiB，见 crud-06 一）等） |
 | 409 | `CLIENT_NAME_EXISTS` | 同名 Client 已存在（导入冲突） |
 
 **YAML 字段规范（Client 导入 / 导出共用的字段全集，以 3.1「Client 对象」为准）**：
@@ -469,8 +469,10 @@
 /// 单次执行器：入口函数
 pub struct Executor;
 impl Executor {
-    /// 执行一次 OP，返回 ExecuteResult；内部完成 5.1–5.4 全部流程，调用方只构造请求、接收结果
-    pub fn execute(req: ExecuteRequest) -> Result<ExecuteResult, ExecutorError>;
+    /// 构造（无字段单元结构体；亦可直接 `Arc::new(Executor)`）
+    pub fn new() -> Self;
+    /// 执行一次 OP，返回 ExecuteResult；内部完成 5.1–5.4 全部流程，调用方只构造请求、接收结果（**async**：调用方 `.await`，见 crud-03 4.4）
+    pub async fn execute(req: ExecuteRequest) -> Result<ExecuteResult, ExecutorError>;
 }
 
 /// 执行请求结构体 (最小原子执行: 只描述"执行什么、用什么执行、本次入参、在哪里执行、执行实例标识", 不包含步骤/编排概念)
@@ -507,15 +509,17 @@ pub struct ExecuteResult {
 
 > **Executor 是最小原子执行单元**：只输入"执行什么（op）、用什么执行（client）、本次入参（inputs）、在哪里执行（workspace）、执行实例标识（run_id + step_id + activation_seq + retry_seq）"，返回一次执行的结果 `ExecuteResult`。**`run_id` 是所属运行（纯 jobRunId），步骤归属由 `step_id` / `activation_seq` / `retry_seq` 显式携带**；避免多执行实例命名冲突所需的命名 token `execution_id = {run_id}_{step_id}_{activation_seq}_{retry_seq}` **仅由 Executor 内部生成**（用于 main 文件/临时目录/日志），**不落库、不回传**。**Executor 不感知 step 编排语义**——步骤归属、与 Workflow/Job 的关系由上层（编排层）用结果显式携带的字段关联。`test` 接口（3.1.6）、Job 执行、单次 OP 执行均封装这一入口。**`ExecuteResult` 原样回填这四个字段**：上层无需另行携带定位信息，也**不再从 run_id 拆 stepId**。**临时文件的创建归属 `execute` 内部**：调用方只需给出四元标识即可——`.ai_auto_result-<executionId>/` 临时目录、`<workspace>/.main-<executionId>-<opId>.*` main 文件均由 `execute` 内部创建，运行结束由 `execute` 清理，调用方不参与创建与清理。
 
-**运行目录约定**：Executor 运行所需文件统一放在 **APP 统一运行时目录**下，与前端生成的中间文件同处一个根目录：
+**运行目录约定**：Executor 运行所需文件统一放在 **APP 统一运行时目录**（即 crud-06 的 `runDir`）下，与前端生成的中间文件同处一个根目录；**仅 main / origin 文件例外——它们写入各次执行的「工作区根目录」（`<runDir>/workspaces/<name>`，见 5.5），不在 runDir 根目录**：
 
 ```text
 <APP 统一运行时目录>
 ├── <前端生成的中间文件 ...>
-└── scripts/                          # 包装脚本目录 (APP 临时生成)
+├── scripts/                          # 包装脚本目录 (APP 临时生成)
     ├── run.bash   run.py   run.ps1
     ├── run.prompt.ps1                # run.prompt 的 Windows 变体
     └── run.prompt.bash               # run.prompt 的 Linux 变体
+├── <workspace>/.main-<executionId>-<opId>.{bash|py|ps1|prompt}  # main 文件 (位于各次执行的工作区根目录 <runDir>/workspaces/<name>, 不在 runDir 根目录; 传给 run.xxx 的入口; prompt 类 = 组装后的 final prompt)
+├── <workspace>/.origin-<executionId>-<opId>.prompt       # 仅 prompt 类: 用户原始 OP.content (同在工作区根目录; 组装 final prompt 时读取)
 └── .ai_auto_result-<executionId>/          # 单次运行临时结果目录 (以 .ai_auto_result 开头)
     ├── stdout          # stdout_file (main/CLI 原始输出)
     ├── stderr          # stderr_file (错误输出)
@@ -526,6 +530,7 @@ pub struct ExecuteResult {
 - **scripts 目录**：包装脚本 `run.xxx` 由 APP **在启动时临时生成**到 `<根>/scripts/` 目录。它与前端文件生成的目录同处统一根目录之下——只是专门放在 `scripts` 子目录。
 - **临时结果目录**：每次运行创建 `<根>/.ai_auto_result-<executionId>/`，存放本次的 stdout_file / stderr_file / rc_file，以及（仅 prompt 类）出参结果 JSON 文件 `outputs.json`——即 `W_AI_AUTO_OP_OUTPUTS_FILE` 指向该路径。**程序启动时主动清理所有以 `.ai_auto_result` 开头的残留目录**，防止程序中断导致文件大量残留。
   **创建归属**：临时目录与 main 文件由 `execute` 内部创建、运行结束由 `execute` 清理；调用方仅保证四元标识（`run_id` + `step_id` + `activation_seq` + `retry_seq`）唯一，不参与临时文件创建/清理。全局残留清理（启动时清 `.ai_auto_result*`）由 APP 启动流程负责。
+- **main / origin 文件的生命周期与残留（M20）**：workspace 根目录下的 `.main-<executionId>-<opId>.{bash|py|ps1|prompt}` 与（仅 prompt 类的）`.origin-<executionId>-<opId>.prompt` 均由 `execute` 在本次运行结束时删除。**崩溃残留不做跨启动扫描清理**（启动清理只覆盖 `.ai_auto_result*` 临时目录，不动用户 workspace）：因文件名含 executionId（四元标识唯一）与 opId，残留不会与后续执行冲突（同名即同一执行，不会并行发生），可在该 workspace 下次执行同名文件时被覆盖或被用户手工清理。
 
 ```text
 Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq, retry_seq, client, op, inputs, workspace}
@@ -583,6 +588,7 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq
 | `W_AI_AUTO_WORKSPACE` | 工作区绝对路径（也作为 run.xxx 的第 1 个参数传入） |
 | `W_AI_AUTO_RUN_ID` | 本次执行实例的所属 run（= ExecuteRequest.run_id，**纯 jobRunId**）；命名 token `execution_id` 另由 Executor 内部拼接 |
 | `W_AI_AUTO_STEP_ID` | （可选，由上层透传）步骤上下文 id；Executor 最小执行不依赖它，仅透传给脚本供日志/命名参考 |
+| `W_AI_AUTO_EXECUTION_ID` | 本次执行实例的命名 token（= `{run_id}_{step_id}_{activation_seq}_{retry_seq}`，由 Executor 生成）；**仅注入包装脚本进程供命名临时文件**（如 run.ps1 的 inner 脚本，见 5.5③），不落库、不回传上层 |
 | `W_AI_AUTO_OP_NAME` | OP 名称 |
 | `W_AI_AUTO_OP_VERSION` | OP 版本号 |
 | `W_AI_AUTO_TIMEOUT_MS` | 本次执行超时毫秒 |
@@ -590,6 +596,8 @@ Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq
 | `W_AI_AUTO_OP_OUTPUT_COUNT` | 出参个数（脚本类据此判断是否再从 stdin 读一行出参名；prompt 类不读，见 5.4 / 5.5） |
 | `W_AI_AUTO_OP_OUTPUT_MODE` / `W_AI_AUTO_OP_OUTPUT_JSON_PATH` / `W_AI_AUTO_OP_OUTPUTS_DEF_JSON` | outputs 解析配置，**主要用于 prompt 类**：Executor 主函数用 `OUTPUT_MODE`/`OUTPUT_JSON_PATH` 从 CLI 输出（stdout_file）解析出参；脚本类出参直接取执行上下文同名变量、不按 outputMode（见 5.4）。`OUTPUTS_DEF_JSON` 由主线程拼进 final prompt，不再注入 run.prompt |
 | `W_AI_AUTO_OP_COMMAND` / `W_AI_AUTO_OP_ARGS_TEMPLATE` / `W_AI_AUTO_OP_INPUT_MODE` / `W_AI_AUTO_OP_OUTPUTS_FILE` | 仅 prompt：外部 CLI、额外参数模板（按 inputMode 使用占位符：arg=`{{prompt}}`=final prompt 文本 / file=`{{prompt-file}}`=final prompt 文件路径 / stdin=无占位符）、喂入方式（arg=命令行参数 / stdin=final prompt 经 stdin / file=final prompt 文件路径）、出参结果 JSON 文件路径（可选）。主进程照常按协议写入入参值/出参名 stdin（run.prompt 脚本内忽略不使用）；出参定义（含描述）等大内容由主线程拼进 final prompt（main_file），不进环境变量 |
+
+> **脚本内部中转变量（非 Executor 注入，不在上表）**：`run.ps1` 因需在 dot-source 子进程内还原上下文，会在**自身进程内**设置 `W_AI_AUTO_MAIN_FILE` / `W_AI_AUTO_STDOUT_FILE` / `W_AI_AUTO_STDERR_FILE` / `W_AI_AUTO_OP_INPUT_NAMES` / `W_AI_AUTO_OP_OUTPUT_NAMES` 供 inner 子进程读取（见 5.5③）；它们不参与对外协议、不出现在其它脚本中（bash / python 不需要子进程中转）。
 
 **stdin 注入协议**：入参与出参名**不通过环境变量注入**，而是经 stdin 逐行喂给 run.xxx，避免占用环境变量空间、并与系统变量隔离：
 
@@ -643,7 +651,7 @@ OUTPUT_NAMES: <name1>,<name2>,<name3>     # 仅当 W_AI_AUTO_OP_OUTPUT_COUNT > 0
 
 **出参个数与名称注入（脚本类）**：为让 run.xxx 知道该取哪些出参值（执行上下文中变量很多）：
 - 出参个数经环境变量 `W_AI_AUTO_OP_OUTPUT_COUNT` 注入。
-- 出参名**不经环境变量、也不逐变量注入**，而是经 stdin 在入参行之后以**一行逗号分隔**的列表注入（`OUTPUT_NAMES: name1,name2,name3`），与入参共用 stdin 通道。
+- 出参名**不只靠环境变量传递、也不逐变量注入**：个数经 `W_AI_AUTO_OP_OUTPUT_COUNT` 告知，名单则经 stdin 在入参行之后以**一行逗号分隔**的列表注入（`OUTPUT_NAMES: name1,name2,name3`），与入参共用 stdin 通道（Executor 侧不注入“出参名”环境变量；`run.ps1` 为传给 dot-source 子进程而在自身进程内自设的 `W_AI_AUTO_OP_OUTPUT_NAMES` 中转变量不属此列，见 5.2 脚本内部中转变量）。
 - run.xxx 读完入参行后检查 `W_AI_AUTO_OP_OUTPUT_COUNT`：为 0 则不再读 stdin；非 0 则再读一行取到完整的出参名列表。
 
 **解析流程（脚本类，run.xxx 内）**：
@@ -856,7 +864,7 @@ foreach ($n in $outNames) {
 }
 '@
 
-$innerPath = Join-Path (Split-Path $stdout_file) "inner-$($env:W_AI_AUTO_RUN_ID).ps1"
+$innerPath = Join-Path (Split-Path $stdout_file) "inner-$($env:W_AI_AUTO_EXECUTION_ID).ps1"   # 命名含 executionId（= run_id_step_id_activation_seq_retry_seq），同一 Run 的并行 step 互不冲突
 [IO.File]::WriteAllText($innerPath, $inner, [Text.UTF8Encoding]::new($false))
 & (Join-Path $PSHOME 'powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $innerPath 2>$null
 $rc = $LASTEXITCODE
@@ -1077,7 +1085,7 @@ exit 0
 - OP 定义：`content`、`timeoutSeconds`、`version`。
 - 入参定义：`inputs`（name/type/required/default/description）。
 - 出参定义：`outputs`（name/type/description）。
-- Client 关联：目标 `type`（prompt/bash/python/powershell）及所需配置（`command`/`binaryPath`、`argsTemplate`、`inputMode`、`outputMode`、`outputJsonPath`、`exitCodeSuccess`）。
-- 关联 Client 的 ID 引用需在导入时校验或映射，避免执行时出现悬挂 Client。
+- Client 关联**不在 OP 导出/导入内容中**：`OP` 定义不包含任何 Client 字段，也不与 Client 绑定（Client 由执行时选择，见 `proposal-01` 硬约束 4）。上列 `type` / `binaryPath` / `command` / `argsTemplate` / `inputMode` / `outputMode` / `outputJsonPath` / `exitCodeSuccess` 属 **Client YAML**（3.1.7–3.1.8）导出/导入的字段。
+- **导入不创建 Client**：导入包只声明所依赖的 **Client 名称**（Workflow 节点 `clientName` / Job 的 `target.clientId` 按名解析，见 crud-03 3.3.9、crud-04 3.4.10）；目标环境无同名 Client → 409 `CLIENT_NOT_FOUND`（需先在目标环境注册同名 Client），**不做 ID 映射、不自动创建**，因而不存在“悬挂 Client”。
 
 > 导入端据此即可重建 `.main-<executionId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job/Client` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10、3.1.7–3.1.8）的设计依据。

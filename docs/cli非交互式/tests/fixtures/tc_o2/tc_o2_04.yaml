@@ -3,7 +3,7 @@ version: 1
 type: prompt
 description: 结果分析
 content: 分析结果并输出结论
-timeoutMs: 300000
+timeoutSeconds: 300
 inputs:
   - {name: result, type: string, required: true, default: null, description: 待分析结果}
 outputs:

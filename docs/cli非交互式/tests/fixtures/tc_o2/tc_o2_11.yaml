@@ -4,7 +4,7 @@ type: powershell
 description: 采集指标
 content: |
   Get-Counter
-timeoutMs: 60000
+timeoutSeconds: 60
 inputs:
   - {name: endpoint, type: string, required: true, default: null, description: 采集地址}
 outputs:

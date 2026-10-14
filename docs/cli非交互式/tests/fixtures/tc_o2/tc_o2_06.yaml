@@ -5,6 +5,6 @@ description: 清理缓存
 content: |
   #!/usr/bin/env bash
   rm -rf cache
-timeoutMs: 30000
+timeoutSeconds: 30
 inputs: []
 outputs: []

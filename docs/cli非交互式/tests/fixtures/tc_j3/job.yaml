@@ -10,6 +10,6 @@ workspace: /path/to/workspace
 inputs: {code: sample}
 trigger:
   kind: schedule
-  cron: "* *"
+  cron: "* * * * *"
 concurrency: skip
 enabled: true

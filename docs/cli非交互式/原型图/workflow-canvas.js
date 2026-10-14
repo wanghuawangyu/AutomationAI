@@ -156,16 +156,20 @@ var WFCanvas = (function () {
     var html = '';
     if (n.kind === 'start') {
       html += '<div class="dn-title">▶ Start</div><div class="dn-meta">开始节点</div>';
-      if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
+      if (st && st.text) html += '<div class="dn-state">' + escText(st.text) + '</div>';
     } else if (n.kind === 'end') {
       html += '<div class="dn-title">End ◉</div><div class="dn-meta">结束节点</div>';
-      if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
+      if (st && st.text) html += '<div class="dn-state">' + escText(st.text) + '</div>';
     } else {
       var opDef = n.opId && (typeof OP_BY_ID !== 'undefined') ? OP_BY_ID[n.opId] : null;
-      html += '<div class="dn-title">' + (n.label || (opDef ? opDef.name : '') || id) + '</div>';
+      // M4：标题可由调用方覆盖（opts.nodeTitle）——运行态展示 OP 名称（§12.6），编辑态仍用 label（§12.2）
+      var title = opts.nodeTitle ? opts.nodeTitle(id, n) : null;
+      if (title == null) title = n.label || (opDef ? opDef.name : '') || id;
+      // R6-S1：标题 / 元信息可来自实体名称（运行态标题 = OP 名）→ 拼 HTML 前转义（escText 由 mock-data.js 提供，恒先于本模块加载）
+      html += '<div class="dn-title">' + escText(title) + '</div>';
       var meta = opts.nodeMeta ? opts.nodeMeta(id, n) : ('v' + (n.opVersion || ''));
-      html += '<div class="dn-meta">' + (meta || '') + '</div>';
-      if (st && st.text) html += '<div class="dn-state">' + st.text + '</div>';
+      html += '<div class="dn-meta">' + escText(meta || '') + '</div>';
+      if (st && st.text) html += '<div class="dn-state">' + escText(st.text) + '</div>';
       if (n.outdated) html += '<span class="dn-warn">⚠</span>';
     }
 

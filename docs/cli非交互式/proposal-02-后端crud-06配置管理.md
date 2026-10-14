@@ -70,7 +70,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | | `db_version` | 1 | 只读 | DB 结构版本（`PRAGMA user_version`，**不落 JSON、仅接口附加，界面不展示**） |
 | **Client** | `client_import_max_bytes` | 1048576 | 动态 | YAML 导入大小上限（B） |
 | **OP** | `op_import_max_bytes` | 1048576 | 动态 | YAML 导入大小上限（B） |
-| **Workflow** | `workflow_max_nodes` | 200 | 动态 | 单流程最大节点数 |
+| **Workflow** | `workflow_max_nodes` | 200 | 动态 | **单流程（Workflow）最大节点数**：创建 / 更新 / 导入 Workflow 时校验 `nodes` 总数，超限 → 400 `VALIDATION_ERROR`（crud-03 3.3.3/3.3.4/3.3.9）；同时作为单 Run 并行 step 数的上界（并行 step ≤ 该 Workflow 节点总数，见 crud-03 4.4）。下一次保存 / 导入时生效 |
 | | `workflow_auto_layout` | true | 动态 | 导入缺坐标时自动排布 |
 | **运行历史** | `job_queue_waiting_max` | 20 | 动态 | 等待中队列深度上限（**默认 20，用户可调，上限 1000**；超出即拒新建运行任务）。**Job 无独立配置项、不设自动重试**（任务失败即失败，需人工重跑或在 Workflow 节点配置 `retry`） |
 | | `job_queue_running_max` | 10 | 动态* | **运行中队列深度上限（最大 10）；Task Runner 并发阈值（同时 running 的 JobRun 数上限）即取此值** |
@@ -161,7 +161,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 |-|-|-|
 | status | enum | `running` / `stopped` |
 | uptimeMs | string | 进程已运行时长（毫秒时间戳） |
-| activeRuns | integer | 当前运行中的 Run 数 |
+| activeRuns | integer | 当前 `status IN ('running','terminating')` 的 Run 数（terminating 仍占并发名额，同 `running_count`，见 crud-05 4.6） |
 
 **错误响应**：无（恒 200）。
 
@@ -345,7 +345,9 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | `job_queue_waiting_max` | 运行历史（原 crud-04 3.4.6） | 全局 waiting 队列深度上限（默认 20、可调、上限 1000）：`count(*) FROM job_runs WHERE status='waiting'` 达此值即拒新建 |
 | `job_queue_running_max` | 运行历史 / Worker | running 状态队列深度上限；派生 Worker 池 |
 | `history_max_*` | 运行历史清理任务（后台周期） | 三条件任一超限即清理；**触发机制**：随 `runner_poll_interval_ms` 复用同一常驻轮询线程，每次轮询顺带检查并清理（与 Engine 事件清理 `engine_event_retention_days` 为**同一清理任务**） |
-| `engine_event_retention_days` | Engine 事件清理（同运行历史清理任务） | 成功 run 完成即物理删本 run 事件；失败 run 最终不重试 → 1 天软删 / 2 天硬删。清理对象为 `engine_events` 重放事件，不影响 `step_records` 明细 |
+| `engine_event_retention_days` | Engine 事件清理（同运行历史清理任务） | 成功 run 完成即物理删本 run 事件；失败 run 最终不重试 → 1 天软删（置 `soft_deleted_at_ms`）/ 2 天硬删。清理对象为 `engine_events` 重放事件（可选 checkpoint 表 `run_edge_state` / `run_node_state` 同生命周期），不影响 `step_records` 明细 |
+| `workflow_max_nodes` | Workflow 管理（crud-03 3.3.3/3.3.4/3.3.9）+ WorkerPool 边界估算（crud-03 4.4） | 创建 / 更新 / 导入时校验节点数上限（超出 → 400 `VALIDATION_ERROR`）；另作为单 Run 并行 step 数上界 |
+| `client_import_max_bytes` / `op_import_max_bytes` | Client / OP 导入（crud-01 3.1.8、crud-02 3.2.8） | YAML 请求体字节数上限，超出 → 400 `VALIDATION_ERROR` |
 | `log_level` | 日志管理 | 动态切换 logger 级别 |
 | `log_max_files` | 日志滚动器 | 绕接 zip 超限删最旧 |
 
@@ -358,7 +360,7 @@ WorkerPool **不设本地滞留队列**（废弃 `worker_queue_depth`）。**任
 - **入队（派发）总是成功**：`worker.run_job(req)` / `worker.run_step(req, inst)` **总是**写 `step_records(waiting)` 后返回；**池满（无空闲 Worker）不报错**，任务就留在 waiting 由 WorkerPool 调度线程稍后指派。对 **Job / Workflow（OP 与 Workflow 执行）一律生效**。
 - **术语定义**：「**入队/派发**」= 写 step_records（同步、除 DB 错误必成功）；「**执行失败**」= OP 返回非 0 / 超时（→ `apply_retry` / 走边）；「**DB 错误**」= 写库返回 Err（→ T26 重放）。**不存在“无空闲 Worker 导致的派发失败”**。
 - **状态语义**：JobRun 在**入队成功之后**才 `waiting → running`（界面「等待中」→「运行中」）；池满时 OP 已在 step_records 排队，不阻塞 JobRun 转 running。
-- **cancel 范围**：`step_records` 中 **waiting（排队中）的 OP 可直接置 `cancelled`**（不再指派）；**仅 running 的 OP 不可外部 cancel**（OP 为最小原子执行单位，唯一 kill = 其自身 `timeoutMs` 到期）。对 Job / Workflow 一致。
+- **cancel 范围**：`step_records` 中 **waiting（排队中）的 OP 可直接置 `cancelled`**（不再指派）；**仅 running 的 OP 不可外部 cancel**（OP 为最小原子执行单位，唯一 kill = 其自身 `timeoutSeconds` 到期）。对 Job / Workflow 一致。
 
 ---
 

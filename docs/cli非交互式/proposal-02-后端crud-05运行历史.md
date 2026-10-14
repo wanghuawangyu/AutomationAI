@@ -93,7 +93,7 @@
 |-|-|-|
 | runId | string(32 位 UUID) | Run 标识 |
 | name | string | 运行名称快照：persistent = jobs.name；virtual（single_op / single_workflow）= op.name / workflow.name（= target.name） |
-| jobId | string(32 位 UUID) | 所属 Job |
+| jobId | string(32 位 UUID) | 所属 Job。**virtual Run（`single_op` / `single_workflow`）无对应 `jobs` 行**：`job_id` 写后端生成的一次性**占位 UUID**（32 位，仅作快照/关联键，与 `jobs.job_id` 无对应关系；不加强外键，与 3.4.5 的「快照引用」口径一致） |
 | jobKind | enum | `persistent` / `virtual` |
 | jobVersion | integer \| null | Job 版本（Job 修订号）；**virtual Run 无 Job 修订号 → `null`**（见 3.5.1 `version` 过滤语义） |
 | triggeredBy | enum | `manual` / `schedule` / `single_op` / `single_workflow` / `retry` |
@@ -102,10 +102,10 @@
 | workspace | string | 工作区 |
 | status | enum | `waiting` / `running` / `terminating`（等待终止：已提交终止、停止派发、等在跑 OP 收敛）/ `success` / `failed` / `cancelled` / `timeout` |
 | terminatedBy | enum \| null | `timeout` / `cancelled` / `error` |
-| timeoutStepId | string \| null | 超时节点 stepId |
-| timeoutOpName | string \| null | 超时节点引用 OP 名称 |
+| timeoutStepId | string \| null | 超时节点 stepId（写入约定见 3.5.6） |
+| timeoutOpName | string \| null | 超时节点引用 OP 名称（写入约定见 3.5.6） |
 | steps | StepRecord[] | 步骤列表 |
-| result | object \| null | 运行结果（**不落库、详情接口按 steps 聚合**）：target.kind=op → OpRunResult；=workflow → WorkflowRunResult |
+| result | object \| null | 运行结果（**不落库、详情接口按 steps 聚合**）：→ `RunResult`（**结构见 proposal-01 §12.3**；op 填 outputs + 摘要字段，workflow 填 outputs + durationMs） |
 | retryFromRunId / retryFromStepId | string \| null | 重试溯源 |
 | startedAtMs / finishedAtMs | string \| null | 起止时间（waiting 时均 null；running 时 finishedAtMs 为 null） |
 | durationMs | integer \| null | 耗时（毫秒；终态才有值） |
@@ -119,7 +119,7 @@
 ### 3.5.0 通用约定
 
 > 以下为运行历史全部 API 的完整 HTTP 定义。通用约定：
-> - 基础路径 `/api`；路径参数中的 `runId` 为 32 位无连字符 UUID。
+> - 基础路径 `/api`；路径参数中的 `runId` 为 32 位无连字符 UUID；**路径参数格式非法**（非 32 位无连字符 UUID）→ 400 `VALIDATION_ERROR`。
 > - 时间字段 JSON 中统一为 string（毫秒时间戳）。
 > - 列表分页 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
@@ -129,7 +129,7 @@
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
 | `JobRun.runId` | `job_runs.run_id` | 主键，32 位 UUID |
-| `JobRun.jobId` | `job_runs.job_id` | 引用 jobs.job_id |
+| `JobRun.jobId` | `job_runs.job_id` | 引用 jobs.job_id；**virtual Run 为一次性占位 UUID**（无对应 `jobs` 行） |
 | `JobRun.jobKind` | `job_runs.job_kind` | persistent / virtual |
 | `JobRun.jobVersion` | `job_runs.job_version` | Job 修订号；virtual Run 为 NULL |
 | `JobRun.triggeredBy` | `job_runs.triggered_by` | manual / schedule / single_op / single_workflow / retry |
@@ -156,7 +156,7 @@
 | `StepRecord.status` | `step_records.status` | waiting/running/success/failed/timeout/cancelled |
 | `StepRecord.inputs` | `step_records.inputs` | JSON object |
 | `StepRecord.bodySnapshot` | `step_records.body_snapshot` | OP 正文快照 |
-| `StepRecord.workspace` | `step_records.workspace` | 执行工作目录 |
+| `StepRecord.workspace` | `step_records.workspace` | 执行工作目录（**可空**：入队时写入，历史记录允许为空） |
 | `StepRecord.outputs` | `step_records.outputs` | 出参，JSON object |
 | `StepRecord.rawOutput` | `step_records.raw_output` | main 原始输出 |
 | `StepRecord.exitCode` | `step_records.exit_code` | 退出码 |
@@ -165,7 +165,7 @@
 | `StepRecord.timedOut` | `step_records.timed_out` | 是否超时 |
 | `StepRecord.notBeforeMs` | `step_records.not_before_ms` | 最早可执行时间（重试退避/延迟调度） |
 | `StepRecord.createdAtMs` | `step_records.created_at_ms` | 入队时间（waiting 队列按此顺序调度） |
-| `StepRecord.startedAtMs` | `step_records.started_at_ms` | 开始时间 |
+| `StepRecord.startedAtMs` | `step_records.started_at_ms` | 开始时间（**可空**：waiting 记录为 NULL，见 3.5.1「JobRun 对象」同口径） |
 | `StepRecord.finishedAtMs` | `step_records.finished_at_ms` | 结束时间 |
 | `StepRecord.durationMs` | `step_records.duration_ms` | 耗时（毫秒） |
 
@@ -190,8 +190,8 @@
 | workspace | query | string | 否 | — | 工作区 |
 | jobKind | query | string | 否 | — | 来源：persistent/virtual |
 | version | query | string | 否 | — | **纯数字**（如 `2`），按 **`job_version`**（Job 修订号）精确等值过滤——非 target 快照版本（OP / Workflow 的 target_version）；**virtual Run 的 `job_version` 为 NULL，任何版本值都不匹配**。若需按快照版本过滤暂不支持（可用 `keyword` 检索目标名称辅助定位） |
-| timeRange | query | string | 否 | — | `last_1h` / `last_24h` / `last_2d` / `last_3d` / `last_5d` / `last_7d` / `last_30d`（固定枚举，无自定义区间） |
-| sort | query | string | 否 | `-startedAtMs` | 排序字段：startedAtMs/durationMs/createdAtMs，`-` 前缀降序 |
+| timeRange | query | string | 否 | — | `last_1h` / `last_24h` / `last_2d` / `last_3d` / `last_5d` / `last_7d` / `last_30d`（固定枚举，无自定义区间）。**过滤列（定稿）= `job_runs.started_at_ms`**（即以「开始执行时刻」为基准，非 `created_at_ms`）；`waiting` 记录 `started_at_ms` 为 NULL，故**不匹配任何 timeRange 档**（清空时间筛选才可见） |
+| sort | query | string | 否 | `-startedAtMs` | 排序字段：startedAtMs/durationMs/createdAtMs，`-` 前缀降序。**NULL 排序语义**：`started_at_ms` 为 NULL 的 `waiting` 记录在降序中排在**最后**（SQLite：NULL 视为最小值，故 `DESC` 时居末；同序时以 `created_at_ms` 为次序参考） |
 
 **请求体**：无
 
@@ -281,9 +281,9 @@
 
 **功能说明**：终止 Run。**按 target 类型分两类语义**：
 
-- **target=OP（单次 OP run）**：
-  - `waiting`（未开始）→ 可直接终止，落 `cancelled`（无在跑 OP）；
-  - **`running`（运行中）→ 不支持终止**——OP 是最小原子执行单元，运行中不可外部终止（返回 409 `RUN_NOT_TERMINABLE`）；**界面表现：终止按钮置灰 / 点击提示「终止失败：OP 正在运行，不可终止」**。
+- **target=OP（单次 OP run）**（**判定依据 = 该 Run 的 OP 步骤（`step_records.source=job`）状态，不看 job_runs.status**——因存在「job_run 已 running 但 step 仍在 waiting 排队」的常态窗口，见 crud-03 4.4）：
+  - 步骤 `waiting`（未开始，含排队中）→ 可直接终止，落 `cancelled`（无在跑 OP）；
+  - **步骤 `running`（已开始执行）→ 不支持终止**——OP 是最小原子执行单元，运行中不可外部终止（返回 409 `RUN_NOT_TERMINABLE`）；**界面表现：终止按钮置灰 / 点击提示「终止失败：OP 正在运行，不可终止」**。
 - **target=Workflow（Workflow run）**：支持终止，但**只能终止未运行的 OP**——停止派发新步骤、仍在 `waiting` 的步骤置 `cancelled`；**运行中的 OP 不 kill**，等其自然运行结束后，整个 Workflow 才落 `cancelled` 终态：
   - **提交终止时若存在运行中的 OP** → Run 先置 `terminating`（终止中）中间态（界面显示"终止中"），等在跑 OP 全部收敛后再落 `cancelled`；
   - **提交终止时无运行中的 OP**（仅 waiting 步骤）→ 直接落 `cancelled`，不经过中间态。
@@ -304,17 +304,19 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | runId 格式非法，或 Run 已处于终态（不可终止） |
-| 409 | `RUN_NOT_TERMINABLE` | target=OP 且该 OP 已开始运行（OP 运行中不可终止） |
+| 400 | `VALIDATION_ERROR` | runId 格式非法（**仅参数非法**；Run 已处于终态时见下一行 409 `RUN_NOT_TERMINABLE`） |
+| 409 | `RUN_NOT_TERMINABLE` | ① target=OP 且该 OP 步骤**已开始执行**（`step_records.status=running`）——判定依据为 step 状态（非 `job_runs.status`，故 job_run 已 running 但 step 仍 waiting 排队时**允许**取消，见 4.7 / crud-03 4.4）；② Run 已处于终态（`success` / `failed` / `timeout` / `cancelled`）。**口径：Run 当前状态不允许该操作统一落 409 专用码（同 3.5.7 `RERUN_NOT_ALLOWED` / 3.5.8 `RETRY_NOT_ALLOWED`），400 仅表示参数非法** |
 | 404 | `RUN_NOT_FOUND` | runId 不存在 |
 
 > Run 处于 `terminating`（等待终止）时重复提交 terminate → **幂等返回 200 ok**（已有终止意图，无需重复处理）。
+
+> **`timeout_step_id` / `timeout_op_name` 的写入约定**：**写入方**：Executor 侦测到 `op.timeoutSeconds` 到期时，`JobComplete` / `step_complete` 路径把该 step 的 `step_id` 与 `op_name` 写入 `job_runs.timeout_step_id` / `timeout_op_name`（与 `terminated_by='timeout'` **同一写入点**）；**仅当 `terminated_by='timeout'` 时非空**（其余终态两列均为 NULL；超时计时起点与 OP 终止见 crud-03 4.4、crud-01 5.1）。
 
 ---
 
 ### 3.5.7 POST /api/runs/{runId}/rerun —— 重跑 Run
 
-**功能说明**：使用最新版本从头重跑（新建 JobRun，从头执行），适用于原 Run 失败或需按新版本重新执行的场景。**前置约束：仅已结束（终态）的 Run 可重跑——`success` / `failed` / `timeout` / `cancelled`；`waiting`（等待中）/ `running`（运行中）不可重跑**。
+**功能说明**：使用最新版本从头重跑（新建 JobRun，从头执行），适用于原 Run 失败或需按新版本重新执行的场景。**前置约束：仅已结束（终态）的 Run 可重跑——`success` / `failed` / `timeout` / `cancelled`；`waiting`（等待中）/ `running`（运行中）/ `terminating`（等待终止）不可重跑**。
 
 **路径参数**：`runId`（32 位 UUID，必填）
 
@@ -336,6 +338,8 @@
 | 404 | `RUN_NOT_FOUND` / `TARGET_NOT_FOUND` | runId 不存在 / 目标（op / workflow）已删除 |
 
 > **原子性（#4）**：检查（终态 + 全局 waiting 上限）与创建 JobRun 在**同一事务（`BEGIN IMMEDIATE`）**内先查后插，语义同 crud-04 3.4.6。
+
+> **新建 Run 的 `triggered_by` / `job_kind`（口径澄清）**：重跑新建的 Run 一律 `triggered_by=manual`，`job_kind` 继承原 Run（原 Run 为 virtual 则仍为 virtual）；**`triggered_by` 与 `job_kind` 是两个独立维度**——`single_op` / `single_workflow` 仅由「单次执行入口」（`POST /api/ops/{opId}/execute`、`POST /api/workflows/{workflowId}/execute`）产生，`retry` 仅由本文件 3.5.8 重试产生，重跑/手动/定时均为 `manual` / `schedule`。重跑**不复制**原 Run 的 `job_version`（virtual 恒为 NULL；persistent 取当前 `Job.version`）。
 
 ---
 
@@ -463,11 +467,11 @@
 | **Executor** | crud-01 第 5.1 节 | 最小原子执行单元，执行**一个 OP**，返回 `ExecuteResult`（归属 Client 层：client 提供执行能力） | — |
 | **Task Runner** | 本章 4.6 | 调度层：创建并管理 **JobRun 生命周期**（waiting / running / terminating / 终态）、并发控制、按序调度分派 | — |
 | **Engine** | crud-03 第 4.3 节 | workflow DAG 调度（并行后台任务）：**异步入口 `engine.notify(EngineStart)`（实例方法 &self）——消息即事件：EngineStart / Terminate 先写 engine_events 落库，**写后立即 `process_event` 同步处理**（无事件循环 / 无信号）**，按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 WorkerPool 并行（互不嵌套） |
-| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在 step_records 插入 waiting 记录（含 activation_seq / retry_seq）即返回（**池满不报错**）；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，与 Runner 并发阈值无关**）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
+| **WorkerPool** | crud-03 第 4.4 节 | 单个 OP 的实际执行（**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在 step_records 插入 waiting 记录（含 activation_seq / retry_seq）即返回（**池满不报错**）；WorkerPool 调度线程常驻轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，数值派生自同一配置、语义不同**）→ 执行 Executor → 更新 step_records 终态+结果）；完成回调为**全局实现**（`JobComplete` 更新终态、`StepComplete` 写事件后调全局 ENGINE 推进），Worker 执行完**同步调用**；WorkerPool 不感知业务 | 与 Engine 并行（互不嵌套） |
 
 > Engine 与 WorkerPool 是两个**互相并行**的后台组件（分别在 crud-03 4.3 / 4.4 描述），不是「Engine 套 WorkerPool」的嵌套关系；Task Runner 与它们也并行——Runner 只管队列与状态，不参与任何实际执行。
 
-**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，默认 10 阈值 → 15 个 Worker，只读派生；**一个 JobRun 可并行多个 step，故池大小需大于并发阈值**，见 crud-03 4.4 / crud-06 一）**是两个独立概念**）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：每轮轮询先 `running_count.load() < job_queue_running_max` 判断是否还有并发空位；有则执行 `SELECT run_id, target_kind FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`（**FIFO 按入队时间，每轮最多取 `runner_batch_size` 条候选**），逐条尝试调度——每条在派发前再读一次 `running_count.load() < job_queue_running_max`，仍有空位则 waiting → running 并 `running_count.fetch_add(1)`；一旦计数达到阈值即**中断本批剩余候选**（留待下轮轮询），未取完的候选不发额外信号，靠下轮 `runner_poll_interval_ms` 自然重扫。达到阈值则整轮不调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，下轮轮询即获得调度机会。
+**并发控制**：Task Runner 控制**同时运行的任务数量**（**并发阈值 = settings `job_queue_running_max`（默认 10、上限 10）**；与 Worker 池大小 `worker_pool_size`（= `ceil(job_queue_running_max × 1.5)`，默认 10 阈值 → 15 个 Worker，只读派生；**一个 JobRun 可并行多个 step，故池大小需大于并发阈值**，见 crud-03 4.4 / crud-06 一）**数值派生自同一配置、语义不同**）。运行中的任务数由 **TaskRunner 内存计数 `running_count: AtomicU32`** 维护——**启动时（new/init）从 `job_runs` 统计一次 `status=running` 或 `terminating` 的记录数作为初始值**（terminating 等待终止、在跑 OP 未释放，仍占并发名额；**临时 Job（单次 OP / Workflow 运行的 virtual JobRun）也是 Job，同样计入并发**）；此后**每次轮询只读内存计数（`load`），不再每次从 DB 统计，减少 DB I/O**。调度规则：每轮轮询先 `running_count.load() < job_queue_running_max` 判断是否还有并发空位；有则执行 `SELECT run_id, target_kind FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`（**FIFO 按入队时间，每轮最多取 `runner_batch_size` 条候选**），逐条尝试调度——每条在派发前再读一次 `running_count.load() < job_queue_running_max`，仍有空位则 waiting → running 并 `running_count.fetch_add(1)`；一旦计数达到阈值即**中断本批剩余候选**（留待下轮轮询），未取完的候选不发额外信号，靠下轮 `runner_poll_interval_ms` 自然重扫。达到阈值则整轮不调度，后续任务保持 `waiting(等待中)`；任务完成触发 **OnComplete（JobComplete 落库终态）时计数自减（`saturating_sub(1)`，最终不小于 0）**，无需显式释放名额，下轮轮询即获得调度机会。
 
 > **`runner_batch_size` 与 `job_queue_running_max` 的关系（消费定义）**：`job_queue_running_max` 是**总量闸门**（running 总数上限），`runner_batch_size` 是**单轮扫描的候选上限**。二者共同决定每轮实际启动数 = `min(runner_batch_size, job_queue_running_max - running_count, 当前 waiting 总数)`。batch_size 不参与并发总量约束，只限制单轮 SELECT 的行数与循环次数，避免队列积压时一轮把全表 waiting 捞进内存逐条判断；调大只加快空队列吞吐，不突破 running 上限；调小则每轮只取更少候选，靠多轮轮询消化（默认 10，与 running_max 默认值一致，常规场景一轮即满）。
 
@@ -490,11 +494,11 @@ impl TaskRunner {
     /// 并从 job_runs 统计一次 status IN ('running','terminating') 的记录数作为 running_count 初始值（terminating 等收敛，仍占并发名额）
     pub fn new(store: Arc<dyn RunStore>) -> Self;
 
-    /// 单次 OP 执行：创建 virtual JobRun（kind=single_op，status=waiting），投递后台执行，返回 runId
+    /// 单次 OP 执行：创建 virtual JobRun（job_kind=virtual、triggered_by=single_op、status=waiting），投递后台执行，返回 runId
     pub fn add_op(req: OpRunRequest) -> Result<String, TaskError>;
-    /// Job 运行：创建 JobRun（kind=job，status=waiting），投递后台执行，返回 runId
+    /// Job 运行：创建 JobRun（job_kind=persistent、triggered_by=manual|schedule、status=waiting），投递后台执行，返回 runId
     pub fn add_job(req: JobRunRequest) -> Result<String, TaskError>;
-    /// Workflow 运行：创建 JobRun（kind=workflow，status=waiting），投递后台执行，返回 runId
+    /// Workflow 运行：创建 JobRun（job_kind=virtual、triggered_by=single_workflow、status=waiting），投递后台执行，返回 runId
     pub fn add_workflow(req: WorkflowRunRequest) -> Result<String, TaskError>;
     /// 查询任务状态（对应内部 JobRun 状态）
     pub fn status(run_id: &str) -> TaskStatus;
@@ -503,7 +507,7 @@ impl TaskRunner {
     ///   SELECT ... FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size →
     ///   逐条派发 waiting → running → fetch_add(1)；计数达阈值即中断本批剩余候选）→ 刷新界面状态；
     /// 并**顺带扫描 engine_events WHERE processed=0 且 run 仍 running，按序逐个 process_event（幂等）**（运行中处理失败兜底，见 crud-03 T26）；
-    /// 以及**运行中事件补齐**：扫描 running run 中“step_records 有终态但缺 step_completed 事件”的记录，补写并 process_event（见 crud-03 U13）
+    /// 以及**运行中事件补齐**：扫描 running run 中“step_records 有终态但缺 step_completed 事件”的记录，补写并 process_event（见 crud-03 4.3.0 运行中兜底（U13）/ 恢复闭环）
     pub fn start(&self);
 }
 ```
@@ -511,7 +515,7 @@ impl TaskRunner {
 **请求结构体（上游只传 ID，实例查询统一收敛到 Task Runner 内部）**：
 
 ```rust
-/// 单次 OP 运行请求（kind=single_op，virtual JobRun）
+/// 单次 OP 运行请求（job_kind=virtual、triggered_by=single_op）
 /// 上游只需传 clientId / opId，Client / Op 实例由 add_op 内部查询后组装 ExecuteRequest
 pub struct OpRunRequest {
     pub run_id:    String,                  // 运行实例 id（后端生成）
@@ -521,7 +525,7 @@ pub struct OpRunRequest {
     pub workspace: PathBuf,                 // 工作区
 }
 
-/// Job 运行请求（kind=job）
+/// Job 运行请求（job_kind=persistent、triggered_by=manual|schedule）
 pub struct JobRunRequest {
     pub run_id:    String,                  // 运行实例 id（JobRun id）
     pub job_id:    String,                  // Job 定义（引用 workflow）
@@ -529,7 +533,7 @@ pub struct JobRunRequest {
     pub workspace: PathBuf,
 }
 
-/// Workflow 运行请求（kind=workflow）
+/// Workflow 运行请求（job_kind=virtual、triggered_by=single_workflow）
 pub struct WorkflowRunRequest {
     pub run_id:      String,                // 运行实例 id
     pub workflow_id: String,                // workflow 定义（DAG）
@@ -566,7 +570,8 @@ running(运行中) ──[提交终止且无在跑 OP]──> cancelled（直接
 ```text
 add_op / add_job / add_workflow(req)
   ├─ 1. **全局 waiting 上限检查（crud-04 3.4.6 #3）**：`count(*) FROM job_runs WHERE status='waiting'` ≥ settings `job_queue_waiting_max`（默认 20、可调、上限 1000）→ 直接返回 `Err(TaskError::QueueFull)`（不插记录）；API 层映射为 409 `CONCURRENCY_CONFLICT`
-  ├─ 2. 创建运行历史（JobRun）：kind/triggeredBy 按入口确定，状态 waiting(等待中)，
+  ├─ 2. 创建运行历史（JobRun）：job_kind（persistent/virtual）与 triggered_by 按入口确定，状态 waiting(等待中)，
+  │      **job_id：persistent 写被运行的 jobs.job_id；virtual（单次 OP / 单次 Workflow）写后端生成的一次性占位 UUID（32 位）**（无对应 `jobs` 行、不加强外键，仅作快照/关联键，见 3.5.1 字段表），
   │      name 按来源写入（add_op → op.name；add_workflow → workflow.name；add_job → jobs.name），
   │      **检查与插入在同一事务（`BEGIN IMMEDIATE`）内**（先查后插，防与 cron / 手动 / rerun / retry 并发击穿）；
   │      写入 job_runs（crud-05 立即可见）；每调用一次入口即插入一条记录
@@ -599,7 +604,7 @@ add_op / add_job / add_workflow(req)
 
 **同步 vs 异步**：
 - **OP execute / Job run / Workflow run**：**异步**——`add_op` / `add_job` / `add_workflow` 在内部写入一条 `waiting(等待中)` 运行记录后返回 runId 即结束；后台线程按入库顺序调度分派（**单次 OP / Job(target=op) 直接调 `worker.run_job(req)`；Job(target=workflow) / 单次 Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})`——engine.notify 仅限 workflow 类执行，Job target=op 时不得走 Engine**（均为实例方法 &self、异步入口、不阻塞；EngineStart 作为 engine_start 事件写入 engine_events 落库，重启不丢）**；`run_job` / `run_step` 只插 step_records(waiting) 即返回（任务入 DB 排队，重启不丢），返回 `WorkerHandle`（定义见 crud-03 4.4），**仅**用于该 OP 自身 `timeoutSeconds` 到期时按进程组终止；**用户终止不使用 `WorkerHandle.abort`**（终止 = 停止派发 + 等待在跑 OP 自然收敛，见 4.7 与 crud-03 4.4）），由 Runner 常驻轮询扫描 DB 驱动调度、自动刷新界面状态。
-- **client test**：**同步例外**——不投递 Task Runner、不入队，直接同步调 `Executor::execute` 实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
+- **client test**：**例外（不入队、不入历史）**——不投递 Task Runner、不入队，在同一 Worker 任务内 `await` `Executor::execute`（对该 Worker 语义上阻塞，不占用额外线程）并实时返回，且不建 JobRun/step_record、不进运行历史（见 crud-01 3.1.6）。
 - **OP 超时计时起点**：`op.timeoutSeconds` **自子进程实际启动（spawn）起算**（`waiting → running` 置位仅表示已指派），池满排队时长与 spawn 前准备期**不计入**（详见 crud-01 5.1 步骤 7、crud-03 4.4）。
 
 ---
@@ -608,12 +613,12 @@ add_op / add_job / add_workflow(req)
 ```text
 POST /api/runs/{runId}/terminate
   │
-  ├─ 前置校验：target=OP 且该 OP 步骤已 running → 409 RUN_NOT_TERMINABLE（OP 开始后不可终止）
+  ├─ 前置校验（**判定依据 = step 状态**）：target=OP 且该 OP 步骤已 `running` → 409 RUN_NOT_TERMINABLE（OP 开始后不可终止；step 仍 waiting 排队则允许）
   ├─ **按 target 类型分流**：
   │     ├─ target=op（单次 OP / Job(target=op)）：**无 Engine**——waiting 中 step 直接置 cancelled（条件更新）；无在跑 OP → job_run 落 cancelled 终态
   │     └─ target=workflow（单次 Workflow / Job(target=workflow)）: engine.notify(Terminate{run_id, reason}) → 写 terminate 事件 → process_event(terminate):
   │           ├─ **不 kill 正在运行的 OP**（OP 最小执行单位，运行中不可外部终止）
-  │           ├─ 置终止意图：停止派发新步骤；**仍在 waiting（含 DB 排队中待指派）的 step 直接置 cancelled**（条件更新；排队中的 OP 未开始执行，可直接取消）
+  │           ├─ 置终止意图：停止派发新步骤；**仍在 waiting（含 DB 排队中待指派）的 step 直接置 cancelled**（条件更新；排队中的 OP 未开始执行，可直接取消）。**去重口径（M17）**：该条件更新（与 `inflight_count` 递减）**唯一实现在 `process_event(terminate)` 内、每个 run 只执行一次**；WorkerPool 的 `abort_run`（crud-03 4.4）只负责停止派发、**不重复执行该 UPDATE**，避免 inflight_count 双次递减
   │           ├─ **若存在在跑 OP → job_run.status = terminating（等待终止，界面显示"终止中"）**（落库）
   │           └─ **等所有在跑 OP 自然收敛后** → 标记 job_run.status = cancelled + finished_at_ms（落库）
   └─ 之后到达的 step_completed（在跑 OP 完成）→ run 已有终止意图 → 不再派发后继 → 收敛后落终态

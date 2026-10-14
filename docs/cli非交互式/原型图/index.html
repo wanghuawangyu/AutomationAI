@@ -6,6 +6,18 @@
 <title>运行历史 · AI 自动化</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="mock-data.js"></script>
+<script>
+ /* M3：「全部导出」依赖 CDN 的 SheetJS。轻量检测：CDN 不可达时在按钮旁给出可见提示（不引入新依赖、不阻断页面）。
+    真正的拦截在 exportAll()/doExport() 中（明确 alert + 复位弹窗，不得静默无响应或抛未捕获异常）。 */
+ window.__xlsxReady = (typeof XLSX !== 'undefined');
+ document.addEventListener('DOMContentLoaded', function () {
+   if (window.__xlsxReady) return;
+   var hint = document.getElementById('exportCdnHint');
+   if (hint) hint.style.display = 'inline';
+   var btn = document.getElementById('exportAllBtn');
+   if (btn) btn.title = '导出组件未加载（SheetJS CDN 不可达），请检查网络后重试';
+ });
+</script>
 <link rel="stylesheet" href="workflow-canvas.css" />
 <script src="workflow-canvas.js"></script>
 <style>
@@ -13,6 +25,7 @@
   :root{
     --bg:#f4f5f7;--panel:#fff;--border:#e4e7ec;--border-soft:#eef0f4;
     --text:#1f2430;--text-2:#6b7280;--text-3:#9aa1ad;
+    --text-dim:#9aa1ad;   /* N12：补充定义（取 --text-3 同值）；此前多处 var(--text-dim) 无定义 → 灰色层次丢失 */
     --accent:#3b6ef6;--accent-soft:#eaf0ff;
     --sidebar:#171b25;--sidebar-hover:#232838;
     --failed:#dc2626;--failed-bg:#fdecec;
@@ -93,6 +106,9 @@
   .badge-failed{color:var(--failed);background:var(--failed-bg)}
   .badge-running{color:var(--running);background:var(--running-bg)}
   .badge-timeout{color:var(--timeout);background:var(--timeout-bg)}
+ .badge-off{color:#6b7280;background:#f0f1f4}
+ .badge-waiting{color:#6b7280;background:#f0f1f4}
+ .badge-terminating{color:#d97706;background:#fef3c7}
   .meta{font-size:12.5px;color:var(--text-3)}
   .dot-sep{color:#d3d7de}
   .run-sub{font-size:12.5px;color:var(--text-2);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
@@ -211,10 +227,10 @@
           <p class="sub">所有 Job Run 的统一执行记录 · 默认首页 · 记录版本快照</p>
         </div>
         <div class="head-actions">
-          <span class="last-updated" id="lastUpdated">最后更新 12:03:41</span>
+          <span class="last-updated" id="daemonStatus"></span><span class="last-updated" id="lastUpdated">最后更新 12:03:41</span>
           <button class="btn" onclick="manualRefresh()">刷新</button>
           <button class="btn toggle on" id="autoRefresh">自动刷新: 开</button>
-          <button class="btn btn-primary" onclick="exportAll()">全部导出</button>
+          <button class="btn btn-primary" id="exportAllBtn" onclick="exportAll()">全部导出</button><span class="last-updated" id="exportCdnHint" style="display:none;color:var(--failed)">导出组件未加载（SheetJS CDN 不可达）</span>
         </div>
       </div>
 
@@ -223,7 +239,7 @@
           <input class="search" id="searchInput" placeholder="🔍 搜索 OP / Workflow / Job 名称..." oninput="applyFilters()" />
           <div class="filter-row">
             <select class="select" id="typeFilter" onchange="applyFilters()"><option value="">全部类型</option><option value="op">OP</option><option value="workflow">Workflow</option></select>
-            <select class="select" id="sourceFilter" onchange="applyFilters()"><option value="">全部来源</option><option value="persistent">持久 Job</option><option value="virtual">虚拟 Job</option></select>
+            <select class="select" id="sourceFilter" onchange="applyFilters()"><option value="">全部来源</option><option value="persistent">持久 Job</option><option value="virtual">单次执行</option></select>
             <select class="select" id="triggerFilter" onchange="applyFilters()"><option value="">全部触发</option><option value="manual">手动</option><option value="schedule">定时</option><option value="single_op">单次执行·OP</option><option value="single_workflow">单次执行·Workflow</option><option value="retry">重试</option></select>
             <select class="select" id="statusFilter" onchange="applyFilters()"><option value="">全部状态</option><option value="waiting">等待中</option><option value="running">运行中</option><option value="terminating">终止中</option><option value="success">成功</option><option value="failed">失败</option><option value="timeout">超时</option><option value="cancelled">已取消</option></select>
             <!-- 选项由 GET /api/workspaces 填充（crud-06 3.6） -->
@@ -266,13 +282,18 @@
       <div class="info-grid">
         <div class="info-item"><div class="info-k">类型</div><div class="info-v">OP</div></div>
         <div class="info-item"><div class="info-k">执行版本</div><div class="info-v" id="opInfoExecVer">v2（快照）</div></div>
-        <div class="info-item"><div class="info-k">状态</div><div class="info-v"><span class="badge badge-success">✓ 成功</span></div></div>
-        <div class="info-item"><div class="info-k">耗时</div><div class="info-v">12.3s</div></div>
-        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono">/path/to/workspace</div></div>
+        <!-- N13：当前版本为**执行信息常驻字段**（proposal-01 §12.5），版本一致时同样展示 -->
+        <div class="info-item"><div class="info-k">当前版本</div><div class="info-v" id="opInfoCurVer">v2</div></div>
+        <div class="info-item"><div class="info-k">状态</div><div class="info-v" id="opInfoStatus"><span class="badge badge-success">✓ 成功</span></div></div>
+        <div class="info-item"><div class="info-k">耗时</div><div class="info-v" id="opInfoDuration">12.3s</div></div>
+        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono" id="opInfoWorkspace">/path/to/workspace</div></div>
         <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="opInfoTrigger">虚拟 Job / 单次执行</div></div>
       </div>
 
       <!-- 执行历史：同一 step 的多次执行记录 -->
+      <div class="run-note note-failed" id="opUnexecutedBar" style="display:none;margin-bottom:14px">
+        ◌ 该节点未执行（本次 Run 无该节点的执行记录）
+      </div>
       <div class="section" id="opHistorySection">
         <div class="section-title">执行历史</div>
         <select class="select" id="opHistorySelect" style="max-width:360px" onchange="switchOpHistory(this.value)">
@@ -340,9 +361,11 @@
       <div class="info-grid">
         <div class="info-item"><div class="info-k">类型</div><div class="info-v">Workflow</div></div>
         <div class="info-item"><div class="info-k">执行版本</div><div class="info-v" id="wfInfoExecVer">v1（快照）</div></div>
+        <!-- N13：当前版本为**执行信息常驻字段**（proposal-01 §12.6），版本一致时同样展示 -->
+        <div class="info-item"><div class="info-k">当前版本</div><div class="info-v" id="wfInfoCurVer">v2</div></div>
         <div class="info-item"><div class="info-k">状态</div><div class="info-v" id="wfInfoStatus"><span class="badge badge-failed">✗ 失败</span></div></div>
         <div class="info-item"><div class="info-k">耗时</div><div class="info-v" id="wfInfoDuration">8.1s</div></div>
-        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono">/path/to/workspace</div></div>
+        <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono" id="wfInfoWorkspace">/path/to/workspace</div></div>
         <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="wfInfoTrigger">持久 Job / 手动</div></div>
       </div>
 
@@ -419,9 +442,9 @@
     <div class="modal-head">重试: <span id="retryJobName">hourly_check</span></div>
     <div class="modal-body">
       <div class="summary">
-        <div><span class="k">执行时间:</span><span class="v">2 小时前</span></div>
-        <div><span class="k">失败节点:</span><span class="v">deploy (step 3/5)</span></div>
-        <div><span class="k">失败原因:</span><span class="v">exit code 1</span></div>
+        <div><span class="k">执行时间:</span><span class="v" id="retryExecTime">2 小时前</span></div>
+        <div><span class="k">失败节点:</span><span class="v" id="retryFailedNode">deploy (step 3/5)</span></div>
+        <div><span class="k">失败原因:</span><span class="v" id="retryReason">exit code 1</span></div>
       </div>
       <div style="margin-top:16px;font-size:13px;color:var(--text-2);margin-bottom:8px">重试方式</div>
       <div class="option-list">
@@ -547,9 +570,20 @@
   /* ==================== 自动刷新开关（按 general.poll_interval_ms 轮询，crud-06 一） ==================== */
   var autoRefreshBtn = document.getElementById('autoRefresh');
   var autoRefreshTimer = null;
+  // M3/N6：前端轮询间隔经 GET /api/settings 读取（crud-06 3.3 / proposal-01 §18.2 D1 定稿）——
+  // 页面不持有也不读取 mock 全局 SETTINGS（真实后端下该全局不存在，原兜底分支会成为 ReferenceError 隐患）
+  var DEFAULT_POLL_INTERVAL_MS = 2000;   // N6：接口未返回前的**常量**兜底（与 general.poll_interval_ms 默认值一致）
+  var pollIntervalCache = null;
+  mockFetch('/api/settings').then(function (s) {
+    var ms = parseInt(((s || {}).general || {}).poll_interval_ms, 10);
+    if (ms > 0) {
+      pollIntervalCache = ms;
+      restartAutoRefresh();   // N6：接口返回后按真实间隔**重建定时器**（页面加载时用兜底值建立的定时器必须被替换）
+    }
+  });
   function pollIntervalMs() {
     // 前端轮询间隔 = general.poll_interval_ms（默认 2000）；勿与后端 runner.runner_poll_interval_ms 混用
-    return parseInt((SETTINGS.general || {}).poll_interval_ms, 10) || 2000;
+    return pollIntervalCache || DEFAULT_POLL_INTERVAL_MS;
   }
   function startAutoRefresh() {
     if (autoRefreshTimer) return;
@@ -558,12 +592,50 @@
   function stopAutoRefresh() {
     if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
   }
+  // N6：按当前接口值重建轮询定时器（仅在开关开启时重建，关闭时保持“关”语义）
+  function restartAutoRefresh() {
+    if (!autoRefreshTimer) return;
+    stopAutoRefresh();
+    startAutoRefresh();
+  }
   autoRefreshBtn.addEventListener('click', function () {
     autoRefreshBtn.classList.toggle('on');
     var on = autoRefreshBtn.classList.contains('on');
     autoRefreshBtn.textContent = on ? '自动刷新: 开' : '自动刷新: 关';
     if (on) startAutoRefresh(); else stopAutoRefresh();
   });
+
+  function refreshDaemonStatus() {
+    // M12：crud-06 3.1 / 3.2 —— 首页展示守护进程是否运行及运行时长（GET /api/system/status + GET /api/system/version）
+    var el = document.getElementById('daemonStatus');
+    if (!el) return;
+    mockFetch('/api/system/status').then(function (st) {
+      return mockFetch('/api/system/version').then(function (v) {
+        var up = parseInt((st && st.uptimeMs) || 0, 10);
+        var upText = up >= 3600000 ? (up / 3600000).toFixed(1) + 'h' : Math.floor(up / 60000) + 'min';
+        el.textContent = '守护进程: ' + ((st && st.status === 'running') ? '运行中' : '未运行') + ' · ' + upText + ' · v' + ((v && v.version) || '-') + ' · 进行中 Run ' + ((st && st.activeRuns) || 0);
+      });
+    });
+  }
+
+  /* M2：can-retry 判定经接口获取（proposal-01 §12.4 C1 定稿：前端调用 GET /api/runs/{runId}/can-retry）
+     首次未返回时用本地等价判定占位（canRetryOf），并异步取权威结果后重渲染 */
+  var canRetryCache = {};
+  var canRetryPending = {};
+  function canRetryInfo(r) {
+    if (!r || !r.runId) return { ok: false, reason: 'Run 不存在' };
+    if (canRetryCache[r.runId]) return canRetryCache[r.runId];
+    if (!canRetryPending[r.runId]) {
+      canRetryPending[r.runId] = true;
+      var rid = r.runId;
+      mockFetch('/api/runs/' + rid + '/can-retry').then(function (res) {
+        canRetryCache[rid] = { ok: !!(res && res.canRetry), reason: (res && res.reason) || null };
+        delete canRetryPending[rid];
+        renderRunList();
+      });
+    }
+    return canRetryOf(r);
+  }
 
   function manualRefresh() {
     var el = document.getElementById('lastUpdated');
@@ -626,9 +698,15 @@
     // D5：文件名不可含路径分隔符或 ".."（前端落盘前自校验）
     if (/[\/\\]/.test(fileName) || fileName.indexOf('..') >= 0) { alert('文件名不可包含路径分隔符或 ".."'); return; }
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
+    // M3：导出组件（CDN SheetJS）不可用时给明确提示并复位弹窗，不得静默无响应 / 抛未捕获异常
+    if (typeof XLSX === 'undefined') {
+      alert('导出组件未加载（SheetJS CDN 不可达），请检查网络后重试');
+      closeModal('exportModal');
+      return;
+    }
     mockFetch('/api/runs/export', { method: 'POST', body: JSON.stringify({ filters: currentFilters() }) })
       .then(function (res) {
-        if (res && res.error) throw new Error(res.message || res.error);
+        if (res && res.error) throw new Error(errorText(res));
         if (!res || !res.xlsx) throw new Error('响应缺少 xlsx 内容');
         // D3：默认名未自定义时，用后端返回的 count 重建文件名（计数单一来源在后端，避免前后端筛选口径漂移）
         if (fileName === defaultExportName && res.count != null) {
@@ -684,7 +762,7 @@
       // version 按 job_version 精确等值；virtual Run 的 jobVersion 为 null，不参与匹配
       if (vr && String(r.jobVersion) !== vr) return false;
       if (tm) {
-        var t = Number(r.startedAtMs || r.createdAtMs || 0);
+        var t = r.startedAtMs ? Number(r.startedAtMs) : 0;   // waiting（startedAtMs 为空）不匹配任何 timeRange 档（crud-05 3.5.1）
         if (!t) return false;
         if ((now - t) > RANGE_MS[tm]) return false;
       }
@@ -703,14 +781,15 @@
       var sel = document.getElementById('workspaceFilter');
       var cur = sel.value;
       sel.innerHTML = '<option value="">全部工作区</option>' + (res.items || []).map(function (w) {
-        return '<option value="' + w + '"' + (w === cur ? ' selected' : '') + '>' + w + '</option>';
+        return '<option value="' + escText(w) + '"' + (w === cur ? ' selected' : '') + '>' + escText(w) + '</option>';
       }).join('');
     });
   }
   loadWorkspaces();
-  /* 刷新数据源（手动刷新 / 自动刷新共用）：重新拉取后按当前筛选重渲染 */
+  /* 刷新数据源（手动刷新 / 自动刷新共用）：重新拉取后按当前筛选重渲染
+     crud-05 3.5.1：列表响应为 { items, total, page, page_size }，用 listItems 取数组 */
   function refreshRuns() {
-    mockFetch('/api/runs').then(function (list) { fetchedRuns = list; applyFilters(); });
+    mockFetch('/api/runs').then(function (res) { fetchedRuns = listItems(res); applyFilters(); });
   }
 
   function changePageSize() {
@@ -728,6 +807,10 @@
   function renderRunList(runs) {
     if (runs) { allRuns = runs; }
     var card = document.querySelector('#view-list .card');
+    // S1：渲染前先清空旧表格（本页没有 .run-card 元素，原清理逻辑形同虚设 → 每次渲染都堆叠新表）与旧分页控件
+    card.querySelectorAll('table').forEach(function (t) { t.remove(); });
+    var oldPaginationEl = card.querySelector('.pagination');
+    if (oldPaginationEl) oldPaginationEl.remove();
     var articles = card.querySelectorAll('.run-card');
     articles.forEach(function(a) { a.remove(); });
 
@@ -760,40 +843,53 @@
       var tagClass = targetKind === 'OP' ? 'tag-op' : 'tag-wf';
       var targetName = (r.target && r.target.name) || r.name;
       var targetVersion = r.target ? (r.target.kind === 'op' ? r.target.opVersion : r.target.workflowVersion) : r.jobVersion;
-      var clickHandler = targetKind === 'OP'
-        ? "openOpDetail('" + targetName + "','v" + targetVersion + "','v" + targetVersion + "','from-list')"
-        : "openWfDetail('" + r.runId + "')";
-      // 按钮可用性：严格按 can-retry 五条件 / 重跑前提（D1 定稿；不再写死）
-      var retryInfo = canRetryOf(r);
+      // G1：当前版本取**该 OP 定义的当前版本**（OP_BY_ID / OP_BY_NAME.version），执行版本取 Run 快照版本（§12.5 版本对比）
+      var curOpVersion = targetKind === 'OP'
+        ? ((r.target && r.target.opId && OP_BY_ID[r.target.opId]) ? OP_BY_ID[r.target.opId].version : (OP_BY_NAME[targetName] ? OP_BY_NAME[targetName].version : targetVersion))
+        : targetVersion;
+      /* R6-S1：名称不再拼进 onclick —— 改为 data-* 属性，由运行历史表的委托处理器读取（名称允许任意 UTF-8 字符） */
+      var nameAttrs = targetKind === 'OP'
+        ? 'data-action="open-op-detail" data-name="' + escText(targetName) + '" data-exec-ver="v' + escText(targetVersion) + '" data-cur-ver="v' + escText(curOpVersion) + '" data-run-id="' + escText(r.runId) + '"'
+        : 'data-action="open-wf-detail" data-run-id="' + escText(r.runId) + '"';
+      // 按钮可用性：严格按 can-retry 五条件 / 重跑前提（M2：重试可点性经 GET /api/runs/{runId}/can-retry 获取）
+      var retryInfo = canRetryInfo(r);
       var rerunInfo = canRerunOf(r);
       var actions = '';
-      if (r.status === 'waiting' || r.status === 'running' || r.status === 'terminating') {
-        actions += '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + r.runId + '\')">终止</button>';
+      // G9：[终止] 仅 running（运行中）展示；terminating（终止中）无操作（proposal-01 §12.4 操作按钮表）
+      if (r.status === 'running') {
+        // G9：target=OP 且其 OP 步骤已开始执行 → OP 运行中不可终止（按钮置灰 + 点击提示；crud-05 3.5.6 返回 409 RUN_NOT_TERMINABLE）
+        // N1：判定与 openTerminate() / crud-05 3.5.6 对齐 —— 依据是该 Run 的 OP 步骤状态（step_records.status=running），**不是只判 target.kind==='op'**
+        // 仅 target=OP 且其步骤仍在 waiting 排队时后端允许终止（proposal-01 §12.4 [终止]）
+        var opStepRunning = !!r.target && r.target.kind === 'op' && (r.steps || []).some(function (s) { return s.status === 'running'; });
+        actions += opStepRunning
+          ? '<button class="btn btn-sm btn-danger" title="终止失败：OP 正在运行，不可终止" onclick="alert(\'终止失败：OP 正在运行，不可终止\')">终止</button>'
+          : '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + escText(r.runId) + '\')">终止</button>';
       }
       if (r.status === 'success' || r.status === 'failed' || r.status === 'timeout' || r.status === 'cancelled') {
         actions += retryInfo.ok
-          ? '<button class="btn btn-sm btn-ghost-primary" onclick="openRetry(\'' + r.runId + '\')">重试</button>'
-          : '<button class="btn btn-sm" disabled title="' + (retryInfo.reason || '不满足重试条件') + '">重试</button>';
+          ? '<button class="btn btn-sm btn-ghost-primary" onclick="openRetry(\'' + escText(r.runId) + '\')">重试</button>'
+          : '<button class="btn btn-sm" disabled title="' + escText(retryInfo.reason || '不满足重试条件') + '">重试</button>';
         actions += rerunInfo.ok
-          ? '<button class="btn btn-sm" onclick="openRerun(\'' + r.runId + '\')">重跑</button>'
-          : '<button class="btn btn-sm" disabled title="' + (rerunInfo.reason || '不可重跑') + '">重跑</button>';
+          ? '<button class="btn btn-sm" onclick="openRerun(\'' + escText(r.runId) + '\')">重跑</button>'
+          : '<button class="btn btn-sm" disabled title="' + escText(rerunInfo.reason || '不可重跑') + '">重跑</button>';
       }
-      // 「失败节点」为前端聚合（后端无 failedNode 字段）：取失败/超时的最后一条 step 的 opName
+      // 「失败节点」为前端聚合（后端无 failedNode 字段）：N14 收敛口径 —— 仅当 Run **最终结果非成功**
+      // （failed / timeout / cancelled）时取最后一条 failed/timeout step 的 opName；成功的 Run 一律显示 `-`（与 §12.4 示例行一致）
       var fs = failedStepOf(r);
       var failedNode = fs ? (fs.opName || fs.stepId) : '-';
       var workspace = r.workspace || '-';
-      var triggerText = r.triggeredBy === 'schedule' ? '持久 Job / 定时' : r.triggeredBy === 'manual' ? '持久 Job / 手动' : r.triggeredBy === 'retry' ? '重试' : '单次执行';
+      var triggerText = triggerTextOf(r.triggeredBy);   // G7：triggeredBy 五值统一映射（含 single_workflow）
       var durationText = (r.durationMs == null) ? '-' : (r.durationMs / 1000).toFixed(1) + 's';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 8px;cursor:pointer" onclick="' + clickHandler + '">' +
-          '<span style="font-weight:500">' + r.name + '</span>' +
+        '<td style="padding:10px 8px;cursor:pointer" ' + nameAttrs + '>' +
+          '<span style="font-weight:500">' + escText(r.name) + '</span>' +
         '</td>' +
         '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
-          '<span class="tag ' + tagClass + '">' + targetKind + '</span> ' + targetName + ' v' + targetVersion +
+          '<span class="tag ' + tagClass + '">' + escText(targetKind) + '</span> ' + escText(targetName) + ' v' + escText(targetVersion) +
         '</td>' +
-        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + failedNode + '</td>' +
-        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + workspace + '</td>' +
-        '<td style="padding:10px 8px;font-size:12px">' + triggerText + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escText(failedNode) + '</td>' +
+        '<td style="padding:10px 8px;font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escText(workspace) + '</td>' +
+        '<td style="padding:10px 8px;font-size:12px">' + escText(triggerText) + '</td>' +
         '<td style="padding:10px 8px;font-size:12px"><span class="badge ' + badgeClass + '">' + badgeText + '</span> ' + durationText + '</td>' +
         '<td style="padding:10px 8px">' + actions + '</td>' +
       '</tr>';
@@ -810,10 +906,10 @@
       '<div style="display:flex;align-items:center;gap:8px">' +
         '<span>每页</span>' +
         '<select id="pageSize" onchange="changePageSize()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' +
-          '<option value="10">10</option>' +
-          '<option value="50">50</option>' +
-          '<option value="100">100</option>' +
-          '<option value="1000">1000</option>' +
+          '<option value="10"' + (pageSize === 10 ? ' selected' : '') + '>10</option>' +
+          '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50</option>' +
+          '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100</option>' +
+          '<option value="1000"' + (pageSize === 1000 ? ' selected' : '') + '>1000</option>' +
         '</select>' +
         '<span id="totalCount">共 ' + total + ' 条</span>' +
       '</div>' +
@@ -828,17 +924,63 @@
   // 调用接口获取数据
   refreshRuns();
 
+  /* R6-S1：运行历史行的名称列用 data-* 传参 + 事件委托（名称允许任意 UTF-8 字符，不得拼进 onclick） */
+  function runRowAction(e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el || !document.getElementById('view-list').contains(el)) return;
+    var d = el.dataset;
+    if (d.action === 'open-op-detail') openOpDetail(d.name, d.execVer, d.curVer, 'from-list', null, d.runId);
+    else if (d.action === 'open-wf-detail') openWfDetail(d.runId);
+  }
+  document.getElementById('view-list').addEventListener('click', runRowAction);
+
   /* ==================== OP 执行详情 ==================== */
-  function openOpDetail(name, execVer, curVer, from, nodeData) {
+  /* S1：进入 OP 执行详情时先把**所有展示位**重置为「— / 无」，无执行记录时不得残留上一个节点的任何字段 */
+  function resetOpDetailSlots() {
+    var st = document.getElementById('opInfoStatus');
+    if (st) st.innerHTML = '<span style="color:var(--text-dim)">—</span>';
+    var dur = document.getElementById('opInfoDuration');
+    if (dur) dur.textContent = '—';
+    var body = document.getElementById('opBodyBlock');
+    if (body) body.textContent = '—';
+    var out = document.getElementById('opOutputBlock');
+    if (out) out.textContent = '—';
+    var tables = document.querySelectorAll('#view-op-detail .section table');
+    if (tables.length >= 2) {
+      var emptyCell = '<tr><td colspan="2" style="padding:8px;color:var(--text-3)">';
+      tables[0].innerHTML = emptyCell + '无入参</td></tr>';
+      tables[1].innerHTML = emptyCell + '无出参</td></tr>';
+    }
+  }
+
+  function openOpDetail(name, execVer, curVer, from, nodeData, runId) {
+    currentOpName = name;
+    currentOpFrom = from || 'from-list';
+    currentOpRunId = runId || null;
+    resetOpDetailSlots();   // S1：先重置再填充（无执行记录时各展示位保持「— / 无」）
     document.getElementById('opDetailName').textContent = name;
     document.getElementById('opExecVer').textContent = execVer;
     document.getElementById('opCurVer').textContent = curVer;
     document.getElementById('opInfoExecVer').textContent = execVer + '（快照）';
+    document.getElementById('opInfoCurVer').textContent = curVer;   // N13：当前版本为执行信息**常驻字段**（§12.5），版本一致时同样展示
 
-    // 从 RUNS 中找到对应的 run 和 step 数据（按 opName 匹配，对齐后端 step_records.op_name 快照）
+    // G8：按调用方传入的 runId 定位 Run，只取**该 Run** 的 step（原实现按 opName 跨 Run 匹配，会展示别的 Run 的记录）
     var stepData = null;
-    var runData = null;
-    for (var i = 0; i < RUNS.length; i++) {
+    var runData = runId ? (RUN_BY_ID[runId] || null) : null;
+    if (runData) {
+      for (var k = 0; k < runData.steps.length; k++) {
+        var st = runData.steps[k];
+        if (nodeData && nodeData.workflowNodeId) {
+          if (st.stepId === nodeData.workflowNodeId) { stepData = st; break; }
+        } else if (st.opName === name) {
+          stepData = st;
+          break;
+        }
+      }
+    }
+    // 兜底（无 runId 的旧调用路径）：按 opName 跨 Run 取首条命中
+    runData = runData || null;
+    for (var i = 0; !stepData && !runData && i < RUNS.length; i++) {
       var run = RUNS[i];
       for (var j = 0; j < run.steps.length; j++) {
         if (run.steps[j].opName === name) {
@@ -852,6 +994,11 @@
     if (stepData && stepData.bodySnapshot) {
       document.getElementById('opBodyBlock').textContent = stepData.bodySnapshot;
     }
+
+    // M14：工作区取该 Run 的实际值（不再硬编码 /path/to/workspace）；N13：改用 id 定位（原按 .info-v 序号取第 5 项，
+    // 新增「当前版本」常驻行后序号会漂移）
+    var opWsEl = document.getElementById('opInfoWorkspace');
+    if (opWsEl) opWsEl.textContent = (runData && runData.workspace) || '—';
 
     // 重跑按钮动态绑定本次 run 的 runId（静态默认 onclick 仅作占位；A1 修复）
     var opRerunBtn = document.getElementById('opRerunBtn');
@@ -882,26 +1029,33 @@
     if (histSelect) {
       histSelect.innerHTML = opHistoryData.length
         ? opHistoryData.map(function (h, idx) {
-            return '<option value="' + idx + '"' + (idx === 0 ? ' selected' : '') + '>' + h.label + (idx === 0 ? ' ← 当前' : '') + '</option>';
+            return '<option value="' + idx + '"' + (idx === 0 ? ' selected' : '') + '>' + escText(h.label) + (idx === 0 ? ' ← 当前' : '') + '</option>';
           }).join('')
         : '<option value="0" selected>（无执行记录）</option>';
     }
+    var unexecBar = document.getElementById('opUnexecutedBar');
+    if (unexecBar) unexecBar.style.display = opHistoryData.length ? 'none' : 'inline-flex';
     if (opHistoryData.length) switchOpHistory(0);
 
-    // 根据来源展示触发对象
+    // 根据来源展示触发对象（G7：triggeredBy 五值统一映射）
     var triggerText = '';
     if (from === 'from-wf') {
       triggerText = 'Workflow';
     } else if (runData) {
-      if (runData.triggeredBy === 'schedule') triggerText = '持久 Job / 定时';
-      else if (runData.triggeredBy === 'manual') triggerText = '持久 Job / 手动';
-      else if (runData.triggeredBy === 'single_op') triggerText = '虚拟 Job / 单次执行';
-      else if (runData.triggeredBy === 'retry') triggerText = '持久 Job / 重试';
-      else triggerText = runData.triggeredBy;
+      triggerText = triggerTextOf(runData.triggeredBy);
     }
 
     var verCompare = document.getElementById('opVerCompare');
     verCompare.classList.toggle('show', execVer !== curVer);
+    // M14：「查看 vX 定义」按钮不再为静态示例——点击展示该 OP 对应版本的定义内容
+    var defBtns = verCompare.querySelectorAll('.vc-links button');
+    if (defBtns.length >= 2) {
+      defBtns[0].onclick = function () { showOpDef(execVer); };
+      defBtns[1].onclick = function () { showOpDef(curVer); };
+      // G1：按钮文案按实际执行 / 当前版本生成（原为静态 v2 / v3）
+      defBtns[0].textContent = '查看 ' + execVer + ' 定义';
+      defBtns[1].textContent = '查看 ' + curVer + ' 定义';
+    }
 
     var backBtn = document.getElementById('opBackBtn');
     if (from === 'from-wf') {
@@ -924,25 +1078,80 @@
   }
 
   /* ---------- OP 执行历史切换 ---------- */
-  var opHistoryData = [];   // 由 openOpDetail 从 RUNS 的 StepRecord[] 动态填充（不再硬编码）
+  var opHistoryData = [];   // 由 openOpDetail 从该 Run 的 StepRecord[] 动态填充（不再硬编码）
+  var currentOpName = '';   // 当前查看的 OP 名（供「查看 vX 定义」用）
+  var currentOpFrom = 'from-list';
+  var currentOpRunId = null;
+
+  /* 展示某个 OP 的版本定义（M14：「查看 vX 定义」按钮的实际行为） */
+  function showOpDef(versionText) {
+    var op = OP_BY_NAME[currentOpName];
+    if (!op) { alert('OP 不存在：' + currentOpName); return; }
+    var lines = [
+      'OP: ' + op.name + ' · type=' + op.type + ' · 查看版本 ' + versionText + '（当前最新 v' + op.version + '）',
+      '超时: ' + op.timeoutSeconds + 's',
+      '入参: ' + ((op.inputs || []).map(function (i) { return i.name + '(' + i.type + (i.required ? ',必填' : '') + ')'; }).join(', ') || '无'),
+      '出参: ' + ((op.outputs || []).map(function (o) { return o.name + '(' + o.type + ')'; }).join(', ') || '无'),
+      '正文:',
+      op.content || ''
+    ];
+    alert(lines.join('\n'));
+  }
+
   function switchOpHistory(idx) {
     var h = opHistoryData[idx];
-    if (!h) return;
-    var infoVals = document.querySelectorAll('#view-op-detail .info-grid .info-v');
-    infoVals[2].innerHTML = h.statusBadge;
-    infoVals[3].textContent = h.durationText;
+    if (!h) { resetOpDetailSlots(); return; }   // S1：无记录时不得残留上一条记录的值
+    // N13：改按 id 定位（原按 .info-v 序号取第 3/4 项；新增「当前版本」常驻行后序号漂移，会把状态写进错误元素）
+    document.getElementById('opInfoStatus').innerHTML = h.statusBadge;
+    document.getElementById('opInfoDuration').textContent = h.durationText;
     var outputBlocks = document.querySelectorAll('#view-op-detail .pre-block');
     if (h.status === 'failed' || h.status === 'timeout') {
       outputBlocks[1].textContent = h.error;
     } else {
       outputBlocks[1].textContent = h.output;
     }
+    // M15：切换执行记录时同步更新入参 / 出参（proposal-01 §12.5：入参、出参、输出一一对应）
+    renderOpParamTables(h);
+  }
+
+  /* 渲染 OP 执行详情的入参 / 出参表格（取当前选中记录的实际值） */
+  function renderOpParamTables(h) {
+    var detailTables = document.querySelectorAll('#view-op-detail .section table');
+    if (detailTables.length < 2) return;
+    var cellStyle = 'padding:6px 10px;width:180px;border-bottom:1px solid var(--border-soft)';
+    var valStyle = 'padding:6px 10px;border-bottom:1px solid var(--border-soft)';
+    var kvRows = function (obj, emptyText) {
+      var keys = Object.keys(obj || {});
+      if (!keys.length) return '<tr><td colspan="2" style="padding:8px;color:var(--text-3)">' + emptyText + '</td></tr>';
+      return keys.map(function (k) {
+        var v = obj[k];
+        return '<tr><td class="mono" style="' + cellStyle + '">' + escText(k) + '</td><td style="' + valStyle + '">' +
+          escText(v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v))) + '</td></tr>';
+      }).join('');
+    };
+    detailTables[0].innerHTML = kvRows(h.inputs, '无入参');
+    detailTables[1].innerHTML = kvRows(h.outputs, '无出参');
   }
 
   /* ==================== Workflow 执行详情 ==================== */
 
   var currentWfNodes = {};
   var currentWfEdges = [];
+  var currentWfRunId = null;   // 当前查看的 Workflow Run（G8：画布节点点击时传给 OP 执行详情）
+
+  /* 展示 Workflow 某个版本的定义（M14：「查看 vX 定义」按钮的实际行为） */
+  function showWfDef(name, version) {
+    var wf = WORKFLOW_BY_NAME[name];
+    if (!wf) { alert('Workflow 不存在：' + name); return; }
+    var opNodes = (wf.nodes || []).filter(function (n) { return n.kind === 'op'; });
+    var lines = [
+      'Workflow: ' + wf.name + ' · 查看版本 v' + version + '（当前最新 v' + wf.version + '）',
+      '节点(' + opNodes.length + '): ' + (opNodes.map(function (n) { return (OP_BY_ID[n.opId] ? OP_BY_ID[n.opId].name : '(已删除)') + ' v' + n.opVersion; }).join(', ') || '无'),
+      '入参: ' + ((wf.inputs || []).map(function (i) { return i.name; }).join(', ') || '无'),
+      '出参: ' + ((wf.outputs || []).map(function (o) { return o.name; }).join(', ') || '无')
+    ];
+    alert(lines.join('\n'));
+  }
 
   function openWfDetail(runId) {
     // 通过 mock API 异步查询 run 和 workflow 定义
@@ -960,6 +1169,7 @@
       var run = result.run;
       var wf = result.wf;
       var wfVersion = result.wfVersion;
+      currentWfRunId = run.runId;   // G8：从画布进入 OP 执行详情时须带上本 Run 的 runId
 
     // 构建节点状态：从 run.steps 中匹配每个 op 节点的执行状态（steps 为扁平数组；同一 step 多条记录时取最后一条，D3）
     currentWfNodes = {};
@@ -995,24 +1205,32 @@
 
     // 状态展示
     var statusHtml = '';
-    if (run.status === 'success') statusHtml = '<span class="badge badge-success">✓ 成功</span>';
-    else if (run.status === 'failed') statusHtml = '<span class="badge badge-failed">✗ 失败</span>';
-    else if (run.status === 'timeout') statusHtml = '<span class="badge badge-timeout">⏱ 超时</span>';
-    else if (run.status === 'running') statusHtml = '<span class="badge badge-running">● 运行中</span>';
+    // G2：§12.6「状态徽标（7 态）」—— waiting / terminating / cancelled 也要渲染（与列表口径一致）
+    var WF_BADGE = {
+      success:     '<span class="badge badge-success">✓ 成功</span>',
+      failed:      '<span class="badge badge-failed">✗ 失败</span>',
+      timeout:     '<span class="badge badge-timeout">⏱ 超时</span>',
+      running:     '<span class="badge badge-running">● 运行中</span>',
+      waiting:     '<span class="badge badge-waiting">⏳ 等待中</span>',
+      terminating: '<span class="badge badge-terminating">⏹ 终止中</span>',
+      cancelled:   '<span class="badge badge-off">⊘ 已取消</span>'
+    };
+    statusHtml = WF_BADGE[run.status] || '<span style="color:var(--text-dim)">—</span>';
     document.getElementById('wfInfoStatus').innerHTML = statusHtml;
 
-    // 触发对象
-    var triggerText = '';
-    if (run.triggeredBy === 'schedule') triggerText = '持久 Job / 定时';
-    else if (run.triggeredBy === 'manual') triggerText = '持久 Job / 手动';
-    else if (run.triggeredBy === 'single_op') triggerText = '虚拟 Job / 单次执行';
-    else if (run.triggeredBy === 'retry') triggerText = '持久 Job / 重试';
+    // 触发对象（G7：triggeredBy 五值统一映射）
+    var triggerText = triggerTextOf(run.triggeredBy);
     document.getElementById('wfInfoTrigger').textContent = triggerText;
     document.getElementById('wfDetailTrigger').textContent = '触发: ' + triggerText;
+
+    // M14：工作区取该 Run 的实际值；N13：改用 id 定位（原按 .info-v 序号取第 5 项，新增「当前版本」常驻行后序号会漂移）
+    var wfWsEl = document.getElementById('wfInfoWorkspace');
+    if (wfWsEl) wfWsEl.textContent = run.workspace || '—';
 
     // 耗时
     document.getElementById('wfInfoDuration').textContent = (run.durationMs == null) ? '—' : (run.durationMs / 1000).toFixed(1) + 's';
     document.getElementById('wfInfoExecVer').textContent = 'v' + wfVersion + '（快照）';
+    document.getElementById('wfInfoCurVer').textContent = 'v' + wf.version;   // N13：当前版本为执行信息**常驻字段**（§12.6），版本一致时同样展示
 
     // 失败/超时提示条
     var failBar = document.getElementById('wfFailBar');
@@ -1021,10 +1239,15 @@
       var fstep = failedStepOf(run);
       var fop = OP_BY_ID[fstep.opId];
       var failedOp = fop ? fop.name : (fstep.opName || fstep.stepId);
-      failBar.innerHTML = '✗ 该 Workflow 执行失败。失败节点: ' + failedOp;
+      failBar.innerHTML = '✗ 该 Workflow 执行失败。失败节点: ' + escText(failedOp);
       failBar.style.display = 'inline-flex';
       timeoutBar.style.display = 'none';
     } else if (run.status === 'timeout') {
+      // M11：超时提示条按该 Run 的超时节点/所引 OP 动态生成（原为静态文案）
+      var toOp = run.timeoutOpName ? OP_BY_NAME[run.timeoutOpName] : null;
+      var toName = run.timeoutOpName || run.timeoutStepId || '—';
+      timeoutBar.innerHTML = '⏱ 该 Workflow 执行超时。超时节点: ' + escText(toName) +
+        (toOp ? ' · 引用 OP ' + escText(toOp.name) + '（timeout = ' + escText(toOp.timeoutSeconds) + 's）' : '');
       timeoutBar.style.display = 'inline-flex';
       failBar.style.display = 'none';
     } else {
@@ -1034,20 +1257,27 @@
 
     // 版本对比提示
     var verCompare = document.getElementById('wfVerCompare');
-    verCompare.classList.toggle('show', wfVersion < wf.version);
-    if (wfVersion < wf.version) {
+    verCompare.classList.toggle('show', wfVersion !== wf.version);   // M2：仅执行版本 ≠ 当前版本时显示（§12.6）
+    if (wfVersion !== wf.version) {
       verCompare.innerHTML = '⚠ 本次执行使用的版本: v' + wfVersion + '，当前最新版本: v' + wf.version +
         ' <button class="btn" style="margin-left:12px">查看 v' + wfVersion + ' 定义</button>' +
         '<button class="btn" style="margin-left:6px">查看 v' + wf.version + ' 定义</button>';
     }
+    // M14：「查看 vX 定义」按钮不再为静态示例
+    var wfDefBtns = verCompare.querySelectorAll('button');
+    if (wfDefBtns.length >= 2) {
+      wfDefBtns[0].onclick = function () { showWfDef(wf.name, wfVersion); };
+      wfDefBtns[1].onclick = function () { showWfDef(wf.name, wf.version); };
+    }
 
     // 操作按钮
     var headActions = document.getElementById('wfHeadActions');
-    var retryInfo = canRetryOf(run);
+    var retryInfo = canRetryInfo(run);   // M2：经 GET /api/runs/{runId}/can-retry 取权威判定
     var rerunInfo = canRerunOf(run);
-    if (run.status === 'waiting' || run.status === 'running' || run.status === 'terminating') {
+    // G9：[终止] 仅 running 展示；waiting / terminating 无操作（proposal-01 §12.6 头部操作按钮表）
+    if (run.status === 'running') {
       headActions.innerHTML = '<button class="btn btn-danger" onclick="openTerminate(\'' + run.runId + '\')">终止</button>';
-    } else {
+    } else if (run.status === 'success' || run.status === 'failed' || run.status === 'timeout' || run.status === 'cancelled') {
       headActions.innerHTML =
         (retryInfo.ok
           ? '<button class="btn btn-ghost-primary" onclick="openRetry(\'' + run.runId + '\')">重试</button>'
@@ -1055,14 +1285,21 @@
         (rerunInfo.ok
           ? '<button class="btn" onclick="openRerun(\'' + run.runId + '\')">重跑</button>'
           : '<button class="btn" disabled title="' + (rerunInfo.reason || '不可重跑') + '">重跑</button>');
+    } else {
+      // G3：waiting / terminating 无操作（§12.6 头部操作按钮表：等待调度 / 已提交终止，均不给按钮）
+      headActions.innerHTML = '<span style="color:var(--text-dim);font-size:13px">—</span>';
     }
 
-    // 入参 / 出参
+    // 入参 / 出参（proposal-01 §12.6：入参值读取该 Run 的 JobRun.inputs 运行入参快照）
     var execInputs = {};
     var execOutputs = {};
-    if (run.steps && run.steps.length) {
-      // 从第一步的 inputs 中提取 workflow 级入参
-      execInputs = run.steps[0].inputs || {};
+    // M3：详情优先使用详情接口的 result（§12.3 RunResult）；缺失时回退到 steps 末条聚合的旧逻辑
+    var runResult = run.result || null;
+    if (runResult) {
+      execInputs = (run.inputs && Object.keys(run.inputs).length) ? run.inputs : ((run.steps && run.steps[0]) ? (run.steps[0].inputs || {}) : {});
+      execOutputs = runResult.outputs || {};
+    } else if (run.steps && run.steps.length) {
+      execInputs = (run.inputs && Object.keys(run.inputs).length) ? run.inputs : (run.steps[0].inputs || {});
       // 从最后一步的 outputs 中提取 workflow 级出参
       execOutputs = run.steps[run.steps.length - 1].outputs || {};
     }
@@ -1072,8 +1309,8 @@
       wf.inputs.forEach(function (i) {
         var val = execInputs[i.name] !== undefined ? execInputs[i.name] : '(未传入)';
         inputsHtml += '<tr style="border-bottom:1px solid var(--border)">' +
-          '<td style="padding:4px 8px;font-family:monospace">' + i.name + ' <span style="color:var(--text-dim);font-size:12px">(' + i.type + ')</span></td>' +
-          '<td style="padding:4px 8px;font-family:monospace">' + val + '</td>' +
+          '<td style="padding:4px 8px;font-family:monospace">' + escText(i.name) + ' <span style="color:var(--text-dim);font-size:12px">(' + escText(i.type) + ')</span></td>' +
+          '<td style="padding:4px 8px;font-family:monospace">' + escText(val) + '</td>' +
         '</tr>';
       });
     } else {
@@ -1086,8 +1323,9 @@
       wf.outputs.forEach(function (o) {
         var val = execOutputs[o.name] !== undefined ? execOutputs[o.name] : '(未输出)';
         outputsHtml += '<tr style="border-bottom:1px solid var(--border)">' +
-          '<td style="padding:4px 8px;font-family:monospace">' + o.name + ' <span style="color:var(--text-dim);font-size:12px">(' + o.type + ')</span></td>' +
-          '<td style="padding:4px 8px;font-family:monospace">' + val + '</td>' +
+          // N2：Workflow 出参按 crud-03 为 {name, from, description}，**无 type** → 无 type 时省略括号，不得渲染 undefined
+          '<td style="padding:4px 8px;font-family:monospace">' + escText(o.name) + ((o.type == null || o.type === '') ? '' : ' <span style="color:var(--text-dim);font-size:12px">(' + escText(o.type) + ')</span>') + '</td>' +
+          '<td style="padding:4px 8px;font-family:monospace">' + escText(val) + '</td>' +
         '</tr>';
       });
     } else {
@@ -1124,13 +1362,21 @@
       nodeMeta: function (id, n) {
         return 'v' + (n.opVersion || '1');
       },
+      // M4：运行态画布节点标题展示 **OP 名称**（§12.2 / §12.6）；Start / End 仍用系统节点展示名（label 仅用于编辑态）
+      nodeTitle: function (id, n) {
+        if (n.kind !== 'op') return null;
+        var d = n.opId ? OP_BY_ID[n.opId] : null;
+        return d ? d.name : (n.label || id);
+      },
       edgeDashed: function (edge, to) {
         return (to.status === 'waiting');
       },
       onNodeClick: function (id, n) {
         if (n.kind === 'start' || n.kind === 'end') return;
         var opDef = OP_BY_ID[n.opId];
-        openOpDetail(opDef ? opDef.name : (n.label || id), n.opVersion, n.opVersion, 'from-wf', n);
+        // G1：当前版本取该 OP 定义的当前版本（而非执行快照版本）
+        var opCurVer = opDef ? opDef.version : n.opVersion;
+        openOpDetail(opDef ? opDef.name : (n.label || id), n.opVersion, opCurVer, 'from-wf', n, currentWfRunId);
       }
     });
   }
@@ -1138,13 +1384,35 @@
   /* 当前操作的 Run（终止 / 重跑 / 重试均以 runId 为接口参数） */
   var currentActionRunId = null;
 
+  /* G8：相对当前时间的展示文案（重试对话框「执行时间」用） */
+  function relativeTimeText(ms) {
+    if (ms == null) return '—';
+    var diff = Date.now() - Number(ms);
+    if (!(diff > 0)) diff = 0;
+    var min = Math.floor(diff / 60000);
+    if (min < 1) return '刚刚';
+    if (min < 60) return min + ' 分钟前';
+    var h = Math.floor(min / 60);
+    if (h < 24) return h + ' 小时前';
+    return Math.floor(h / 24) + ' 天前';
+  }
+
   /* ==================== 重试（can-retry 五条件；接口：POST /api/runs/{runId}/retry） ==================== */
   function openRetry(runId) {
     var run = RUN_BY_ID[runId];
-    var info = canRetryOf(run);
+    var info = canRetryInfo(run);   // M2：经 GET /api/runs/{runId}/can-retry 取权威判定
     if (!info.ok) { alert('不可重试：' + info.reason); return; }
     currentActionRunId = runId;
     document.getElementById('retryJobName').textContent = (run && run.name) || runId;
+    // G8：「失败信息」按**所选 Run 动态生成**（§12.8.4）—— 失败节点 = 该 Run 最后一条 failed/timeout step 的 opName
+    var fstep = failedStepOf(run);
+    var steps = (run && run.steps) || [];
+    var stepPos = fstep ? (steps.indexOf(fstep) + 1) : 0;
+    document.getElementById('retryFailedNode').textContent = fstep
+      ? ((fstep.opName || fstep.stepId) + (stepPos ? ' (step ' + stepPos + '/' + steps.length + ')' : ''))
+      : '—';
+    document.getElementById('retryReason').textContent = fstep ? (fstep.error || '（无错误信息）') : '—';
+    document.getElementById('retryExecTime').textContent = relativeTimeText(fstep ? fstep.startedAtMs : (run && run.startedAtMs));
     openModal('retryModal');
   }
 
@@ -1152,7 +1420,8 @@
     var runId = currentActionRunId;
     closeModal('retryModal');
     if (!runId) return;
-    mockFetch('/api/runs/' + runId + '/retry', { method: 'POST' }).then(function () {
+    mockFetch('/api/runs/' + runId + '/retry', { method: 'POST' }).then(function (res) {
+      if (res && res.error) { alert(errorText(res)); return; }
       closeView();
       refreshRuns();
     });
@@ -1172,7 +1441,8 @@
     var runId = currentActionRunId;
     closeModal('rerunModal');
     if (!runId) return;
-    mockFetch('/api/runs/' + runId + '/rerun', { method: 'POST' }).then(function () {
+    mockFetch('/api/runs/' + runId + '/rerun', { method: 'POST' }).then(function (res) {
+      if (res && res.error) { alert(errorText(res)); return; }
       closeView();
       refreshRuns();
     });
@@ -1181,6 +1451,11 @@
   /* ==================== 终止（接口：POST /api/runs/{runId}/terminate） ==================== */
   function openTerminate(runId) {
     var run = RUN_BY_ID[runId];
+    // G9：target=OP 且该 OP 步骤已开始执行 → 不可终止（crud-05 3.5.6：409 RUN_NOT_TERMINABLE）
+    if (run && run.target && run.target.kind === 'op' && (run.steps || []).some(function (s) { return s.status === 'running'; })) {
+      alert('终止失败：OP 正在运行，不可终止');
+      return;
+    }
     currentActionRunId = runId;
     document.getElementById('terminateName').textContent = (run && run.name) || runId;
     openModal('terminateModal');
@@ -1190,7 +1465,8 @@
     var runId = currentActionRunId;
     closeModal('terminateModal');
     if (!runId) return;
-    mockFetch('/api/runs/' + runId + '/terminate', { method: 'POST' }).then(function () {
+    mockFetch('/api/runs/' + runId + '/terminate', { method: 'POST' }).then(function (res) {
+      if (res && res.error) { alert(errorText(res)); refreshRuns(); return; }   // G9/G11：409 RUN_NOT_TERMINABLE 按错误对象消费
       closeView();
       refreshRuns();
     });
@@ -1211,6 +1487,10 @@
 
   /* ==================== 初始化 ==================== */
   renderExecCanvas();
+  // G6：自动刷新按钮默认 on，页面加载时须同步启动轮询（否则界面显示“开”却不轮询，首次点击反而切到“关”）
+  if (autoRefreshBtn.classList.contains('on')) startAutoRefresh();
+  // M12：首页展示守护进程状态与版本（GET /api/system/status + /api/system/version）
+  refreshDaemonStatus();
 </script>
 </body>
 </html>

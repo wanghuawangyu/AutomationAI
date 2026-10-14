@@ -3,10 +3,10 @@ version: 1
 description: TC-X4 manual Workflow Job
 target:
   kind: workflow
-  workflowId: f0001
+  workflowId: f0e1d2c3f0e1d2c3f0e1d2c3f0e1d2c3
   workflowVersion: 1
 workspace: /path/to/workspace
-inputs: {target_env: staging}
+inputs: {}
 trigger:
   kind: manual
 concurrency: skip
