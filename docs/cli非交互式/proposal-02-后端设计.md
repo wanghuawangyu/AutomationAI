@@ -3,6 +3,11 @@
 > 配套前端文档: `proposal-01-界面设计.md`
 > 配套建表脚本: `schema.sql`（独立文件，本文件不重复 DDL，仅说明引用关系）
 
+> **引用与编号约定（本文件统一口径，本组 crud-01/02/06 同）**：
+> - **章号用中文数字、节号用阿拉伯数字**：`§二`（=「二、模块划分」）、`§七`（=「七、日志管理」）、`§9.3`（= 第九章 9.3 节）；**不写 `§2` / `§7` / `§11` 这类阿拉伯章号**。
+> - **跨文件引用**：目标文档的**章**按上条写其章号（如 `proposal-01 §二 ID 规范`）、**节**写 `§N.M`（如 `proposal-01 §10.14`）；`crud-0X` 的小节**不带 `§`**（如 `crud-03 4.3.4`）；`schema.sql` 用「第 N 节」。
+> - **行内编号**（本文件仅 `（G9）` 一处）为审查 / 决策**条目号**，**不是全局唯一 id**——同一字母在不同文件可指不同条目，出处见 `proposal-01 §20.1`（决策编号释义表）与本轮决策 `_fix_v2_decisions.md` / 校验报告 `_val2_02_backend.md`；本文件的 `G9` = 「连接级 PRAGMA 初始化约定」（见 §1.1）。**跨文件引用不使用别文件的小节内编号**，一律具名（如「crud-04 3.4.6.2「`job_queue_waiting_max` 的语义」」）。
+
 ---
 
 ## 一、总体架构
@@ -18,13 +23,15 @@
 | 进程执行 | tokio::process::Command | 子进程管理 + 超时 kill |
 | 序列化 | serde / serde_json / serde_yaml | JSON（API）与 YAML（OP / Client / 导入导出载荷） |
 | CLI 入口 | clap | 命令行参数解析 |
-| 日志 | tracing / tracing-subscriber | 结构化日志 + 绕接（§7） |
-| 标识 | uuid | 32 位无连字符 UUID（见 proposal-01 §2） |
-| DB 访问 | sqlx（或 rusqlite） | SQLite 访问层（Repository，§2 模块 9） |
+| 日志 | tracing / tracing-subscriber | 结构化日志 + 绕接（§七） |
+| 标识 | uuid | 32 位无连字符 UUID（见 proposal-01 §二 ID 规范） |
+| DB 访问 | sqlx（或 rusqlite） | SQLite 访问层（Repository，§二 模块 9） |
 | 压缩 / 解包 | zip | Workflow / Job 的 ZIP 导入导出 |
 | Excel 生成 | rust_xlsxwriter | 运行历史导出 `.xlsx`（两个 Sheet，base64 返回，crud-05 3.5.10） |
-| 前端静态资源 | rust-embed（或 include_dir） | 构建时内嵌 `ui/`，启动时释放到二进制所在目录（§2 模块 13 / §9.3） |
+| 前端静态资源 | rust-embed（或 include_dir） | 构建时内嵌 `ui/`，启动时释放到二进制所在目录（§二 模块 13 / §9.3） |
 | Windows 服务 | windows-service | Windows 下可注册为系统服务（§9.8） |
+
+> **数据库连接初始化约定（G9）**：`foreign_keys` / `busy_timeout` 等为**连接级** PRAGMA，不随 DB 持久化。连接池创建时**必须对每个连接**显式执行 `PRAGMA foreign_keys = ON`（sqlx：`SqliteConnectOptions::foreign_keys(true)`；rusqlite：`pragma_update(None,"foreign_keys","ON")`）与 `journal_mode=WAL`；否则 FK 约束与 `ON DELETE CASCADE` 静默失效（可插入孤儿 `workflow_nodes`、删 Workflow 不级联删节点，影响「OP 被引用」检查与 needsUpdate 判定）。依赖级联的删除在 Repository 层另有**显式 SQL 兜底**（见 `schema.sql` 头注）。
 
 ### 1.2 进程模型
 
@@ -55,7 +62,7 @@
 │      │   │  │执行OP │ │执行OP │ │执行OP │→ Executor│          │
 │      │   │  └──────┘ └──────┘ └──────┘          │           │
 │      │   └──────────────────────────────────────┘           │
-│      │   on_complete 钩子（WorkerPool / Engine → Task Runner）    │
+│      │   on_complete 钩子（全局 JOB_COMPLETE / STEP_COMPLETE）    │
 │      └───────────────────────┬──────────────────┘           │
 │                              ▼ 更新运行历史终态              │
 │              ┌─────────────────┐                            │
@@ -71,15 +78,15 @@
 
 | 后台任务 | 职责 | 与其它任务的关系 |
 |-|-|-|
-| **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（waiting → running → 终态）、并发控制、按序调度分派（**常驻轮询**，固定间隔扫描 DB） | 与 Engine 并行；WorkerPool / Engine 完成时同步写终态，轮询自动感知 |
+| **Task Runner**（调度层，后台任务①） | 运行历史（JobRun）状态机（waiting → running → terminating → 终态）、并发控制、按序调度分派（**常驻轮询**，固定间隔扫描 DB） | 与 Engine 并行；WorkerPool / Engine 完成时同步写终态，轮询自动感知 |
 | **Engine**（编排控制，后台任务②） | 收到 `EngineStart` 通知后（**notify 消息即事件：EngineStart / Terminate 先写 engine_events 落库，写后立即 `process_event` 同步处理**——无事件循环 / 无信号），按 DAG 顺序决定下一步执行哪个 OP 并派发给 WorkerPool；整体完成时在处理 `workflow_done` / `terminate` 事件时调用**全局 JobComplete** 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） | 与 Task Runner、WorkerPool 并行（互不嵌套） |
-| **WorkerPool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在 step_records 插 waiting 记录（含 activation_seq / retry_seq，定位同一 step 的重试 / 循环回跳）即返回（**池满不报错、无内存滞留**）；WorkerPool 调度线程轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，数值派生自同一配置、语义不同**）执行 Executor → 更新 step_records 终态；完成回调为**全局实现**（JobComplete 更新终态 / StepComplete 写事件后调全局 ENGINE 推进），Worker 执行完同步调用，WorkerPool 不感知业务 | 与 Engine 并行；job_complete 写 job_runs 终态 |
+| **WorkerPool**（执行层） | 同步执行单个 OP（调 Executor 启动子进程），**数据库排队 + Worker 池**：`worker.run_job(req)` / `worker.run_step(req, inst)`（实例方法 &self）**总是**在 step_records 插 waiting 记录（含 activation_seq / retry_seq，定位同一 step 的重试 / 循环回跳）即返回（**池满不报错、无内存滞留**）；WorkerPool 调度线程轮询 waiting → 指派空闲 Worker（**池大小 = `ceil(job_queue_running_max × 1.5)`，数值派生自同一配置、语义不同**）执行 Executor → 更新 step_records 终态；完成回调为**全局实现**（JobComplete 更新终态 / StepComplete 写事件后调全局 ENGINE 推进），Worker 执行完同步调用，WorkerPool 不感知业务 | 与 Engine 并行；JobComplete 写 job_runs 终态 |
 
 **执行数据流**：
 
 1. **触发**：接口触发（HTTP 手动 / Scheduler cron 定时 / 单次 OP / Workflow 执行）统一调用 `TaskRunner.add_op / add_job / add_workflow`；
 2. **创建运行历史**：Task Runner 写入一条 JobRun（status=waiting）到 `job_runs` 并返回 runId，接口即结束；
-3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 waiting → running；**单次 OP 直接派发 WorkerPool**；**Job / Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})` 通知 Engine——EngineStart 作为 `engine_start` 事件写入 engine_events（落库，重启不丢）**；
+3. **调度**：Task Runner 后台调度线程按入库顺序调度——并发配额内取出任务，状态 waiting → running；**单次 OP / Job(target=op) 直接派发 WorkerPool**；**Job(target=workflow) / 单次 Workflow 调 `engine.notify(EngineStart{run_id, workflow_id})` 通知 Engine——EngineStart 作为 `engine_start` 事件写入 engine_events（落库，重启不丢）**（`engine.notify` 仅限 **workflow 类执行**；Job `target.kind=op` 时**不得走 Engine**，必须直连 WorkerPool，否则 `job_runs.target_kind=op` 的 Run 会被误按 workflow 处理，见 crud-05 4.6）；
 4. **执行**：Engine 按 DAG 顺序派发各 OP 给 WorkerPool；WorkerPool 同步执行（调 Executor）；
 5. **完成回调**：WorkerPool 完成后**同步调用全局完成实现**（入参 ExecuteResult：run_id 在结果内、step_id / activation_seq / retry_seq 随结果携带，无需回查 step_records）——全局 `JobComplete` 更新 job_runs 终态（落库）并供运行历史界面展示；全局 `StepComplete` 回报 Engine 推进 DAG（写 step_completed 事件后立即调全局 ENGINE.process_event）；Engine 整体完成时在处理 `workflow_done` / `terminate` 事件时调用全局 `JobComplete` 更新 job_runs 终态（事件持久化 + 单例重启重建，重放幂等） → **不依赖内存回调传递业务**：Task Runner 常驻轮询线程按固定间隔扫描 DB → 统计并发、调度下一个 waiting 任务 → 刷新界面状态。
 
@@ -107,7 +114,7 @@
 | 9 | DB 操作层 (Repository) | 所有 SQL 操作，统一连接池 | 全部表 |
 | 10 | 日志管理 | 结构化日志、Run 级日志文件 | （文件系统） |
 | 11 | 配置管理 | `ai-automation.json` 读写、实时写回、启动参数（`-c`） | ai-automation.json |
-| 12 | CLI 入口 | 命令行：start / run / export / import / version / install-service / uninstall-service / service（§9） | — |
+| 12 | CLI 入口 | 命令行：start / run / export / import / version / install-service / uninstall-service / service（§九） | — |
 | 13 | 前端静态资源服务 | 构建时内嵌 `ui/`（rust-embed），**启动时释放到二进制所在目录的 `ui/`**；`/`（首页）与静态资源路由由 HTTP 服务对外提供（`/api` 之外的路由，见 §9.3 / tasks.md T1.6 / T2.2） | （内嵌资源 + 文件系统） |
 
 ---
@@ -115,7 +122,7 @@
 ## 三、接口设计
 
 > 基础路径 `/api`，全部 JSON 请求/响应。
-> **`/api` 之外**：`/`（首页）与静态资源路由返回内嵌并在启动时释放到 `<exe_dir>/ui/` 的前端文件（见 §2 模块 13 / §9.3），不参与 JSON 接口约定。
+> **`/api` 之外**：`/`（首页）与静态资源路由返回内嵌并在启动时释放到 `<exe_dir>/ui/` 的前端文件（见 §二 模块 13 / §9.3），不参与 JSON 接口约定。
 > 列表接口统一支持 `?page=1&page_size=10&keyword=&sort=` 等查询参数。
 > 时间字段 JSON 中为 string（毫秒时间戳）。
 
@@ -173,8 +180,8 @@ trait ClientRepo {
     async fn update(&self, client: &Client) -> Result<()>;
     async fn delete(&self, id: &str) -> Result<()>;
 }
-// 同理: ClientRepo, OpRepo, WorkflowRepo, JobRepo, RunRepo, StepRepo, EngineEventRepo
-// 配置不再走 Repository：由配置模块直接读写 {run}/ai-automation.json（ConfigRepo，见 crud-06 〇）
+// 同理: OpRepo, WorkflowRepo, JobRepo, RunRepo, StepRepo, EngineEventRepo
+// 配置不再走 Repository：由配置模块直接读写 {run}/ai-automation.json（不定义 trait，见 crud-06 〇）
 ```
 
 > **命名对照**：`ClientRepo / OpRepo / WorkflowRepo / JobRepo / RunRepo / StepRepo / EngineEventRepo` 为落地 trait（见 tasks.md T3.4）；`SqliteStore` 为其 SQLite 实现聚合体，`EngineStore`（crud-03 用）与 `RunStore`（crud-05 用）为该层的**按模块窄化视图**——`RunStore` 同时承载 `job_runs` 与 `step_records`（即 `RunRepo` + `StepRepo` 的聚合），实现时可用同一 `SqliteStore` 实现多个 trait。
@@ -256,7 +263,7 @@ ai-automation version
 | `--port <port>` | `7878` | 监听端口；占用则**报错退出**（提示改用 `--port`），不静默换端口。 |
 | `--open` | 关闭 | **默认不打开浏览器**；仅在显式传入 `--open` 时用系统默认浏览器打开首页。 |
 
-- **前台运行**：日志同时写 `{run}/logs/app-{date}.log`（结构见 §7）；`Ctrl+C`（SIGINT）/ SIGTERM 触发**优雅退出**——停止接收新任务 → 等在途 Run 收敛 → 关闭服务，退出码 0。**等待上限 30s**：超时则记 WARN、放弃收敛并退出；未收敛的在途 Run 由下次启动的 `recover` 接管（§1.2）。
+- **前台运行**：日志同时写 `{run}/logs/app-{date}.log`（结构见 §七）；`Ctrl+C`（SIGINT）/ SIGTERM 触发**优雅退出**——停止接收新任务 → 等在途 Run 收敛 → 关闭服务，退出码 0。**等待上限 30s**：超时则记 WARN、放弃收敛并退出；未收敛的在途 Run 由下次启动的 `recover` 接管（§1.2）。
 - **实例发现**：启动成功后把实际监听信息写入 `{run}/daemon.json`（`{pid, host, port, startedAtMs, version}`），退出时删除；`run` 等一次性子命令据此定位当前实例。**同一运行目录只允许一个 daemon**：`daemon.json` 存在**且其中 pid 确为在跑的 ai-automation 进程**（需校验进程身份，防 pid 复用）才判为「已有实例」并拒绝二次启动；文件缺失 / 损坏 / pid 不符一律视为陈旧，直接覆盖。启动成功在 stdout 打印首页地址（`--host 0.0.0.0` 时打印 `http://127.0.0.1:<port>/`，避免输出不可点击的地址）。
 
 ### 9.4 `run` —— 触发一次 Job
@@ -326,32 +333,32 @@ ai-automation version
 
 ### 10.1 统一错误码总表
 
-> 全后端**错误码唯一总表**（约 26 个）。各 crud 文档内联错误表为**局部详表**（含接口级场景），本表为汇总口径——code 拼写、HTTP 状态码、语义均以本表为准；实现枚举以此表为基准对齐。
+> 全后端**错误码唯一总表**（共 **27 行 / 26 个 code**，其中 `CLIENT_NOT_FOUND` 依调用上下文取 404 / 409）。各 crud 文档内联错误表为**局部详表**（含接口级场景），本表为汇总口径——code 拼写、HTTP 状态码、语义均以本表为准；实现枚举以此表为基准对齐。
 
 | code | HTTP | 语义 | 定义位置 |
 |-|-|-|-|
 | `VALIDATION_ERROR` | 400 | 参数 / 字段校验失败（格式、缺失、枚举非法、超限等） | 全部 crud（通用） |
 | `CRON_INVALID` | 400 | cron 表达式非法 | crud-04 3.4.3/3.4.4 |
-| `CLIENT_TYPE_MISMATCH` | 400 | Client 类型与 OP 类型不匹配（bash/python/powershell/prompt 须同类对应） | crud-02 3.2.6（口径基准）；crud-03 3.3/3.3.3/3.3.4/3.3.7/4.4；crud-04 3.4.3/3.4.4/3.4.6/4.5 |
-| `OP_NOT_FOUND` | 404 | OP 不存在 | crud-02 |
+| `CLIENT_TYPE_MISMATCH` | 400 | Client 类型与 OP 类型不匹配（bash/python/powershell/prompt 须同类对应） | crud-02 3.2.6（口径基准）；crud-03 3.3/3.3.3/3.3.4/3.3.7/**3.3.9**/4.4；crud-04 3.4.3/3.4.4/3.4.6/**3.4.10**/4.5 |
+| `OP_NOT_FOUND` | 404 | OP 不存在 | crud-02；crud-04 3.4.3/3.4.4（target 引用） |
 | `CLIENT_NOT_FOUND` | 404 | Client 不存在（按 `clientId` 引用时） | crud-01/02/04 |
 | `CLIENT_NOT_FOUND` | 409 | Client 不存在（**导入时按名称匹配不到**，Client 不自动创建；响应体列出缺失名称） | crud-03 3.3.9 / crud-04 3.4.10 |
-| `WORKFLOW_NOT_FOUND` | 404 | Workflow 不存在 | crud-03 |
+| `WORKFLOW_NOT_FOUND` | 404 | Workflow 不存在 | crud-03；crud-04 3.4.3/3.4.4（target 引用） |
 | `JOB_NOT_FOUND` | 404 | Job 不存在 | crud-04 |
 | `RUN_NOT_FOUND` | 404 | 运行记录不存在 | crud-05 |
 | `STEP_NOT_FOUND` | 404 | 步骤记录不存在 | crud-05 |
-| `TARGET_NOT_FOUND` | 404 | 重跑时目标（op / workflow）已删除 | crud-04/05 |
+| `TARGET_NOT_FOUND` | 404 | **重跑**时目标（op / workflow）已删除；**重试**时目标 Workflow 已删除（与重跑对称，见 crud-05 3.5.8 / 3.5.9） | crud-04/05 |
 | `CLIENT_NAME_EXISTS` | 409 | Client name 冲突（创建 / 更新 / 导入） | crud-01 |
 | `OP_NAME_EXISTS` | 409 | OP name 冲突（创建 / 更新 / 导入） | crud-02 |
 | `WORKFLOW_NAME_EXISTS` | 409 | Workflow name 冲突（创建 / 更新 / 导入） | crud-03 |
 | `JOB_NAME_EXISTS` | 409 | Job name 冲突（创建 / 更新 / 导入） | crud-04 |
-| `CLIENT_REFERENCED` | 409 | Client 正被 Job 引用，删除被拒绝 | crud-01 |
+| `CLIENT_REFERENCED` | 409 | Client 正被 **Job.target.clientId（`kind=op`）** 或 **Workflow 节点级 `client_id`** 引用，删除被拒绝 | crud-01 |
 | `OP_REFERENCED` | 409 | OP 正被 Workflow 节点或 Job.target 引用，删除被拒绝 | crud-02 |
 | `WORKFLOW_REFERENCED` | 409 | Workflow 正被 Job 引用，删除被拒绝 | crud-03 |
 | `JOB_HAS_ACTIVE_RUNS` | 409 | Job 存在 waiting/running/terminating 实例，删除被拒绝（terminating 仍占在途名额） | crud-04 3.4.5 |
 | `WORKFLOW_NEEDS_UPDATE` | 409 | Workflow.needsUpdate=true，需更新后才能执行 | crud-03 3.3.7 |
 | `JOB_NEEDS_UPDATE` | 409 | Job.needsUpdate=true，需更新后才能运行 | crud-04 3.4.6 |
-| `CONCURRENCY_CONFLICT` | 409 | 并发冲突：全局 waiting 队列达 `job_queue_waiting_max` 上限（所有创建 job_runs 入口统一检查）；或并发策略 skip 且已有在途实例 | crud-02 3.2.6 / crud-03 3.3.7 / crud-04 3.4.6 / crud-05 3.5.7/3.5.8 |
+| `CONCURRENCY_CONFLICT` | 409 | 并发冲突：全局 waiting 队列达 `job_queue_waiting_max` 上限（所有创建 job_runs 入口统一检查）；或并发策略 skip 且已有在途实例 | crud-02 3.2.6 / crud-03 3.3.7 / crud-04 3.4.6 / **crud-04 4.5.2（cron 入口）** / **crud-05 4.6（`TaskError::QueueFull` 映射点）** / crud-05 3.5.7/3.5.8 |
 | `RUN_NOT_TERMINABLE` | 409 | target=OP 且其 OP 步骤**已开始执行**（`step_records.status=running`；OP 运行中不可终止，step 仍 waiting 排队则允许）；或 Run 已处于终态（不可终止） | crud-05 3.5.6 |
 | `RERUN_NOT_ALLOWED` | 409 | Run 未结束（waiting/running/terminating）不可重跑 | crud-05 3.5.7 |
 | `RETRY_NOT_ALLOWED` | 409 | 不满足重试前提（版本不一致 / needsUpdate / 无失败或超时 step） | crud-05 3.5.8 |
@@ -360,7 +367,12 @@ ai-automation version
 
 **说明**：
 - **内部错误不直接暴露**：Task Runner 内部 `TaskError::QueueFull` 在 API 层映射为 409 `CONCURRENCY_CONFLICT`（见 crud-05 4.6），不入错误码表。
+- **同一 `code` 允许随调用上下文返回不同 HTTP 状态**（当前仅 `CLIENT_NOT_FOUND`：按 `clientId` 引用 → 404；导入时按名称匹配不到 → 409）：实现时**状态码由抛错点决定、`code` 字符串不变**；前端按 `code` 分支、按 HTTP 状态区分提示语境。
+- **导入「名称锚不一致」的定位信息以 `message` 文本承载**（不新增错误结构，错误体恒为 `{"error":{"code","message"}}`）：格式**固化**为
+  `名称锚不一致：manifest.<锚字段>=<值>，<包内路径> 内 name=<值>`
+  （示例：`名称锚不一致：manifest.target.name=deploy_workflow，workflows/deploy_workflow.yaml 内 name=deploy_v2`；同一格式串的其它示例见 crud-03 3.3.9 / crud-04 3.4.10 / tests 第 8 节——示例中的名称仅为占位，**`bash-build` 属 Client 名，不作名称锚示例**）。前端**原样展示该 `message`、不做解析**（口径同 `CLIENT_NOT_FOUND`「响应体列出缺失名称」）。锚字段范围与校验规则见 crud-03 3.3.9 / crud-04 3.4.10。
 - 多资源不存在时（如 `OP_NOT_FOUND / WORKFLOW_NOT_FOUND / CLIENT_NOT_FOUND` 并列），按调用上下文返回**首个命中**的错误码。
+- **不新增专用错误码**：导出流程中出现的执行 / 内部错误（例如导出组件不可用）统一用 `INTERNAL_ERROR`——本表**不为其新增导出类专用错误码**（确认口径，与 `原型图/mock-data.js` 的 `INTERNAL_ERROR` 一致）。
 
 ---
 
@@ -398,7 +410,12 @@ page_size 可选值：10 / 50 / 100 / 1000。
 | 十三、版本管理 | 各管理模块 (动态计算) |
 | 十四、超时语义 | Executor + Engine |
 | 十五、循环场景 | Engine |
+| 十六、典型 Use Case | 综合各模块（UC 分别归入 Client/OP/Workflow/Job/运行历史 各章） |
 | 十七、接口列表 | 本文第三章 |
+| 十八、通用列表分页规范 | 本文 §十一 分页规范 |
+| 十九、前端独立界面清单 | 静态资源服务（§二 模块 13 / §9.3）+ 共享 Workflow 画布（前端） |
+| 二十、关键设计决策 | 总体架构与接口 / 错误码约定（§一 / §三 / §十） |
+| 二十一、核心结论 | 总体架构（§一） |
 
 ---
 
@@ -414,6 +431,5 @@ page_size 可选值：10 / 50 / 100 / 1000。
 | job_runs | 运行历史管理, Engine, Scheduler |
 | step_records | 运行历史管理, Engine, Executor |
 | engine_events | Engine (调度事件流/重放, 审计) |
-| run_edge_state | Engine (可选 checkpoint: 边状态快照) |
 | run_node_state | Engine (可选 checkpoint: 节点就绪快照) |
 | ~~settings~~（已废弃） | 配置迁移至 `ai-automation.json`（见 crud-06） |
