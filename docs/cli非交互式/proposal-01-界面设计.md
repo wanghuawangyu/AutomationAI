@@ -25,9 +25,9 @@
 11. **保存时版本确认默认"不更新版本"。**
 12. **运行历史记录版本快照，不随上游更新而变。**
 13. **运行历史是默认首页。**
-14. **失败的 Workflow 支持从失败 step 重试（续跑，已完成节点不重复执行）。**
+14. **失败的 Workflow 支持从失败 OP 重试。**
 15. **超时只属于 OP，超时是终止信号。**
-16. **循环终止由 min(max × 3, max_loop_multiplier) 控制**（`max_loop_multiplier = 0` 时 = `max × 3`，见 §15.2）。
+16. **循环终止由 min(max × 3, max_loop_multiplier) 控制。**
 17. **所有任务后台运行，前端轮询 DB 获取状态，不使用事件流。**
 18. **Workflow 编辑器布局：左侧 OP 库（可搜索、可拖动）+ 中间画布 + 右侧节点详情面板（常驻）。**
 19. **Job target 为单个 OP 时，创建 Job 时必须选择一个 Client（存放于 `target.clientId`，Job 顶层不设 clientId）。**
@@ -136,22 +136,22 @@
 
 **入口**：左侧菜单栏左下角「⚙️ 设置」按钮（5 个页面均含），点击进入 `settings.html`。
 
-**配置界面**：左侧为分组导航，右侧为对应分组的配置表单。可配置项存储于运行目录 `ai-automation.json`（唯一事实来源），界面展示的可配置项即 JSON 内容，修改保存后后端**实时写回 JSON 文件**；派生只读项（`worker_pool_size` / `worker_max_concurrency`）与 `db_version` 由 `GET /api/settings` 附加返回（`db_version` 界面不展示）。界面上的目录类只读项（`db_path` / `workspace_root`）由**后端**按 `runDir`（当前运行目录，`-c` 指定、未指定默认 `~/.ai-automation`）**拼接为具体绝对路径后下发**，前端直接展示、**不自行拼接**（见 crud-06 3.3）。
+**配置界面**：左侧为分组导航，右侧为对应分组的配置表单。可配置项存储于运行目录 `ai-automation.json`（唯一事实来源），界面展示的可配置项即 JSON 内容，修改保存后后端**实时写回 JSON 文件**；派生只读项（`worker_pool_size` / `worker_max_concurrency`）与 `db_version` 由 `GET /api/settings` 附加返回（`db_version` 界面不展示）。界面上的目录类只读项（`db_path` / `workspace_root`）由**后端**按 `runDir`（当前配置目录，`-c` 指定、未指定默认 `~/.ai-automation`）**拼接为具体绝对路径后下发**，前端直接展示、**不自行拼接**（见 crud-06 3.3）。
 
 | 分组 | 配置项要点 |
 |-|-|
 | 通用 | 前端轮询间隔（可改）；db_path / workspace_root / config_version（只读；**config_version 为 `ai-automation.json` 结构版本；`db_version` 不在界面展示**） |
-| Client | client_import_max_bytes：YAML 导入 Client 的**文件大小阈值（字节）**，默认 1 MiB（1048576），取值范围 1024 ≤ x ≤ 104857600；导入校验见 §8.9 |
-| OP | op_import_max_bytes：YAML 导入 OP 的**文件大小阈值（字节）**，默认 1 MiB（1048576），取值范围 1024 ≤ x ≤ 104857600；导入校验见 §8.9 |
+| Client | client_import_max_bytes（YAML 导入上限） |
+| OP | op_import_max_bytes（YAML 导入上限） |
 | Workflow | 最大节点数、导入自动排布 |
-| 运行历史 | waiting 队列深度上限（默认 20、可调、上限 1000）、running 队列深度上限（默认 10、上限 10）、**单 Job 保留条数（默认 10）**、**整体保留条数（默认 1000）**、**单条记录保存时长（默认 180 天，硬上限 180 天）**；**Job 无独立配置项、不设自动重试**（失败即失败，人工重跑或 Workflow 节点 retry） |
+| 运行历史 | waiting/running 队列深度上限（waiting 默认 20、可调、上限 1000）、单 Job/整体/单条保存时长（单条硬上限 180 天）；**Job 无独立配置项、不设自动重试**（失败即失败，人工重跑或 Workflow 节点 retry） |
 | Engine | 循环次数上限、失败事件保留 |
 | Worker | 池大小 / 并发执行上限（只读派生，= `ceil(job_queue_running_max × 1.5)`；**数值派生自同一配置、语义不同**——阈值为 running 的 JobRun 数上限，池大小为常驻执行体数） |
 | Task Runner | 轮询间隔、调度批数 |
 | Scheduler | 定时任务上限（时区固定 Local） |
 | 日志 | 日志级别（动态）、最大绕接 zip 文件数 |
 
-**标识规则**：动态配置标「即时生效」（当前**所有可配置项均为动态**）；只读配置不可编辑。「🔄 重启后生效」**不作独立徽标**，但可在该项 desc 末尾附「（🔄）」标记作说明，仅用于 `job_queue_running_max` 派生的 **Worker 池大小**（下次启动重新初始化），在该项 desc 注明。
+**标识规则**：动态配置标「即时生效」（当前**所有可配置项均为动态**）；只读配置不可编辑。「🔄 重启后生效」不作独立徽标，仅用于 `job_queue_running_max` 派生的 **Worker 池大小**（下次启动重新初始化），在该项 desc 注明。
 
 ---
 
@@ -281,7 +281,7 @@ Job.interactive = target 的 interactive
 ```typescript
 interface NodeRetry {
   on: "failure" | "success";        // 互斥
-  max: number;                       // 每轮尝试次数（首次执行计入）
+  max: number;                       // 每轮重试次数
   backoff: "constant" | "linear" | "exponential";
   interval: number;                  // 毫秒
 }
@@ -373,8 +373,6 @@ interface CliProfile {
 | Python | python |
 | PowerShell | powershell |
 
-> **类型匹配为硬契约（前后端双保险，D5）**：前端所有 Client 下拉（OP 单次执行 / Job 编辑器 / Workflow 节点详情面板）**按上表过滤**（见 §8.5 / §9.6 / §10.11 / §11.4）；下拉为空时提示「请先在 Client 管理中创建 {type} 类型的 Client」。后端在 `POST/PUT /api/jobs`（`target.kind="op"`）与 `POST/PUT /api/workflows`（OP 节点 `clientId`）**校验 Client.type 与 OP.type 一致**，不一致 → 400 `CLIENT_TYPE_MISMATCH`（错误码见 `proposal-02 §10.1` 总表；同一校验口径见 crud-02 3.2.6），message：`Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>`。
-
 ### 8.4 包装脚本机制（后端实现）
 
 APP 内部硬编码通用包装脚本，运行时临时生成：
@@ -385,11 +383,6 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 | Bash | 使用 `source` 命令执行 | 注入入参变量、捕获出参 |
 | PowerShell | 使用 `. .` 方式执行 | 注入入参变量、捕获出参 |
 
-**变量注入约定（定稿，G17）**：
-
-- **脚本类（bash / python / powershell）**：包装脚本以**环境变量**注入入参，变量名 = `AI_` + 入参名大写（如 `AI_ENDPOINT`）；工作区注入为 `AI_WORKSPACE`。出参以 `echo "AI_OUT_<name>=<value>"` 单行输出，由包装脚本解析。
-- **prompt 类**：`OP.content` 中允许 `{{name}}` 引用本 OP 的入参（`{{workspace}}` 引用工作区）。**该语法仅适用于 `OP.content`，不适用于 Client 的 `argsTemplate`**（后者见 §8.6）。
-
 ### 8.5 列表视图
 
 ```text
@@ -399,7 +392,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 │  🔍 搜索...                                                                  │
 │  筛选: [全部类型 ▾] [prompt] [bash] [python] [powershell]                     │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  Client名称    Client类型   二进制路径              输入方式      输出解析方式  操作  │
+│  Client名称    Client类型   二进制路径              输入方式        输出解析  操作  │
 │  ───────────  ──────────  ────────────────────────  ─────────────  ───────  ──── │
 │  ▶ Claude Code  prompt      claude                   参数模板: -p...    json      [编辑][导出][复制][删除] │
 │  ▼ Claude Code  prompt      claude                   参数模板: -p...    json      [编辑][导出][复制][删除] │
@@ -428,7 +421,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 | 输出解析方式 | **仅 prompt 类**：json / text / jsonl；**脚本类（bash / python / powershell）无此字段，显示 `-`** |
 | 操作 | 编辑、导出、复制、删除 |
 
-> 点击名称行展开/折叠详情，同时只展开一条。Bash/Python/PowerShell 类型**展开详情中无参数模板行与输出解析行**；列表「输入方式」列显示「固定调用方式」、「输出解析方式」列显示 `-`（调用方式固定，仅二进制路径不同）。
+> 点击名称行展开/折叠详情，同时只展开一条。Bash/Python/PowerShell 类型**展开详情中无参数模板行与输出解析行**；列表「输入方式」列显示「固定调用方式」、「输出解析」列显示 `-`（调用方式固定，仅二进制路径不同）。
 
 ### 8.6 编辑器视图（prompt 类型）
 
@@ -455,7 +448,7 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 > 说明：
 > - **新建 Client 时，「命令」字段默认为空**（不预填 `claude`），由用户填写。
 > - Client **不含超时字段**（超时只属于 OP）。
-> - Client **不含工作目录字段**（工作目录只属于 Job 运行时，见 JobDefinition.workspace / JobRun.workspace；参数模板**不支持** `{{workspace}}` 占位符；`OP.content` 的 `{{workspace}}` 不受此限，见 §8.4）。
+> - Client **不含工作目录字段**（工作目录只属于 Job 运行时，见 JobDefinition.workspace / JobRun.workspace；参数模板**不支持** `{{workspace}}` 占位符）。
 > - inputMode 只决定 prompt 的投递方式，内容源统一来自 OP.content。
 > - **参数模板占位符按输入方式区分**（前端在「参数模板」输入框旁实时提示）：`arg` 用 `{{prompt}}`（替换为提示词文本）；`file` 用 `{{prompt-file}}`（替换为提示词文件路径）；`stdin` 无占位符（提示词经标准输入喂入，模板仅填固定参数）。
 
@@ -503,8 +496,6 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 └──────────────────────────────────────┘
 ```
 
-> **测试对话框「参数」取值（定稿，L7）**：「参数」= 该 Client 的 `argsTemplate` 将占位符替换为示例值后的结果（`arg` 用示例提示词替换 `{{prompt}}`、`file` 用示例文件路径替换 `{{prompt-file}}`）；`inputMode=stdin` 时追加固定测试提示词。
-
 ### 8.9 导入对话框
 
 ```text
@@ -532,8 +523,6 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 | 5 | 未选择文件时 [导入] 按钮置灰，不可点击 |
 
 > OP 导入对话框（`.yaml`/`.yml`）交互流程与 Client 完全一致；Workflow / Job 导入对话框（`.zip`）交互流程一致，仅文件过滤类型不同。
-
-> **导入校验约定（决策-导入名称锚一致性，适用于 Workflow / Job 的 ZIP 导入）**：[导入] 提交 `{zip}` → 后端先做**包完整性校验（含名称锚校验）**——`manifest` 名称锚与包内文件实际 `name` 必须一致，覆盖四项：① Workflow 包 `manifest.workflow.name` ↔ 根级 `workflow.yaml` 的 `name`；② Job 包 `manifest.target.name` ↔ `manifest.target.file` 指向文件的 `name`；③ `manifest.job.name` ↔ 包内 `job.yaml` 的 `name`（Job 包）；④ `manifest.ops[].name` ↔ `manifest.ops[].file` 指向文件的 `name`（Workflow / Job 包）。任一不一致 → 400 `VALIDATION_ERROR`（见 crud-03 3.3.9 / crud-04 3.4.10）。**「不一致位置」以 `message` 文本承载，前端原样展示、不做解析**，格式为 `名称锚不一致：manifest.<锚字段>=<值>，<包内路径> 内 name=<值>`（示例：`名称锚不一致：manifest.target.name=deploy_workflow，workflows/deploy_workflow.yaml 内 name=deploy_v2`）。**`file` / `target.file` 仅作包内定位，不校验文件名与 `name` 一致（只校验文件内容的 `name`）。** 用户可**手动修改包内文件 / manifest 后重新 [选择文件] 重新提交**。Client / OP 为单文件 YAML（无 manifest），不适用名称锚校验，但适用**体积校验**：前端读取文件后校验 `file.size` ≤ **配置项** `client_import_max_bytes` / `op_import_max_bytes`（存于 `ai-automation.json`，默认 1 MiB，见 §4.2 / crud-06 一），超限 → 提示并保持 [导入] 禁用。
 
 ### 8.10 导出对话框
 
@@ -597,7 +586,7 @@ interface OpDefinition {
   inputs: OpInput[];
   outputs: OpOutput[];
   interactive: boolean;   // 字段占位，默认 false，界面不暴露
-  timeoutSeconds: number; // 超时秒数（整数，1 ≤ timeoutSeconds ≤ 86400，默认 60，**必填**；只属于 OP，字段名与 crud-02 3.2 一致），0/负数/非整数 → 400 VALIDATION_ERROR
+  timeoutSeconds?: number; // 超时秒数（只属于 OP，默认 60，字段名与 crud-02 3.2 一致）
   version: number;
   createdAtMs: bigint;
   updatedAtMs: bigint;
@@ -722,7 +711,7 @@ interface OpOutput {
 | ( ) Python | 内容（Python 脚本） | Python 脚本 |
 | ( ) PowerShell | 内容（PowerShell 脚本） | PowerShell 脚本 |
 
-> **OP 新建时无问题**：名称、描述、入参、出参、内容默认为空，由用户填写；**超时预填默认值 60 秒**（整数，范围 1..86400，必填，可改）。
+> **OP 新建时无问题**：各字段默认值为空（名称、描述、超时、入参、出参、内容均为空），由用户填写。
 
 ### 9.5 保存时的版本确认
 
@@ -863,7 +852,7 @@ interface WorkflowNode {
   // kind === "op" 时的字段
   opId?: string;
   opVersion?: number;
-  clientId?: string;               // kind === "op" 时**必填**（缺失 → 400 VALIDATION_ERROR；D3）
+  clientId?: string;
   bindings?: Record<string, ParamBinding>;
   retry?: NodeRetry;
 
@@ -873,8 +862,7 @@ interface WorkflowNode {
 type ParamBinding =
   | { kind: "node_output"; workflowNodeId: string; outputName: string }   // 取上游节点出参
   | { kind: "workflow_input"; inputName: string }                // 取 Workflow 入参
-  | { kind: "literal"; value: string }                           // 固定值
-  | { kind: "unbound" };                                         // 未绑定（拖拽创建节点时全部入参初始态；无来源）
+  | { kind: "literal"; value: string };                          // 固定值
 
 interface WorkflowEdge {
   from: string;
@@ -911,10 +899,8 @@ type EdgeCondition = "on_success" | "on_failure" | "always";
 | kind | opId | opVersion | clientId | bindings | retry |
 |-|-|-|-|-|-|
 | start | ❌ | ❌ | ❌ | ❌ | ❌ |
-| op | ✅ 必填 | ✅ 必填 | ✅ 必填（缺失 → 400 VALIDATION_ERROR；D3） | ☑ 可空（缺省视为空对象；与 crud-03 3.3「WorkflowNode（节点）对象字段说明」bindings 行一致） | ✅ 可选 |
+| op | ✅ 必填 | ✅ 必填 | ✅ 可选 | ☑ 可空（缺省视为空对象；与 crud-03 3.3「WorkflowNode.bindings：op 时可空」一致） | ✅ 可选 |
 | end | ❌ | ❌ | ❌ | ❌ | ❌ |
-
-> **OP 节点必须指定 Client（D3）**：`clientId` 必填（`POST/PUT /api/workflows` 缺失 → 400 `VALIDATION_ERROR`；工作流校验规则含「所有 OP 节点的 clientId 非空」）。前端拖拽创建节点时，节点详情面板的 Client 下拉**默认选中该 OP 类型下 `createdAtMs` 最早的匹配 Client**（类型过滤见 §8.3）。
 
 **锚点规则**：
 
@@ -955,7 +941,7 @@ type EdgeCondition = "on_success" | "on_failure" | "always";
 
 | 来源 | 说明 |
 |-|-|
-| 前置节点的出参 | **仅限从 Start 可达且位于当前节点之前**的节点（按 DAG 拓扑序判定）；下拉只列出这些节点的出参（D4）。**在允许环的图中（D8），下拉剔除自身节点以及从当前节点正向可达的节点**——它们在回跳环上位于当前节点之后，不得作为前置来源（同 §10.14「参数绑定必须指向前置节点」） |
+| 任意前置节点的出参 | 只要该节点在当前节点之前已可执行 |
 | Workflow 入参 | 来自 Workflow 定义中的 inputs |
 | 字面量 | 手动填写的字符串 |
 
@@ -1043,8 +1029,8 @@ interface NodeRetry {
 │  ▼ deploy_workflow  1      2      5     [执行][编辑][导出][复制][删除]      │
 │  ┌──────────────────────────────────────────────────────────────────────────┐ │
 │  │ 入参: target_env (string)   目标环境                                     │ │
-│  │ 出参: deploy_url            部署后的访问地址                             │ │
-│  │       status               最终状态                                     │ │
+│  │ 出参: deploy_url (string)   部署后的访问地址                             │ │
+│  │       status (string)       最终状态                                     │ │
 │  │                                                                          │ │
 │  │  [Start]──🟢→[check_tests]──🟢→[review]──🟢→[deploy]                  │ │
 │  │                    └──🔴→[notify_fail]──🟢→[End]                        │ │
@@ -1068,7 +1054,7 @@ interface NodeRetry {
 | 节点数 | OP 节点数（不含 Start/End） |
 | 操作 | 执行、编辑、复制、导出、删除 |
 
-> 点击名称行展开只读画布预览。顶部参数定义区用子表格（入参：参数名(类型)|描述；出参：参数名，Workflow 出参无 type，见 §12.6）；边按条件着色（绿=成功，红=失败，蓝=总是）；点击节点橙色高亮，右侧显示节点配置（OP/版本/Client/参数/重试策略）。
+> 点击名称行展开只读画布预览。顶部参数定义区用子表格（参数名(类型)|描述）；边按条件着色（绿=成功，红=失败，蓝=总是）；点击节点橙色高亮，右侧显示节点配置（OP/版本/Client/参数/重试策略）。
 
 ### 10.9 编辑器视图（三栏布局）
 
@@ -1090,8 +1076,8 @@ interface NodeRetry {
 │                                                                                          │
 │  Workflow 出参:  [＋ 添加]                                                                │
 │  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ name          from（下拉：节点 × 出参）                    description                       │  │
-│  │ deploy_url    [node_deploy · deploy · url ▾]      部署后的 URL                       │  │
+│  │ name          from (workflowNodeId.outputName)            description                       │  │
+│  │ deploy_url    node_deploy.url                    部署后的 URL                       │  │
 │  └────────────────────────────────────────────────────────────────────────────────────┘  │
 ├──────────────────┬───────────────────────────────────────────┬───────────────────────────┤
 │  OP 库            │  画布                                      │  节点详情面板              │
@@ -1138,8 +1124,6 @@ interface NodeRetry {
 | 中间画布 | 节点（Start / OP / End）、边、三色锚点 |
 | **右侧节点详情面板** | **选中 node 的配置（常驻，不可折叠）** |
 
-> **Workflow 出参 `from` 录入（G13）**：`from` 为**双下拉**——① **节点下拉**：列出画布上**所有 op 节点**（Start / End 不作为候选），展示为「{节点画布名} · {OP 名}」；② **出参下拉**：随所选节点列出该节点 OP 定义的 `outputs[].name`（未选节点时为空）。两者组合展示为「{节点画布名} · {OP 名} · {outputName}」，存储为 `workflowNodeId.outputName`；**不要求用户输入 32 位 UUID**（界面不直接展示 workflowNodeId，见 §10.11）。取值合法性由校验规则保证（§10.14「出参来源必须有效」）。
-
 **新建时的默认值**：
 
 | 字段 | 默认值 |
@@ -1150,12 +1134,6 @@ interface NodeRetry {
 | Workflow 出参 | 空（无行） |
 | 画布 | 仅包含 Start 和 End 两个节点，无 OP 节点、无连线 |
 | 节点详情面板 | 空状态，提示"请在画布中选择一个节点以查看和编辑其配置" |
-
-**校验与保存的关系（D2 定稿）**：
-
-> `[校验]` 与 `[保存]` 相互独立。**保存不要求校验通过**（允许保存草稿）；`[保存]` 前**不调用** `POST /api/workflows/{workflowId}/validate`。`[校验]` 仅在用户主动点击时调用，用于提示拓扑问题；对**未保存**的新建对象点 [校验] 时提示「请先保存后再校验」。
-> **保存时执行的校验**：仅**字段级**（name 等字段约束、`position` 完整性、op 节点 `clientId` 非空、Client 类型匹配）。**拓扑 / 连通 / 绑定类规则不在保存时执行**，仅在 `[校验]` 与**创建 Run 前**执行（规则分区与完整规则集见 crud-03 3.3「校验规则」）。
-> 例外：`[执行]`（单次执行）与 Job 触发执行时，后端在创建 Run 前对**所引用版本**做拓扑校验，不通过 → 400 `VALIDATION_ERROR`，前端提示「拓扑不合法，无法执行」。
 
 ### 10.10 OP 库
 
@@ -1189,7 +1167,7 @@ interface NodeRetry {
 | 操作 | 行为 |
 |-|-|
 | 从 OP 库拖动 OP | 光标变为"复制/新建"状态 |
-| 释放到画布空白处 | 创建一个新的节点，引用该 OP 的最新版本，**并自动带出该 OP 的全部入参，绑定类型置为 `unbound`（未绑定，无来源）** |
+| 释放到画布空白处 | 创建一个新的节点，引用该 OP 的最新版本，**并自动带出该 OP 的全部入参（未绑定状态）** |
 | 释放到画布已有节点上 | 不创建，提示"此处已有节点" |
 | 释放到画布外 | 不创建，取消拖动 |
 | 释放后 | **节点详情面板立即展示该新节点的配置**，用户可编辑参数绑定、Client、重试策略 |
@@ -1236,7 +1214,7 @@ interface NodeRetry {
 |-|-|
 | 节点 ID | workflowNodeId（32 位 UUID，内部使用，界面不直接展示；参数绑定中以 `workflowNodeId.outputName` 形式引用） |
 | OP | 引用的 OP 名称（界面展示用），含超时时间，只读 |
-| Client | 下拉列表选择，**仅列出与该节点 `OP.type` 匹配的 Client（§8.3）**；**默认选中该 OP 类型下 `createdAtMs` 最早的匹配 Client**（D3/D5） |
+| Client | 下拉列表选择 |
 | 参数绑定 | 每个入参的绑定来源，**可编辑**（前置节点出参下拉选 `workflowNodeId.outputName`、Workflow 入参下拉选、字面量输入框） |
 | 重试策略 | on / max / backoff / interval |
 | ⚠ 提示 | 若 OP 已更新，显示提示条 |
@@ -1247,7 +1225,7 @@ interface NodeRetry {
 | 操作 | 行为 |
 |-|-|
 | 修改节点配置（Client、参数绑定、重试策略） | 仅修改"编辑草稿"，不影响节点数据 |
-| 点击 [保存] | 将编辑草稿写入节点数据（node.clientId、node.bindings、node.retry） |
+| 点击 [保存] | 将编辑草稿写入节点数据（node.client、node.bindings、node.retry） |
 | 点击 [取消] | 丢弃编辑草稿，还原为进入该节点时的配置 |
 | 切换选中另一个 node（未保存） | **丢弃当前草稿**（等同取消），切换到新节点 |
 | 拖拽新 OP 到画布 | 新节点使用默认配置（自动带出 OP 入参，未绑定状态） |
@@ -1312,8 +1290,8 @@ interface NodeRetry {
 
 ```text
 workflow-deploy_workflow-v2.zip
-├── workflow.yaml
 ├── manifest.json
+├── workflow.yaml
 └── ops/
     ├── check_tests.yaml
     ├── review.yaml
@@ -1420,7 +1398,6 @@ interface JobDefinition {
 > - **Job 顶层不设 `clientId`（Client 为 OP 专有）**：`clientId` 仅当 `target.kind === "op"` 时需要，存放在 `target.clientId`，创建 Job 时选择。
 > - 定时 Job 也可在 Job 管理界面通过 [运行] 按钮手动触发一次。
 > - `inputs` 的 **name 列表来源于 OP / Workflow 的参数定义**，Job 只填 value，不自己定义 name。
-> - `nextRunAtMs` 为**计算字段（不落库）**，仅供接口消费，**界面不展示**（如后续需展示「下次触发」列再另行定义）。
 
 ### 11.3 列表视图
 
@@ -1455,15 +1432,13 @@ interface JobDefinition {
 |-|-|
 | 名称 | Job 名称 + 版本号 + 需要更新标签（不换行），点击可展开/折叠详情 |
 | Target | 目标类型 + 名称 + 版本号 |
-| 工作区 | **Job.workspace（Job 定义的工作目录）**，不是 Run 的实际 workspace（Run 实际值见 §12.4 运行历史） |
+| 工作区 | 工作目录路径 |
 | 触发方式 | 手动 / Cron 表达式 |
 | 是否启用 | ✅ 启用 / ⏸ 已禁用 |
 | 最近运行结果 | 状态徽标（**7 态**：⏳ waiting / ● running / ⏹ terminating / ✓ success / ✗ failed / ⏱ timeout / ⊘ cancelled）+ 执行耗时（如 `✓ 成功 15.3s`）。**仅展示、不提供操作**（D4=B：非终态也不给「终止」按钮） |
 | 操作 | 运行、编辑、复制、导出、禁用/启用、删除（**不含「终止」**） |
 
 > 点击名称行展开详情。详情中展示：类型、状态、目标、触发方式、入参等。
-
-> **示例为示意**：本节 §11.3 的 Job 列表示例（Target / 工作区 / 最近运行结果等取值）为**示意**；权威夹具见 `原型图/mock-data.js` 的 `JOBS` / `RUNS`（正式前端自 T2 起以真实 `ui/` + 后端接口为准）。
 
 > **入口收窄（D4=B 定稿）**：Job 列表的「最近运行结果」是列表加载时**顺带**返回的 `lastRun` 摘要，**不构成运行历史控制入口**——终止 / 重跑 / 重试在途 Run 一律只能在**运行历史界面**操作（见 12.4 操作列、crud-05 3.5.6/3.5.7/3.5.8）。
 
@@ -1491,7 +1466,6 @@ interface JobDefinition {
 | 选择"单个 OP" | 显示 OP 下拉和 Client 下拉，**默认不选择**；工作区、触发方式、并发策略仍为空 |
 | 选择"整个 Workflow" | 显示 Workflow 下拉，**默认不选择**；工作区、触发方式、并发策略仍为空 |
 | 选择具体 OP / Workflow | **初始入参区域自动列出该 OP / Workflow 的全部参数 name**（value 为空），由用户填写 value |
-| 选择具体 OP 后（Client 下拉） | **Client 下拉只列出与 `OP.type` 匹配的 Client（映射见 §8.3）**；若该类型下无 Client，下拉置空并提示「请先在 Client 管理中创建 {type} 类型的 Client」（D5） |
 
 **初始入参的来源规则**：
 
@@ -1597,8 +1571,6 @@ job-hourly_check-v1.zip
 ```
 
 > `manifest.target.file` 为导入的名称锚（`workflows/<name>.yaml` 或 `ops/<name>.yaml`），导入据此定位目标实体并按名重映射为新 uuid（见 crud-04 3.4.10）。**Workflow 导出包（§10.13）保持根级 `workflow.yaml`**，不套子目录。
->
-> **导入校验（见 §8.9 通用约定）**：导入时 `manifest.target.name` 必须与 `manifest.target.file` 指向的包内文件实际 `name` 一致；不一致 → 校验不通过，提示不一致位置，用户修改包内文件 / manifest 后重新导入。
 
 **交互流程**：
 
@@ -1668,8 +1640,8 @@ interface JobRun {
   /** 运行结果（**不落库**，详情接口按 steps 聚合）。结构见下方 `RunResult`；两 target 类型共用同一结构。 */
   result?: RunResult | null;
   steps: StepRecord[];
-  retryFromRunId?: string;         // 重试溯源：源 Run（仅 retry 写入）
-  retryFromRecordId?: string;      // 重试溯源：源 **失败/超时 StepRecord 主键**（step_records.record_id；仅 retry 写入，rerun 不写；D17）
+  retryFromRunId?: string;
+  retryFromStepId?: string;
   startedAtMs?: bigint | null;   // 开始时间（waiting 记录为 null）
   finishedAtMs?: bigint | null;  // 结束时间（waiting / running 为 null）
   durationMs?: number;     // 耗时（毫秒），终态才有值
@@ -1690,7 +1662,7 @@ interface StepRecord {
   opVersion: number;
   opName: string;           // OP 名称快照（step_records.op_name；OP 改名/删除后仍可展示）
   clientId?: string;
-  source: "job" | "step";   // 任务来源：job=单次 OP/Job（Runner 触发，完成调 JOB_COMPLETE）；step=workflow 步骤（Engine 触发，完成调 STEP_COMPLETE）
+  source: "job" | "step";   // 任务来源：job=单次 OP/Job（Runner 触发，完成调 job_complete）；step=workflow 步骤（Engine 触发，完成调 step_complete）
   status: StepStatus;
   inputs: Record<string, string>;
   bodySnapshot?: string;
@@ -1723,7 +1695,7 @@ interface RunResult {
 }
 ```
 
-> **同一 step 多次执行**：step 因**重试**或**循环回跳重入**会多次执行，每次执行产生一条独立的 StepRecord（**不内嵌在一条记录里**），由 `(activationSeq, retrySeq)` 唯一区分（`activationSeq` 回跳 +1；`retrySeq` 重试 +1）。查看 OP 执行详情时，执行历史以下拉选项展示，**按 `(activationSeq, retrySeq)` 降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。**判断该 step 的最终结果一律以最后一条记录为准**（D3；不做 `attempts` 内嵌数组）。本文中 `attempt` 一词一律指 `retrySeq`（不再单独使用该词）。
+> **同一 step 多次执行**：step 因**重试**或**循环回跳重入**会多次执行，每次执行产生一条独立的 StepRecord（**不内嵌在一条记录里**），由 `(activationSeq, retrySeq)` 唯一区分（`activationSeq` 回跳 +1；`retrySeq` 重试 +1）。查看 OP 执行详情时，执行历史以下拉选项展示，**按 `(activationSeq, retrySeq)` 降序排列**（最新的在最上面），**默认选中最后一条**（最新的一次）。**判断该 step 的最终结果一律以最后一条记录为准**（D3；不做 `attempts` 内嵌数组）。
 
 ### 12.4 第一层：Job 运行历史列表
 
@@ -1736,38 +1708,37 @@ interface RunResult {
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  名称              Target                失败节点      工作区           触发方式        结果        操作  │
 │  ────────────────  ──────────────────  ────────────  ──────────────  ──────────────  ──────────  ──── │
-│  check_tests       OP check_tests v2    -             /path/ws-001    单次执行 · OP    ✓ 成功 12.3s  [重跑] │
-│  deploy_workflow   Workflow deploy_workflow v2 -      /path/ws-002    单次执行 · Workflow ● 运行中    [终止] │
-│  hourly_check      Workflow hourly_check v1 health_check /path/ws-003 持久 Job · 定时  ✗ 失败 8.2s   [重试][重跑] │
-│  deploy_workflow   Workflow deploy_workflow v2 deploy /path/ws-004    持久 Job · 定时  ⏱ 超时 137.5s [重试][重跑] │
-│  daily_cleanup     OP clean_logs v2     -             /path/ws-005    持久 Job · 定时  ✓ 成功 3.2s   [重跑] │
-│  data_sync         OP process_data v2   process_data  /path/ws-006    持久 Job · 定时  ✗ 失败 4.1s   [重试置灰][重跑] │
+│  check_tests       OP check_tests v2    -             /path/ws-001    单次执行         ✓ 成功 12.3s  [重跑] │
+│  deploy_workflow   Workflow deploy_workflow v2 -      /path/ws-002    单次执行         ● 运行中      [终止] │
+│  hourly_check      Workflow hourly_check v1 health_check /path/ws-003 持久 Job / 定时  ✗ 失败 8.2s   [重试][重跑] │
+│  deploy_workflow   Workflow deploy_workflow v2 deploy /path/ws-004    持久 Job / 定时  ⏱ 超时 137.5s [重试][重跑] │
+│  daily_cleanup     OP clean_logs v2     -             /path/ws-005    持久 Job / 定时  ✓ 成功 3.2s   [重跑] │
+│  data_sync         OP process_data v2   process_data  /path/ws-006    持久 Job / 定时  ✗ 失败 4.1s   [重试置灰][重跑] │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                          每页 [10 ▾] 共 6 条  [上一页] 1/1 [下一页] │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**筛选项说明**（**「取值」列为筛选下拉文案**；列表列展示文案与筛选文案不同，见下方「列表列说明」的「触发方式」行）：
+**筛选项说明**：
 
 | 筛选项 | 取值 | 说明 |
 |-|-|-|
 | 搜索（keyword） | 文本 | **仅匹配名称**：Run 名称与 Target 名称（快照）模糊匹配；**状态 / 版本请用下方独立筛选项**（精确等值，keyword 不参与） |
 | 类型 | 全部 / OP / Workflow | `targetKind` |
 | 来源 | 全部 / 持久 Job / 单次执行 | `jobKind`（persistent / virtual） |
-| 触发 | 全部 / 手动（manual） / 定时（schedule） / 单次执行 · OP（single_op） / 单次执行 · Workflow（single_workflow） / 重试（retry） | `triggeredBy` —— 5 个单值枚举一一对应，**不做多值合并**（D16）；「重试」= `retry`，由运行历史 [重试] 产生 |
+| 触发 | 全部 / 持久 Job·定时 / 持久 Job·手动 / 单次执行 / 重试 | `triggeredBy` 展示映射（「重试」= `retry`，由运行历史 [重试] 产生） |
 | 状态 | 全部 / 7 态 | `status`（waiting / running / terminating / success / failed / cancelled / timeout） |
 | 工作区 | 全部 + 最近使用工作区 | `workspace`；选项**动态加载**——`GET /api/workspaces`（`job_runs.workspace` 去重、最近使用优先、默认 10 条，见 crud-06 3.6），不使用硬编码列表 |
-| 版本 | 全部 / **按现有 Job 修订号动态生成**（纯数字，如 `1` / `2` / `3`） | `version`，按 **`job_version`（Job 修订号）精确等值**；**virtual Run 无修订号（null），任何版本值都不匹配** |
+| 版本 | 全部 / `1` / `2` / `3` …（**纯数字**） | `version`，按 **`job_version`（Job 修订号）精确等值**；**virtual Run 无修订号（null），任何版本值都不匹配** |
 | 时间 | last_1h / last_24h / last_2d / last_3d / last_5d / last_7d / last_30d | `timeRange` 固定枚举（**无自定义区间**；D2） |
 
 > **操作按钮可用性（C1 定稿：按 can-retry 五条件动态决定，不写死）**：前端调用 `GET /api/runs/{runId}/can-retry`（五条件，见 crud-05 3.5.9 / 4.8）决定 **[重试]** 是否可点；不可点时置灰并以其 `reason` 作 tooltip。要点：
 > - **超时（timeout）结束且存在超时 step 时 [重试] 可点**（用于手动重试超时 step）——不再固定置灰；
-> - **cancelled 结束且终止前存在失败/超时 step 时 [重试] 可点**（D15）；
 > - **仅 Workflow 支持重试**：target=OP 的 Run（如 `data_sync`）[重试] 恒置灰；
 > - **needsUpdate 时 [重试] 置灰**：Workflow 或 Job 需更新（`needsUpdate=true`）、或 Run 快照版本 ≠ 当前版本时，[重试] 置灰，tooltip 显示 reason（如「版本已更新，请使用 [重跑]」「Workflow 或 Job 需要更新，无法重试」）；
 > - `[重跑]` 仅要求 Run 已结束且 target 仍存在（见 12.8.5）。
 
-**列表列说明**（**「触发方式」行为列表列展示文案**；筛选下拉文案见上方「筛选项说明」的「触发」行）：
+**列表列说明**：
 
 | 列 | 说明 |
 |-|-|
@@ -1775,9 +1746,9 @@ interface RunResult {
 | Target | 目标类型 + 名称 + 版本号 |
 | 失败节点 | **前端聚合计算字段**（JobRun 结构无 `failedNode` 字段）：**仅当 Run 最终结果非成功**（`failed` / `timeout` / `cancelled`）时，取该 Run 的 `steps` 中**最后一条 `failed` 或 `timeout` 的 step** 的 `opName`（超时 step 同样计入，如示例超时行 `deploy`）；**成功的 Run 一律显示 `-`**（与本节示例行 `check_tests … ✓ 成功 12.3s` 的 `-` 一致，即以 Run 的最终结果为准，而非「曾出现过 failed 记录」） |
 | 工作区 | 工作目录路径 |
-| 触发方式 | 展示映射（由 `triggeredBy` 生成）：manual → `持久 Job · 手动`；schedule → `持久 Job · 定时`；single_op → `单次执行 · OP`；single_workflow → `单次执行 · Workflow`；retry → `重试`（不叠加 Job 形态前缀，避免 virtual Run 误标「持久 Job」，L11） |
+| 触发方式 | 持久 Job / 定时 / 持久 Job / 手动 / 单次执行 / 重试 |
 | 结果 | 状态徽标（**7 态**：`⏳ waiting 等待中` / `● running 运行中` / `⏹ terminating 终止中` / `✓ success 成功` / `✗ failed 失败` / `⏱ timeout 超时` / `⊘ cancelled 已取消`）+ 执行耗时（如 `✓ 成功 12.3s`） |
-| 操作 | 重跑 / 终止 / 重试（按状态显示）：**成功 / 等待中 / 运行中 / 终止中 不展示 [重试]**（失败、超时、取消 才展示，可否点击由 `can-retry` 决定） |
+| 操作 | 重跑 / 终止 / 重试（按状态显示） |
 
 > 注：名称带 ↓ 表示可点击，点击名称即进入对应执行详情（OP 详情 / Workflow 详情），不再单独提供 [查看] 按钮。
 
@@ -1803,11 +1774,11 @@ interface RunResult {
 │  ├ 状态: ✓ 成功                                          │
 │  ├ 耗时: 12.3s                                           │
 │  ├ 工作区: /path/to/workspace                            │
-│  └ 触发: 单次执行 · OP                                  │
+│  └ 触发: 虚拟 Job / 单次执行                              │
 │                                                          │
 │  【执行历史】                                             │
 │  [ 第2次 12:01:35 成功（12.3s）← 当前 ▾ ]                │
-│    └ 下拉选项(按 (activationSeq, retrySeq) 降序): 第2次成功 / 第1次失败  │
+│    └ 下拉选项(按 activation/attempt 降序): 第2次成功 / 第1次失败  │
 │                                                          │
 │  【入参】                                                 │
 │  ┌──────────────┬──────────────────────┐               │
@@ -1830,7 +1801,7 @@ interface RunResult {
 ```
 
 > 说明：
-> - OP 执行详情页的入参 / 出参 / 输出 / 正文**一律取自所查看的那一条 StepRecord**（正文取 `bodySnapshot`），**随所选 Run 与执行记录变化**；页面为单条 step 的视图，不做跨 step 聚合。
+> - OP 执行详情页以 `check_tests` 为静态示例内容，不随 OP 变化。
 > - 入参/出参用表格展示：左列=参数名固定宽度，右列=参数值，多个参数换行展示。
 > - 每次执行（重试 / 循环回跳，执行历史下拉切换）的入参、出参、输出一一对应，切换时同步更新。
 > - **版本对比提示条**（仅执行版本 ≠ 当前版本时显示）：条内两个按钮 [查看 v{执行版本} 定义] / [查看 v{当前版本} 定义]；点击弹出对话框展示**该版本的定义摘要**——OP 为「名称 / 类型 / 查看版本（对照当前最新）/ 超时 / 入参 / 出参 / 正文摘要」，正文取该次执行的 `step.bodySnapshot` 快照（见 §12.3 StepRecord 字段）。**不保留历史版本定义**（无 OP 历史版本表），两按钮的差别仅在「按哪个版本号对照展示」，执行版本与当前版本不一致时以提示条 + 版本号对比呈现，不提供逐字段 diff（与原型 `showOpDef(versionText)` 一致）。
@@ -1841,7 +1812,7 @@ interface RunResult {
 
 **布局**：执行信息 + 入参/出参（本次执行值）+ 画布（只读执行状态）。**无 OP 库，无右侧节点详情面板。**
 
-> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录快照中的 `target.workflowId`（**嵌套于 `run.target`，无顶层 `workflowId` 字段**，见 §12.3 JobRun 结构）调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态**按 `stepId`（= `workflowNodeId`）匹配 run 的 steps**（同一节点多次执行（重试/回跳）时取 `(activationSeq, retrySeq)` 最大的一条，见 §12.3 D3）；**不得按 `opId` 匹配**——同一 Workflow 可多次引用同一 OP。节点上展示 OP 名称（不展示 workflowNodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
+> **数据来源**：进入 Workflow 执行详情时，先调用 `GET /api/runs/{runId}` 获取运行记录，再根据运行记录快照中的 `target.workflowId`（**嵌套于 `run.target`，无顶层 `workflowId` 字段**，见 §12.3 JobRun 结构）调用 `GET /api/workflows/{workflowId}` 获取 Workflow 定义（含节点、连线、坐标）。画布节点和连线均从 Workflow 定义渲染——**节点坐标取自各 `WorkflowNode.position.{x,y}` 字段**，连线据 `edges` 与两端节点坐标绘制；执行状态从 run 的 steps 中按 opId 匹配。节点上展示 OP 名称（不展示 workflowNodeId），失败节点提示条也展示 OP 名称。编辑界面和执行详情共用同一份 Workflow 定义数据源。
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -1854,7 +1825,7 @@ interface RunResult {
 │  ├ 当前版本: v2                                                          │
 │  ├ 状态: ✗ 失败                                                          │
 │  ├ 耗时: 8.1s                                                            │
-│  └ 触发: 持久 Job · 手动                                                  │
+│  └ 触发: 持久 Job / 手动                                                  │
 │                                                                          │
 │  ✗ 该 Workflow 执行失败。失败节点: deploy                                │
 │  [重试] [重跑]                                                            │
@@ -1870,8 +1841,8 @@ interface RunResult {
 │  ┌──────────────────────────────┬───────────────────────────────────────┐ │
 │  │ 参数名                       │ 参数值                                │ │
 │  ├──────────────────────────────┼───────────────────────────────────────┤ │
-│  │ deploy_url                    │ https://prod.example.com/app          │ │
-│  │ status                        │ success                               │ │
+│  │ deploy_url (string)          │ https://prod.example.com/app          │ │
+│  │ status (string)              │ success                               │ │
 │  └──────────────────────────────┴───────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  画布（只读展示执行状态）                                                  │
@@ -1911,14 +1882,11 @@ interface RunResult {
 | 失败 | [重试] + [重跑] |
 | 运行中 | [终止] |
 | 超时 | [重试]（`can-retry` 为真时，即存在超时 step）+ [重跑] |
-| 成功 | [重跑] |
-| 取消 | [重试]（`can-retry` 为真时，即终止前存在失败/超时 step）+ [重跑] |
+| 成功 / 取消 | [重跑] |
 | 等待中 | —（等待调度，无操作） |
 | 终止中 | —（已提交终止，等待收敛） |
 
 > 说明：进入 Workflow 执行详情后，只展示执行信息 + 入参/出参 + 画布（只读执行状态），**不展示右侧节点详情面板**。用户点击画布中的某个 node，直接跳转到该 OP 的执行详情页面。
->
-> **刷新**：详情页头部提供 [刷新] [自动刷新: 开] 开关；自动刷新打开且该 Run 有运行中 step 时按 §12.10 轮询轻量接口 `GET /api/runs/{runId}/status`，无 running step 时自动停止轮询。
 >
 > **版本对比提示条**（仅执行版本 ≠ 当前版本时显示）：条内两个按钮 [查看 v{执行版本} 定义] / [查看 v{当前版本} 定义]；点击弹出对话框展示定义摘要——「名称 / 查看版本（对照当前最新）/ 节点（OP 名 + opVersion）/ 入参 / 出参」（**Workflow 出参无 type，只列名称**；与原型 `showWfDef(name, version)` 一致）。同样**不保留历史版本定义**，节点级别的逐字段 diff 须进入各 OP 执行详情查看其 `bodySnapshot`（见 §12.7）。
 
@@ -2028,7 +1996,6 @@ interface RunResult {
 │                                      │
 │  重试方式:                            │
 │    从失败节点开始重试（固定）           │
-│    已完成节点不重复执行（续跑）      │
 │                                      │
 │  版本使用:                            │
 │    使用最新版本（固定）                 │
@@ -2043,13 +2010,11 @@ interface RunResult {
 |-|-|-|
 | 起始位置 | 从失败 step 开始 | 从头开始 |
 | 版本使用 | 最新版本（= 快照版本） | 最新版本（固定） |
-| 前提条件 | 五条件（见 12.8.2） | 仅终态可重跑（waiting / running / **terminating** 不可）且 **target 仍存在（OP / Workflow 未被删除）**；无版本限制 |
+| 前提条件 | 五条件（见 12.8.2） | 仅终态可重跑（waiting / running / **terminating** 不可）；无版本限制 |
 | 触发位置 | 运行历史 / Workflow 详情顶部（**Job 管理界面不含重试入口**，见 12.8.1） | 运行历史 / OP 执行详情 / Workflow 执行详情 |
 | 适用 target | 仅 Workflow | OP / Workflow |
 | 超时 Run | ✅ 支持（手动重试超时 step；自动重试不含 timeout） | ✅ 支持 |
 | 用户终止 Run（cancelled） | ✅ 支持（需存在失败/超时 step） | ✅ 支持 |
-
-> **续跑语义（D6）**：[重试] 为**续跑**——以失败/超时 step 对应的节点为起点新建 Run，**其全部前置节点视为已完成、不重复执行**（不写入新 Run 的 `step_records`，仅由 `retry_from_*` 溯源）；新 Run 的 `run_context` 以**源 Run 完成节点的出参快照**为初始上下文。与 `rerun` 的区别：`rerun` **从头**执行且不写 `retry_from_*`。
 
 ### 12.9 超时终止的展示
 
@@ -2063,7 +2028,7 @@ interface RunResult {
 │  ├ 执行版本: v2                          │
 │  ├ 状态: ⏱ 超时                          │
 │  ├ 耗时: 137.5s                          │
-│  └ 触发: 持久 Job · 定时                  │
+│  └ 触发: 持久 Job / 定时                  │
 │                                          │
 │  超时信息:                                │
 │  ├ 超时节点: deploy                      │
@@ -2087,12 +2052,10 @@ interface RunResult {
 |-|-|-|
 | 运行历史列表（自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms） | `/api/runs` |
 | 运行历史列表（自动刷新关） | 不轮询，手动 [刷新] | `/api/runs` |
-| Run 详情（有运行中的 Step，自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms） | `/api/runs/{runId}/status`（轻量；首次进入 / 手动 [刷新] 用 `/api/runs/{runId}`） |
-| Run 详情（已完成 / 无 running step） | 不轮询（自动停止），手动刷新 | `/api/runs/{runId}` |
+| Run 详情（有运行中的 Step，自动刷新开） | 每 `general.poll_interval_ms`（默认 2000ms） | `/api/runs/{runId}` |
+| Run 详情（已完成） | 不轮询，手动刷新 | `/api/runs/{runId}` |
 
 **不使用**：SSE 事件流、WebSocket。
-
-> **Run 详情刷新（G10）**：详情页头部提供 [刷新] [自动刷新: 开] 开关；自动刷新打开且该 Run 有运行中的 Step 时轮询轻量接口 `GET /api/runs/{runId}/status`，**无 running step 时自动停止轮询**；首次进入详情 / 手动 [刷新] 拉取完整详情 `GET /api/runs/{runId}`（两者差异见 §17.5）。
 
 ### 12.11 全部导出
 
@@ -2322,13 +2285,13 @@ Workflow deploy_workflow
 
 ### 15.2 循环终止条件
 
-> **单节点在一次 Run 中的执行次数上限 = `min(max × 3, max_loop_multiplier)`；当 `max_loop_multiplier = 0` 时表示**不施加绝对上限、仍受 `max × 3` 约束**（实际执行上限 = `max × 3`，不是无限）。达到上限时，整个 Run 失败。**
+> **单节点在一次 Run 中的执行次数上限 = min(max × 3, max_loop_multiplier)。达到上限时，整个 Run 失败。**
 
 | 字段 | 说明 |
 |-|-|
-| max | 每轮**尝试次数**（**首次执行计入**，来自 NodeRetry）；**节点未配置 retry 时取 1**（无重试配置即按单次执行计，与 crud-03 4.3.0 ① 口径一致） |
-| max_loop_multiplier | 执行总次数绝对上限（**配置项** `max_loop_multiplier`，存于 `ai-automation.json`，见 crud-06 一）；**`0` = 不施加绝对上限，此时仅由 `max × 3` 约束**（D14，不是无限）；非 0 时与 `max × 3` 取较小值 |
-| 执行上限 | `max_loop_multiplier = 0` 时 = `max × 3`；否则 = `min(max × 3, max_loop_multiplier)` |
+| max | 每轮重试次数（来自 NodeRetry）；**节点未配置 retry 时取 1**（无重试配置即按单次执行计，与 crud-03 4.3.0 ① 口径一致） |
+| max_loop_multiplier | 执行总次数绝对上限（settings 可配，见 crud-06；`0`=不限制，否则与 max×3 取较小值） |
+| 执行上限 | min(max × 3, max_loop_multiplier) |
 
 **不再依赖**：Job timeout、Workflow 执行上限。
 
@@ -2480,12 +2443,12 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 
 | UC | 场景 | 操作路径 | 预期结果 |
 |-|-|-|-|
-| UC-C1 | 新建 Client | Client 管理 → [新建] → 填写名称/类型/二进制路径/输出格式 → [保存] → 在列表中对该 Client 点 [编辑] → [测试命令] 验证可执行 | 列表新增一行，类型为 bash/python/powershell 时无参数模板 |
+| UC-C1 | 新建 Client | Client 管理 → [新建] → 填写名称/类型/二进制路径/输出格式 → 可先点 [测试] 验证命令可执行 → [保存] | 列表新增一行，类型为 bash/python/powershell 时无参数模板 |
 | UC-C2 | 展开/折叠 Client | 列表点击某行 [展开] → 行内展开详情；再次点击折叠；展开另一行时自动折叠上一行 | 行内展开详情，描述与类型/输出格式同一行展示 |
 | UC-C3 | 导入 Client | Client 管理 → [导入] → 点击 [选择文件] → 选择 YAML 文件 → [导入] | 导入成功后列表刷新，新增对应 Client |
 | UC-C4 | 导出 Client 为 YAML | Client 管理 → 某行 [导出] → 点击 [选择] 选目录 → [导出] | 文件直接写入所选目录，提示路径 |
 | UC-C5 | 删除 Client | Client 管理 → 某行 [删除] → 确认 | 列表删除该行 |
-| UC-C6 | 编辑 Client | Client 管理 → 某行 [编辑] → 修改字段 → [保存]（[测试命令] 仅对**已保存**的 Client 可用；未保存时按钮置灰，title 提示原因） | 更新成功，列表刷新 |
+| UC-C6 | 编辑 Client | Client 管理 → 某行 [编辑] → 修改字段 → 可先点 [测试] 验证命令可执行 → [保存] | 更新成功，列表刷新 |
 | UC-C7 | 复制 Client | Client 管理 → 某行 [复制] | 基于该 Client 复制一条新记录，名称加副本后缀，进入编辑状态 |
 | UC-C8 | 搜索与筛选 | Client 管理 → 搜索框输入关键词 + 点击类型 chip | 列表按名称关键词和类型组合过滤 |
 | UC-C9 | 分页 | Client 管理 → 右下角分页控件切换每页条数（10/50/100/1000）→ 翻页 | 列表按选择条数刷新；分页在右下角 |
@@ -2509,9 +2472,9 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 
 | UC | 场景 | 操作路径 | 预期结果 |
 |-|-|-|-|
-| UC-W1 | 新建 Workflow | Workflow 管理 → [新建] → 拖拽 OP 到画布 → 连线 → 配置参数绑定 → 可先点 [校验] 检查拓扑（不通过不影响保存） → [保存] | 列表新增一行 |
+| UC-W1 | 新建 Workflow | Workflow 管理 → [新建] → 拖拽 OP 到画布 → 连线 → 配置参数绑定 → 可先点 [校验] 检查拓扑 → [保存] | 列表新增一行 |
 | UC-W2 | 展开/折叠 Workflow | 列表点击某行 [展开] → 行内展开只读画布；再次点击折叠；展开另一行时自动折叠上一行 | 行内展示只读画布，入参/出参以表格形式在画布上方展示 |
-| UC-W3 | 编辑 Workflow | Workflow 管理 → 某行 [编辑] → 三栏编辑器（左侧 OP 库可用搜索框过滤 OP + 中间画布 + 右侧节点详情）→ 可先点 [校验] 检查拓扑（不通过不影响保存） → [保存] | 可添加节点、连线、配置重试策略；**保存不要求校验通过**（允许保存草稿；执行时后端再校验，见 §10.9） |
+| UC-W3 | 编辑 Workflow | Workflow 管理 → 某行 [编辑] → 三栏编辑器（左侧 OP 库可用搜索框过滤 OP + 中间画布 + 右侧节点详情）→ 可先点 [校验] 检查拓扑 → [保存] | 可添加节点、连线、配置重试策略；校验通过后才能保存 |
 | UC-W4 | 删除连线 | 编辑器画布 → 在连线上**点击右键** → 选择 [删除] → 确认 | 连线被删除 |
 | UC-W5 | 配置节点重试 | 编辑器 → 选中节点 → 右侧面板 → [添加重试] → 设置 on/max/backoff/interval | 节点显示重试策略标记；不需要时可删除 |
 | UC-W6 | 展开预览选中节点 | 展开预览 → 点击画布中某节点 | 该节点高亮框选，右侧显示节点名称、版本号、参数配置、重试策略 |
@@ -2522,8 +2485,6 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | UC-W11 | 搜索与筛选 | Workflow 管理 → 搜索框输入关键词 + 点击状态 chip（全部/需要更新/已同步） | 列表按名称关键词和状态组合过滤 |
 | UC-W12 | 单次执行 Workflow | Workflow 管理 → 某行 [执行] → 填写入参 → [运行] | 跳转运行历史，显示执行详情 |
 | UC-W13 | 分页 | Workflow 管理 → 右下角分页控件切换每页条数（10/50/100/1000）→ 翻页 | 列表按选择条数刷新；分页在右下角 |
-
-> **保存语义（D2）**：`[保存]` 仅做**字段级**校验，**拓扑 / 连通 / 绑定类规则不阻塞保存**（允许草稿保存）；这些规则仅在用户主动点 `[校验]` 与**创建 Run 前**执行（见 §10.9 与 crud-03 3.3「校验规则」）。
 
 ### 16.4 Job 管理
 
@@ -2635,8 +2596,6 @@ A ──🟢──→ B（OP 节点）──🟢──→ End   （有终结 OP�
 | GET | `/api/runs/{runId}/can-retry` | 检查 Run 是否可重试 |
 | POST | `/api/runs/export` | 生成运行历史 Excel（`{xlsx, count}`，前端落盘） |
 
-> **`/api/runs/{runId}` 与 `/api/runs/{runId}/status` 的差异（L6）**：前者返回完整 Run 详情（含 steps、result 等）；后者为轻量接口，仅返回状态与最后更新时间（轮询用）。详情页**首次进入 / 手动 [刷新] 用完整接口**，**自动刷新轮询用轻量接口**（见 §12.10）。
-
 ### 17.6 版本与更新相关
 
 | 方法 | URL | 说明 |
@@ -2724,8 +2683,6 @@ GET /api/runs?keyword=deploy&status=failed&triggeredBy=schedule&timeRange=last_2
 
 > 原型阶段使用前端 mock 过滤模拟；真实后端实现时替换为后端查询。
 
-> **触发筛选粒度（D16）**：运行历史「触发」筛选项与 query 参数一一对应（`manual` / `schedule` / `single_op` / `single_workflow` / `retry`），**不提供多值合并**（如 `triggeredBy=single_op,single_workflow`）。
-
 ---
 
 ## 十九、前端独立界面清单
@@ -2759,7 +2716,7 @@ GET /api/runs?keyword=deploy&status=failed&triggeredBy=schedule&timeRange=last_2
 | 界面 | 说明 |
 |-|-|
 | Workflow 列表 | 含名称、版本、节点数、入参/出参数、需要更新标记、执行按钮 |
-| Workflow 行内展开详情 | 点击名称在条目下展开只读画布：顶部参数定义区用子表格展示**入参（左列=参数名(类型)）**与**出参（左列=参数名，Workflow 出参无 type，见 §12.6）**，右列=描述；画布节点连线按条件着色（绿色=on_success，红色=on_failure，蓝色=always），与编辑界面一致；点击节点后橙色高亮框选，右侧面板显示 OP 名称/版本/Client/节点参数/重试策略（未配置显示"未配置"）；再次点击折叠 |
+| Workflow 行内展开详情 | 点击名称在条目下展开只读画布：顶部参数定义区用子表格展示入参/出参（左列=参数名(类型)，右列=描述）；画布节点连线按条件着色（绿色=on_success，红色=on_failure，蓝色=always），与编辑界面一致；点击节点后橙色高亮框选，右侧面板显示 OP 名称/版本/Client/节点参数/重试策略（未配置显示"未配置"）；再次点击折叠 |
 | Workflow 编辑器（三栏布局，三栏常驻） | 顶部（基础信息 + 入参/出参）、左侧 OP 库（可搜索、可拖动）、中间画布（含 Start / OP / End 节点）、右侧节点详情面板（**常驻，无折叠功能**） |
 | OP 库面板（编辑器内） | 列出所有 OP，支持搜索，支持拖动到画布 |
 | Workflow 节点详情面板（常驻） | 未选中节点时显示空状态提示；选中 / 拖拽创建节点后展示配置；底部含 **[保存] [取消]** 按钮；点击保存才生效，点击取消则丢弃草稿 |
@@ -2839,9 +2796,9 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 
 | 界面 | 新建时默认状态 |
 |-|-|
-| Client（Prompt） | 名称空、描述空、命令空、参数模板空、输入方式 arg（**前端预填建议值，非后端默认**）、输出解析 mode json（同上）、jsonPath 空、退出码语义 0 |
+| Client（Prompt） | 名称空、描述空、命令空、参数模板空、输入方式 arg、输出解析 mode json、jsonPath 空、退出码语义 0 |
 | Client（Bash / Python / PowerShell） | 名称空、描述空、二进制路径空 |
-| OP | 名称空、描述空、超时 = 60（默认值预填，必填，范围 1..86400）、入参空、出参空、类型 prompt、内容空 |
+| OP | 名称空、描述空、超时空、入参空、出参空、类型 prompt、内容空 |
 | Workflow | 名称空、描述空、入参空、出参空、画布仅 Start + End、节点详情面板空状态 |
 | Job | 名称空、描述空、目标类型无勾选、OP / Workflow 下拉空、Client 空、工作区空、初始入参空、触发方式无勾选、Cron 空、并发策略空 |
 
@@ -2857,12 +2814,6 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 - `workflow.html` 与 `index.html` 均通过 `<link>` / `<script>` 引入上述文件，不再各自维护画布实现。
 - 三个界面节点形态、连线形态、锚点颜色语义完全一致；仅内容有差异：编辑界面节点 meta 显示「OP vX · 超时」，查看界面显示「vX」，运行历史叠加执行状态文本。
 - **连线箭头**：三处画布的连线均带方向箭头（红 / 绿 / 蓝与连线同色）。同一页面内多个画布共存时（如 Workflow 列表展开查看画布与编辑画布同时存在于 DOM），每个画布实例的 SVG 箭头 marker id 带独立实例序号，互不干扰，保证箭头始终正常渲染。
-
-### 19.10 设置界面（settings.html）
-
-| 界面 | 说明 |
-|-|-|
-| 设置界面 | 左侧分组导航（10 组：通用 / Client / OP / Workflow / 运行历史 / Engine / Worker / Task Runner / Scheduler / 日志）+ 右侧对应分组的配置表单；只读项（`db_path` / `workspace_root` / `config_version` 等目录类只读项与 Worker 池大小等派生项）不可编辑；[保存] 调 `PUT /api/settings`，[恢复默认] 调 `POST /api/settings/reset`（见 §4.2 / crud-06）|
 
 ---
 
@@ -2897,11 +2848,11 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | Workflow 单次执行入口 | 只在列表界面 | 编辑器专注定义 |
 | Workflow 编辑器布局 | 左侧 OP 库 + 中间画布 + 右侧节点详情面板（**三栏常驻**） | 从 OP 库拖动创建节点，直观 |
 | OP 库功能 | 列出所有 OP，支持搜索，支持拖动 | 快速构建 Workflow |
-| 拖动创建节点 | 自动带出 OP 全部入参（`unbound` 未绑定态），并立即在右侧展示配置 | 减少手动配置 |
+| 拖动创建节点 | 自动带出 OP 全部入参（未绑定），并立即在右侧展示配置 | 减少手动配置 |
 | **节点详情面板** | **常驻，不可折叠；未选中显示空状态；含 [保存] [取消] 按钮** | **编辑草稿与提交分离** |
 | 画布锚点连线 | 支持从锚点拖拽生成边 | 直观编排 |
 | Workflow 执行详情布局 | 画布只读（无 OP 库、无右侧面板） | 执行详情只读，不需要配置 |
-| 参数绑定来源 | 前置节点出参（仅从 Start 可达且位于本节点之前）/ Workflow 入参 / 字面量 | 灵活；未绑定为 `unbound` |
+| 参数绑定来源 | 任意前置节点出参 / Workflow 入参 / 字面量 | 灵活 |
 | 参数绑定编辑 | 节点详情面板内可编辑（点击保存后生效） | 完整配置能力 |
 | 汇聚策略 | 由 DAG 边决定 | 不单独配置 |
 | 节点锚点 | 红/绿/蓝三色 | 决定边触发条件 |
@@ -2911,7 +2862,7 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | **End 完成语义** | **所有入边均已决定（并行多边需全部结束）且至少一条 activated** | **汇聚正确、互斥不互等** |
 | **失败传播** | **任一 op failed 且失败无出边路由（无 on_failure / always）→ 置 Run failed（不 abort 在飞，等收敛落终态）** | **即使另一分支到 End；被 on_failure / always 边接住则不终结** |
 | 循环实现 | 重试 + 条件边 + 回跳 | 指向原节点 |
-| 循环终止 | min(max × 3, max_loop_multiplier)（`max_loop_multiplier = 0` 时 = `max × 3`，见 §15.2） | 不依赖 Job / Workflow 时间 |
+| 循环终止 | min(max × 3, max_loop_multiplier) | 不依赖 Job / Workflow 时间 |
 | 超时归属 | 只在 OP 上 | OP 是原子执行单元 |
 | 超时语义 | 终止信号，不是失败 | 不走边、不回跳、不重试 |
 | **终止语义** | **不 kill 在跑 OP；停止派发 + 取消未开始 + 等其收敛** | **OP 最小执行单位，强杀会产生不可预期结果** |
@@ -2942,7 +2893,7 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 
 ### 20.1 决策编号释义（Inline Tag Glossary）
 
-本文档与 `proposal-02-后端*` / `tasks.md` / `tests/集成测试用例.md` 正文中散落形如「（D1 定稿）」「（C1 定稿）」「（V11-B）」的**行内编号**。它们**不是全局唯一 id**：**同一字母在不同章节 / 文件可指不同决策**（典型：`D1` 在 §12.10 指前端轮询间隔，在 crud-03 4.4 指 DB 排队与超时计时起点），因此**引用时必须带出处**。下表为**决策类**行内编号释义（含本次拍板口径）；其余形如 `Z5/U8/V4/Q1/W6/R3/S8/T13/AA7/BB4/Z/N/M17/M20/P4/P6/K`、`G10/G13/L6/L11`（**独立校验报告条目号**）、`#1..#8`（各 crud 内**局部**审查条目号，**不可跨文件引用**）等编号为各文档**内部条目号**，见其所在章节；`tests/集成测试用例.md` 中的 `#n` 指**数据集行号**（与 crud 的审查条目号同形不同义，勿混用）。
+本文档与 `proposal-02-后端*` / `tasks.md` / `tests/集成测试用例.md` 正文中散落形如「（D1 定稿）」「（C1 定稿）」「（V11-B）」的**行内编号**。它们**不是全局唯一 id**：**同一字母在不同章节 / 文件可指不同决策**（典型：`D1` 在 §12.10 指前端轮询间隔，在 crud-03 4.4 指 DB 排队与超时计时起点），因此**引用时必须带出处**。下表为**决策类**行内编号释义（含本次拍板口径）；其余形如 `Z5/U8/V4/Q1/W6/R3/S8/T13/AA7/BB4/Z/N/M17/M20/P4/P6/K` 等编号为各文档**内部条目号**，见其所在章节：
 
 | 编号 | 含义（分义项） | 出处 |
 |-|-|-|
@@ -3026,7 +2977,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 5. **Workflow 有独立入参和出参**，参数绑定支持任意前置节点。
 6. **超时只属于 OP**，超时是终止信号，全层级标记 timeout。
 7. **循环终止由 min(max × 3, `max_loop_multiplier`) 控制**（受 `max_loop_multiplier` 约束，见 §15.2），超时立即终止。
-8. **重试要求版本一致（快照版本 = 当前版本）且满足五条件；重跑才固定使用最新版本**。
+8. **重试使用最新版本，且只在五条件满足时可用**。
 9. **所有任务后台运行，前端轮询获取状态**，不使用事件流。
 10. **Workflow 编辑器左侧提供 OP 库**，支持搜索和拖动创建节点；**Workflow 执行详情无 OP 库，无右侧面板**。
 11. **Workflow 有固定的 Start 和 End 节点**，不绑定 OP。
@@ -3123,7 +3074,7 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 **重试规范**：
 
 - 仅 target 为 Workflow 且满足五条件时可用。
-- 从失败 step 开始重试（已完成节点不重复执行，见 §12.8）。
+- 从失败 OP 开始重试。
 - 使用最新版本（= 快照版本，版本一致时）。
 - 版本不一致或 needsUpdate 时禁止重试，提示用户重跑。
 - 两处入口：运行历史 / Workflow 运行详情顶部（**Job 管理界面不含重试入口**，见 12.8.1）。
@@ -3140,4 +3091,4 @@ Client ←（执行时下拉选择）← OP ← Workflow（含入参 / 出参 + 
 - **OP 管理**：定义"做什么"。
 - **Workflow 管理**：定义"按什么顺序做，节点如何重试，用哪个 Client"，左侧 OP 库 + 中间画布（含 Start / End）+ 右侧节点详情（常驻）。
 - **Job 管理**：定义"什么时候做、在哪做"，展示最近执行结果。
-- **运行历史**（首页）：记录"做过什么、结果如何、用的哪个版本"，支持从失败 step 续跑重试。
+- **运行历史**（首页）：记录"做过什么、结果如何、用的哪个版本"，支持从失败 OP 重试。

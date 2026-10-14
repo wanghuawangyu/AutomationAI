@@ -61,35 +61,31 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 按后端业务分组。字段说明：**生效方式** —— `动态`=修改即时生效无需重启（当前**全部可配置项均为动态，无纯静态项**）；`动态*`=限制即时生效、但派生的 Worker 池大小重启后生效；`只读`=由运行目录推导或派生值（不可修改）。
 
-> **JSON 线格式（G11 定稿）**：配置项在 JSON 请求 / 响应中**一律为字符串**——数值以字符串承载（如 `"2000"`）、布尔以 `"true"` / `"false"` 承载、枚举以枚举名承载（如 `"info"`）；后端收到后**按上表逻辑类型解析为强类型存储**。下表「默认」列为**逻辑类型**（数值 / 布尔 / 枚举的展示值），接口一律以字符串承载（见 §二 通用约定 + PUT 请求体约束）。
->
-> **配置项全路径口径（与 `tests` / `mock` 统一）**：本文**配置项表与接口定义**中，配置项一律以 **`<分组>.<键>` 全路径**书写（如 `history.job_queue_running_max`、`engine.engine_event_retention_days`），与 `ai-automation.json` 的嵌套结构、`mock-data.js` 的 `SETTING_LIMITS` 键、`tests` 用例写法一致；下表「分组」列为路径前缀、「配置项」列为全路径。**正文行文中的不带前缀短名（如 `job_queue_running_max`）为同义简写**。
-
-| 分组（JSON 路径前缀） | 配置项（全路径 = 分组.键） | 默认 | 动/静态 | 说明 |
+| 分组 | 配置项 | 默认 | 动/静态 | 说明 |
 |-|-|-|-|-|
-| **通用（general）** | `general.poll_interval_ms` | 2000 | 动态 | **前端**轮询建议间隔（ms；前端经 GET /api/settings 读取） |
-| | `general.db_path` | `{run}/data/data.db` | 只读 | 由 `runDir`（`-c`）推导，接口返回拼接后的具体路径 |
-| | `general.workspace_root` | `{run}/workspaces` | 只读 | 由 `runDir`（`-c`）推导，接口返回拼接后的具体路径 |
-| | `general.config_version` | 1 | 只读 | `ai-automation.json` 结构版本（写入 JSON，见 3.4） |
-| | `general.db_version` | 1 | 只读 | DB 结构版本（`PRAGMA user_version`，**不落 JSON、仅接口附加，界面不展示**） |
-| **Client（client）** | `client.client_import_max_bytes` | 1048576 | 动态 | **Client YAML** 导入大小上限（B）。**仅约束单实体 YAML，不用于 ZIP 包**（Workflow / Job 导入包体积上限沿用 `op.op_import_max_bytes`，见下行） |
-| **OP（op）** | `op.op_import_max_bytes` | 1048576 | 动态 | **OP YAML** 导入大小上限（B）；**同一键亦为 Workflow / Job 的 ZIP 导入包（解压前）体积上限**——包内主体为 OP YAML，故**沿用现有键、不新造键**（见 crud-03 3.3.9 / crud-04 3.4.10） |
-| **Workflow（workflow）** | `workflow.workflow_max_nodes` | 200 | 动态 | **单流程（Workflow）最大节点数**：创建 / 更新 / 导入 Workflow 时校验 `nodes` 总数，超限 → 400 `VALIDATION_ERROR`（crud-03 3.3.3/3.3.4/3.3.9）；同时作为单 Run 并行 step 数的上界（并行 step ≤ 该 Workflow 节点总数，见 crud-03 4.4）。下一次保存 / 导入时生效 |
-| | `workflow.workflow_auto_layout` | true | 动态 | 导入缺坐标时自动排布 |
-| **运行历史（history，含并发上限）** | `history.job_queue_waiting_max` | 20 | 动态 | 等待中队列深度上限（**默认 20，用户可调，上限 1000**；超出即拒新建运行任务）。**Job 无独立配置项、不设自动重试**（任务失败即失败，需人工重跑或在 Workflow 节点配置 `retry`） |
-| | `history.job_queue_running_max` | 10 | 动态* | **运行中队列深度上限（取值范围 1..10，默认 10）；Task Runner 并发阈值（同时 running 的 JobRun 数上限）即取此值**——上限 10 = 默认值，故**只能调小、无法调大** |
-| | `history.history_max_per_job` | 10 | 动态 | **单 Job 最大保留历史条数** |
-| | `history.history_max_total` | 1000 | 动态 | **整体最大保留历史条数** |
-| | `history.history_max_age_days` | 180 | 动态 | **单条记录最大保存天数（半年，硬上限 180）** |
-| **Engine（engine）** | `engine.max_loop_multiplier` | 0 | 动态 | 循环**回跳**总次数上限（**`0` / 未设置 = 不施加绝对上限，仍受 `max×3` 约束——不是无限**；见 crud-03 4.3.0）。下次 Run 读取时生效 |
-| | `engine.engine_event_retention_days` | 1 | 动态 | Engine 事件清理（`engine_events` 表，重放事件）：**成功 run 完成即物理删本 run 事件**；失败 run 最终不重试 → **软删 = `engine.engine_event_retention_days` 天（默认 1）** / **硬删 = 软删 + 1 天（默认 2）**——即默认值 1 时为「1 天软删 / 2 天硬删」。**不影响 `step_records` 明细**（后者由运行历史 `history.history_max_*` 保留） |
-| **Worker（worker）** | `worker.worker_pool_size` | =1.5×running | 只读派生 | Worker 池大小 = `ceil(job_queue_running_max × 1.5)`，只读展示；**数值派生自同一配置，语义与 Task Runner 并发阈值不同**（阈值为 running 的 JobRun 数上限，池大小为常驻执行体数） |
-| | `worker.worker_max_concurrency` | =pool_size | 只读派生 | = `worker.worker_pool_size`（单 Worker 单工作线程） |
-| **Task Runner（runner）** | `runner.runner_poll_interval_ms` | 1000 | 动态 | **后端** Task Runner 调度轮询间隔（ms；区别于前端 `general.poll_interval_ms`） |
-| | `runner.runner_batch_size` | 10 | 动态 | 单轮调度批数：每轮轮询 `SELECT ... FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`，FIFO 取候选后逐条派发；与并发阈值 `history.job_queue_running_max` 配合，每轮实际启动数 = `min(batch_size, running_max - running_count, waiting 总数)`；仅限制单轮扫描行数，不突破 running 总量闸门（消费逻辑见 crud-05 4.6） |
-| **Scheduler（scheduler）** | `scheduler.scheduler_max_jobs` | 100 | 动态 | 可加载定时任务上限（时区固定 Local） |
-| **日志（log）** | `log.log_level` | info | 动态 | 应用日志级别 |
-| | `log.log_max_files` | 10 | 动态 | 最大绕接 zip 文件数（无保留天数） |
+| **通用** | `poll_interval_ms` | 2000 | 动态 | **前端**轮询建议间隔（ms；前端经 GET /api/settings 读取） |
+| | `db_path` | `{run}/data/data.db` | 只读 | 由 `runDir`（`-c`）推导，接口返回拼接后的具体路径 |
+| | `workspace_root` | `{run}/workspaces` | 只读 | 由 `runDir`（`-c`）推导，接口返回拼接后的具体路径 |
+| | `config_version` | 1 | 只读 | `ai-automation.json` 结构版本（写入 JSON，见 3.4） |
+| | `db_version` | 1 | 只读 | DB 结构版本（`PRAGMA user_version`，**不落 JSON、仅接口附加，界面不展示**） |
+| **Client** | `client_import_max_bytes` | 1048576 | 动态 | YAML 导入大小上限（B） |
+| **OP** | `op_import_max_bytes` | 1048576 | 动态 | YAML 导入大小上限（B） |
+| **Workflow** | `workflow_max_nodes` | 200 | 动态 | **单流程（Workflow）最大节点数**：创建 / 更新 / 导入 Workflow 时校验 `nodes` 总数，超限 → 400 `VALIDATION_ERROR`（crud-03 3.3.3/3.3.4/3.3.9）；同时作为单 Run 并行 step 数的上界（并行 step ≤ 该 Workflow 节点总数，见 crud-03 4.4）。下一次保存 / 导入时生效 |
+| | `workflow_auto_layout` | true | 动态 | 导入缺坐标时自动排布 |
+| **运行历史** | `job_queue_waiting_max` | 20 | 动态 | 等待中队列深度上限（**默认 20，用户可调，上限 1000**；超出即拒新建运行任务）。**Job 无独立配置项、不设自动重试**（任务失败即失败，需人工重跑或在 Workflow 节点配置 `retry`） |
+| | `job_queue_running_max` | 10 | 动态* | **运行中队列深度上限（最大 10）；Task Runner 并发阈值（同时 running 的 JobRun 数上限）即取此值** |
+| | `history_max_per_job` | 10 | 动态 | **单 Job 最大保留历史条数** |
+| | `history_max_total` | 1000 | 动态 | **整体最大保留历史条数** |
+| | `history_max_age_days` | 180 | 动态 | **单条记录最大保存天数（半年，硬上限 180）** |
+| **Engine** | `max_loop_multiplier` | 0 | 动态 | 循环总次数上限（0=不限制） |
+| | `engine_event_retention_days` | 1 | 动态 | Engine 事件清理（`engine_events` 表，重放事件）：**成功 run 完成即物理删本 run 事件**；失败 run 最终不重试 → 1 天软删 / 2 天硬删。**不影响 `step_records` 明细**（后者由运行历史 `history_max_*` 保留） |
+| **Worker** | `worker_pool_size` | =1.5×running | 只读派生 | Worker 池大小 = `ceil(job_queue_running_max × 1.5)`，只读展示；**数值派生自同一配置，语义与 Task Runner 并发阈值不同**（阈值为 running 的 JobRun 数上限，池大小为常驻执行体数） |
+| | `worker_max_concurrency` | =pool_size | 只读派生 | = `worker_pool_size`（单 Worker 单工作线程） |
+| **Task Runner** | `runner_poll_interval_ms` | 1000 | 动态 | **后端** Task Runner 调度轮询间隔（ms；区别于前端 `poll_interval_ms`） |
+| | `runner_batch_size` | 10 | 动态 | 单轮调度批数：每轮轮询 `SELECT ... FROM job_runs WHERE status='waiting' ORDER BY created_at_ms ASC LIMIT runner_batch_size`，FIFO 取候选后逐条派发；与并发阈值 `job_queue_running_max` 配合，每轮实际启动数 = `min(batch_size, running_max - running_count, waiting 总数)`；仅限制单轮扫描行数，不突破 running 总量闸门（消费逻辑见 crud-05 4.6） |
+| **Scheduler** | `scheduler_max_jobs` | 100 | 动态 | 可加载定时任务上限（时区固定 Local） |
+| **日志** | `log_level` | info | 动态 | 应用日志级别 |
+| | `log_max_files` | 10 | 动态 | 最大绕接 zip 文件数（无保留天数） |
 
 \* `job_queue_running_max`：运行中队列深度限制**即时生效**；其派生的 Worker 池大小在下次启动按新值初始化（界面标注「🔄 池大小重启后生效」）。**改小上限仅约束新调度**：存量 waiting 自然消化、存量 running 自然收敛（OP 不可 kill、不做强制清理），直到自然降到新阈值以下。
 
@@ -129,8 +125,6 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 > - 时间字段 JSON 中统一为 string（毫秒时间戳）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
 > - 配置项 key 为业务键（非 UUID），API 不暴露 id；配置来源为 `ai-automation.json`。
-> - **配置值 JSON 类型（G11）**：请求 / 响应中的配置值**一律为 string**（数值 `"20"`、布尔 `"true"`、枚举 `"info"`）；后端按逻辑类型解析为强类型存储。非 string（number / boolean / null 等）→ 400 `VALIDATION_ERROR`。
-> - **行内编号对照表（本文件用例）**：行内编号**不构成全局唯一 id**（同一字母在不同章节 / 文件可指不同决策，见 `proposal-01 §20.1`），本文件出现者及出处如下——`G11` = 配置值 JSON 线格式**一律为字符串**（出处本文件 §一 / §二 / 3.4）；`D6` = `GET /api/workspaces` 数据源 = `job_runs.workspace` 去重 + 最近使用倒序（出处本文件 3.6；与 crud-03 4.3.4 / crud-05 3.5.8 的「重试续跑 D6」**同名不同义**）；`C4` = 本文件「配置类接口一览」的内部序号（释义见 `proposal-01 §20.1`）。**跨文件引用一律具名**（如「crud-04 3.4.6.2「`job_queue_waiting_max` 的语义」」），不使用别文件的小节内编号；**章号 / 节号写法**见 `proposal-02-后端设计.md` 顶部「引用与编号约定」。
 
 ---
 
@@ -166,7 +160,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | 字段 | 类型 | 说明 |
 |-|-|-|
 | status | enum | `running` / `stopped` |
-| uptimeMs | string | 进程已运行**时长**（毫秒数，string；**非时间戳**） |
+| uptimeMs | string | 进程已运行时长（毫秒时间戳） |
 | activeRuns | integer | 当前 `status IN ('running','terminating')` 的 Run 数（terminating 仍占并发名额，同 `running_count`，见 crud-05 4.6） |
 
 **错误响应**：无（恒 200）。
@@ -191,7 +185,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 ### 3.3 GET /api/settings —— 读取配置
 
-**功能说明**：读取**全部**全局配置（可配置项来源：`ai-automation.json`），前端据此渲染配置界面。**响应含 `runDir`（当前运行目录，由 CLI 入口 `-c` 指定；未指定默认 `~/.ai-automation`）**——只读派生项（`db_path` / `workspace_root`）由后端按 `runDir` **拼接为具体绝对路径**后返回（非 `{run}` 占位符），前端直接展示、无需（也不应）自行拼接。
+**功能说明**：读取**全部**全局配置（可配置项来源：`ai-automation.json`），前端据此渲染配置界面。**响应含 `runDir`（当前配置目录，由 CLI 入口 `-c` 指定；未指定默认 `~/.ai-automation`）**——只读派生项（`db_path` / `workspace_root`）由后端按 `runDir` **拼接为具体绝对路径**后返回（非 `{run}` 占位符），前端直接展示、无需（也不应）自行拼接。
 
 **路径参数**：无　**查询参数**：无　**请求体**：无
 
@@ -242,7 +236,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 > 返回全部配置（值为 string），按业务分组组织。**可配置项来自 JSON；派生只读项（`worker_pool_size`、`worker_max_concurrency`）与 `db_version` 由接口附加返回**（不存 JSON）。
 >
-> `runDir` 为**顶层字段**：当前运行目录（`-c` 指定值，未指定默认 `~/.ai-automation`）；**`~` 仅为输入简写，接口返回的 `runDir` / `db_path` / `workspace_root` 一律为已展开、按平台分隔符的绝对路径**（Unix `/home/<user>/.ai-automation`；Windows `C:\Users\<user>\.ai-automation`）。前端直接展示下发的 `db_path` / `workspace_root`；**不自行拼接路径**（如底部信息条展示配置文件位置，可直接用下发的绝对 `runDir` 拼接固定文件名 `ai-automation.json`，仅展示用途）。
+> `runDir` 为**顶层字段**：当前配置目录（`-c` 指定值，未指定默认 `~/.ai-automation`）；**`~` 仅为输入简写，接口返回的 `runDir` / `db_path` / `workspace_root` 一律为已展开、按平台分隔符的绝对路径**（Unix `/home/<user>/.ai-automation`；Windows `C:\Users\<user>\.ai-automation`）。前端直接展示下发的 `db_path` / `workspace_root`；**不自行拼接路径**（如底部信息条展示配置文件位置，可直接用下发的绝对 `runDir` 拼接固定文件名 `ai-automation.json`，仅展示用途）。
 
 **错误响应**：无。
 
@@ -262,7 +256,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
-| (分组.key) | object | 是 | 需更新的 KV 项；**value 必须为 string**（数值 / 布尔 / 枚举一律以字符串承载，如 `"60000"` / `"true"` / `"debug"`），非 string → 400 `VALIDATION_ERROR`；空对象视为不更新 |
+| (分组.key) | object | 是 | 需更新的 KV 项；空对象视为不更新 |
 
 **成功响应 `200 OK`**：返回更新后的全部配置（结构同 GET /api/settings）。
 
@@ -273,33 +267,28 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 | 400 | `VALIDATION_ERROR` | key 不存在、value 非法、超出上限（见下「数值项上限」）；**:warning: 只读项不可修改**——`db_path` / `workspace_root` / `config_version` / `db_version` 被提交时**明确拒绝**（返回 message 指明该项只读），不静默忽略 |
 | 500 | `WRITE_FAILED` | 校验通过、内存已更新，但**原子写回 `ai-automation.json` 失败**（磁盘满 / 权限 / rename 失败）——**回滚内存配置至写回前状态**并返回 500，保证内存与磁盘一致（不产生「内存已改、磁盘未改」的半更新）；前端提示「保存失败，配置未生效」 |
 
-> **与「实体审计字段」的区别（D9，勿混用）**：本项目其它实体的 `PUT` 接口（crud-01 3.1.4 / crud-02 3.2.4 / crud-04 3.4.4）对请求体携带的**实体审计字段**（`clientId` / `createdAtMs` / `updatedAtMs` 等系统生成字段）**一律忽略、不报错**（语义 = 整体替换可编辑字段）；而**配置只读项**（`general.db_path` / `general.workspace_root` / `general.config_version` / `general.db_version`）被提交时**明确拒绝并返回 400 `VALIDATION_ERROR`**。二者语义不同：**实体审计字段 = 忽略；配置只读项 = 400**。
-
 **只读项与版本维护**：
 
 | 项 | 来源 / 维护方 | 说明 |
 |-|-|-|
 | `db_path` / `workspace_root` | 由 `runDir` 推导 | 只读，不可 PUT |
-| `config_version` | **配置模块**维护 | `ai-automation.json` 的**结构版本**（存于 JSON 内）；启动读取时若缺失或低于程序支持版本 → 自动迁移后写回并递增；用户不可改。**迁移失败回退**：① 读取/解析/迁移步骤异常 → **不写回**、原文件先备份为 `ai-automation.json.bak`，按「程序支持版本」内置默认结构加载（保证可启动），`config_version` 保持原值**不递增**，错误记录日志并经 `GET /api/settings` 只读附加返回 `migrate_error`，前端提示「配置迁移失败，已按默认结构加载，原配置已备份」；② 迁移后**写回失败**（磁盘满/权限/rename 失败）→ 内存保持迁移后值、磁盘原文件不动，返回 500 `WRITE_FAILED`，`config_version` 不递增（下次启动重新尝试迁移）。**程序支持版本**判定：内置 `SUPPORTED_CONFIG_VERSION` 常量；仅当 JSON 中 `config_version` 缺失或数值小于该常量时才触发迁移 |
+| `config_version` | **配置模块**维护 | `ai-automation.json` 的**结构版本**（存于 JSON 内）；启动读取时若缺失或低于程序支持版本 → 自动迁移后写回并递增；用户不可改。**迁移失败回退（P6）**：① 读取/解析/迁移步骤异常 → **不写回**、原文件先备份为 `ai-automation.json.bak`，按「程序支持版本」内置默认结构加载（保证可启动），`config_version` 保持原值**不递增**，错误记录日志并经 `GET /api/settings` 只读附加返回 `migrate_error`，前端提示「配置迁移失败，已按默认结构加载，原配置已备份」；② 迁移后**写回失败**（磁盘满/权限/rename 失败）→ 内存保持迁移后值、磁盘原文件不动，返回 500 `WRITE_FAILED`，`config_version` 不递增（下次启动重新尝试迁移）。**程序支持版本**判定：内置 `SUPPORTED_CONFIG_VERSION` 常量；仅当 JSON 中 `config_version` 缺失或数值小于该常量时才触发迁移 |
 | `db_version` | **DB 迁移**维护 | SQLite schema 版本（等价 `PRAGMA user_version`），**不存于 JSON、仅经本接口只读附加返回**；**配置界面不展示**（拍板） |
 
 **数值项上限**：
 
-| 配置项（全路径） | 上限 | 配置项（全路径） | 上限 |
+| 配置项 | 上限 | 配置项 | 上限 |
 |-|-|-|-|
-| `history.job_queue_waiting_max` | 1000（默认 20） | `runner.runner_poll_interval_ms` | 60000 |
-| `history.job_queue_running_max` | 10（**范围 1..10**，默认 10） | `runner.runner_batch_size` | 100 |
-| `general.poll_interval_ms` | 60000 | `scheduler.scheduler_max_jobs` | 1000 |
-| `client.client_import_max_bytes` / `op.op_import_max_bytes` | 104857600（100MB） | `log.log_max_files` | 100 |
-| `workflow.workflow_max_nodes` | 1000 | `engine.max_loop_multiplier` | 10000（**`0` / 未设置不受此上限约束**，仍受 `max×3` 约束） |
-| `history.history_max_per_job` | 1000 | `engine.engine_event_retention_days` | 30 |
-| `history.history_max_total` | 100000 | `history.history_max_age_days` | **180（硬上限）** |
-| `GET /api/workspaces` 的 `limit` | 1000（默认 10） | — | — |
+| `job_queue_waiting_max` | 1000（默认 20） | `runner_poll_interval_ms` | 60000 |
+| `job_queue_running_max` | 10 | `runner_batch_size` | 100 |
+| `poll_interval_ms` | 60000 | `scheduler_max_jobs` | 1000 |
+| `client_import_max_bytes` / `op_import_max_bytes` | 104857600（100MB） | `log_max_files` | 100 |
+| `workflow_max_nodes` | 1000 | `max_loop_multiplier` | 10000（**0 不受此上限约束**：0=不限制） |
+| `history_max_per_job` | 1000 | `engine_event_retention_days` | 30 |
+| `history_max_total` | 100000 | `history_max_age_days` | **180（硬上限）** |
 
 > 未列出的布尔/枚举/字符串项按类型校验（布尔、枚举白名单、非空等）；上限均为**可配置的最大值**，超过即 400 `VALIDATION_ERROR`。
-> **`max_loop_multiplier` 合法取值**：`0` **或** `1..10000`；`0` / 未设置语义为「**不施加绝对上限**」（仍受 `max×3` 约束，**非无限**），**优先于上限**（上限仅约束非零取值）。
-> **`job_queue_running_max` 合法取值**：整数，**范围 `1..10`**（**下限 1**、上限 10，默认 10）；< 1 或 > 10 → 400 `VALIDATION_ERROR`。因**上限 = 默认值**，该配置**只能调小、无法调大**（扩容手段是调小 `workflow_max_nodes` / 拆分 Workflow，见 crud-03 4.4）。
-> **导入体积上限只用两个现有键（不新造键）**：`client_import_max_bytes` **仅**约束 Client YAML 导入；`op_import_max_bytes` 同时约束 OP YAML 导入与 **Workflow / Job ZIP 导入包（解压前）体积**（包内主体为 OP YAML；见 crud-03 3.3.9 / crud-04 3.4.10）。
+> **`max_loop_multiplier` 合法取值**：`0` **或** `1..10000`；`0` 语义为“不限制”，**优先于上限**（上限仅约束非零取值）。
 
 **恢复默认（reset）**：见 3.5 节。
 
@@ -325,19 +314,7 @@ PUT /api/settings ──► 校验 ──► 更新内存 ──┤──► 原
 
 **功能说明**：返回最近使用的工作区路径列表，前端在新建 / 编辑任务与运行历史筛选时快速选择工作区。
 
-**数据来源（D6 定稿）**：取自 `job_runs.workspace` **去重**、按**最近使用**排序（即该工作区**最近一次提交（入队）时间** `created_at_ms` 倒序，**非** `started_at_ms`——后者对 `waiting` 记录为 NULL），取 `limit` 条。SQL（可执行）：
-
-```sql
-SELECT workspace, MAX(created_at_ms) AS last_used
-FROM job_runs
-GROUP BY workspace
-ORDER BY last_used DESC
-LIMIT ?1;
-```
-
-（如需 `keyword` 过滤，追加 `HAVING workspace LIKE '%' || ?2 || '%'`。）**不读取配置或独立的工作区表**——工作区是运行历史的自然后果。
-
-> **时间基准说明**：`last_used` = 该工作区**最近一次入队（提交）时间**，用 `created_at_ms`；crud-05 3.5.1 的列表筛选基准是 `started_at_ms`（「开始执行时刻」）——两者**口径不同**，各按本接口语义使用，不要混用。
+**数据来源（D6 定稿）**：取自 `job_runs.workspace` **去重**（`SELECT DISTINCT workspace FROM job_runs`），按**最近使用**排序（`ORDER BY MAX(created_at_ms) DESC`，即该工作区最近一次运行时间倒序），取 `limit` 条。**不读取配置或独立的工作区表**——工作区是运行历史的自然后果。
 
 **路径参数**：无
 
@@ -345,7 +322,7 @@ LIMIT ?1;
 
 | 参数 | 位置 | 类型 | 必填 | 默认 | 说明 |
 |-|-|-|-|-|-|
-| limit | query | integer | 否 | 10 | 返回条数上限（去重后），**∈ 1..1000**（上限见 3.4「数值项上限」），非法值 → 400 `VALIDATION_ERROR` |
+| limit | query | integer | 否 | 10 | 返回条数上限（去重后） |
 | keyword | query | string | 否 | — | 模糊匹配路径（`workspace LIKE %keyword%`） |
 
 **请求体**：无
@@ -362,18 +339,17 @@ LIMIT ?1;
 
 ## 四、配置项与其它模块联动
 
-| 配置项（全路径） | 消费方 | 生效语义 |
+| 配置项 | 消费方 | 生效语义 |
 |-|-|-|
-| `engine.max_loop_multiplier` | Engine（crud-03 4.3.0） | 回跳执行总次数上限 = `min(max×3, max_loop_multiplier)`；**`0` / 未设置 = 不施加绝对上限（即取 `max×3`），非无限** |
-| `history.job_queue_waiting_max` | 运行历史（crud-04 3.4.6） | 全局 waiting 队列深度上限（默认 20、可调、上限 1000）：`count(*) FROM job_runs WHERE status='waiting'` 达此值即拒新建 |
-| `history.job_queue_running_max` | 运行历史 / Worker | running 状态队列深度上限；派生 Worker 池 |
-| `history.history_max_*` | 运行历史清理任务（后台周期） | 三条件任一超限即清理；**触发机制**：随 `runner.runner_poll_interval_ms` 复用同一常驻轮询线程，每次轮询顺带检查并清理（与 Engine 事件清理 `engine.engine_event_retention_days` 为**同一清理任务**） |
-| `engine.engine_event_retention_days` | Engine 事件清理（同运行历史清理任务） | 成功 run 完成即物理删本 run 事件；失败 run 最终不重试 → **软删 = `engine.engine_event_retention_days` 天（置 `soft_deleted_at_ms`）**、**硬删 = 软删 + 1 天**（默认 1 / 2）。清理对象为 `engine_events` 重放事件（可选 checkpoint 表 `run_node_state` 同生命周期；边状态为内存态、不落库，重启 / 恢复后按「节点状态 + Run 终态」口径重建），不影响 `step_records` 明细 |
-| `workflow.workflow_max_nodes` | Workflow 管理（crud-03 3.3.3/3.3.4/3.3.9）+ WorkerPool 边界估算（crud-03 4.4） | 创建 / 更新 / 导入时校验节点数上限（超出 → 400 `VALIDATION_ERROR`）；另作为单 Run 并行 step 数上界 |
-| `client.client_import_max_bytes` | Client 导入（crud-01 3.1.8） | **Client YAML** 请求体字节数上限，超出 → 400 `VALIDATION_ERROR`；**不用于 ZIP 包** |
-| `op.op_import_max_bytes` | OP 导入（crud-02 3.2.8）**+ Workflow / Job ZIP 导入（crud-03 3.3.9、crud-04 3.4.10）** | **OP YAML** 请求体字节数上限；**同一键兼作 ZIP 导入包（解压前）体积上限**（包内主体为 OP YAML，**沿用现有键、不新造键**），超出 → 400 `VALIDATION_ERROR` |
-| `log.log_level` | 日志管理 | 动态切换 logger 级别 |
-| `log.log_max_files` | 日志滚动器 | 绕接 zip 超限删最旧 |
+| `max_loop_multiplier` | Engine（crud-03 4.3.0） | 执行总次数上限 = `min(max×3, max_loop_multiplier)`，`0`=不限制 |
+| `job_queue_waiting_max` | 运行历史（原 crud-04 3.4.6） | 全局 waiting 队列深度上限（默认 20、可调、上限 1000）：`count(*) FROM job_runs WHERE status='waiting'` 达此值即拒新建 |
+| `job_queue_running_max` | 运行历史 / Worker | running 状态队列深度上限；派生 Worker 池 |
+| `history_max_*` | 运行历史清理任务（后台周期） | 三条件任一超限即清理；**触发机制**：随 `runner_poll_interval_ms` 复用同一常驻轮询线程，每次轮询顺带检查并清理（与 Engine 事件清理 `engine_event_retention_days` 为**同一清理任务**） |
+| `engine_event_retention_days` | Engine 事件清理（同运行历史清理任务） | 成功 run 完成即物理删本 run 事件；失败 run 最终不重试 → 1 天软删（置 `soft_deleted_at_ms`）/ 2 天硬删。清理对象为 `engine_events` 重放事件（可选 checkpoint 表 `run_edge_state` / `run_node_state` 同生命周期），不影响 `step_records` 明细 |
+| `workflow_max_nodes` | Workflow 管理（crud-03 3.3.3/3.3.4/3.3.9）+ WorkerPool 边界估算（crud-03 4.4） | 创建 / 更新 / 导入时校验节点数上限（超出 → 400 `VALIDATION_ERROR`）；另作为单 Run 并行 step 数上界 |
+| `client_import_max_bytes` / `op_import_max_bytes` | Client / OP 导入（crud-01 3.1.8、crud-02 3.2.8） | YAML 请求体字节数上限，超出 → 400 `VALIDATION_ERROR` |
+| `log_level` | 日志管理 | 动态切换 logger 级别 |
+| `log_max_files` | 日志滚动器 | 绕接 zip 超限删最旧 |
 
 ### Worker 队列失败语义（实现约束）
 
@@ -396,4 +372,3 @@ WorkerPool **不设本地滞留队列**（废弃 `worker_queue_depth`）。**任
 | v2.1 | 路径拼接职责统一（一律后端拼接绝对路径下发，前端不拼）；可配置项/派生只读项来源说清；`job_queue_waiting_max` 上限放宽到 1000（默认 20，超出即拒新建，用户可调）；`history_max_age_days` 硬上限 180；`max_loop_multiplier` 合法取值 0 或 1..10000；`db_version` 界面不展示 |
 | v2.2 | **WorkerPool 定稿为 DB 排队**：入队（派发）总是成功、池满不报错（删除 Err(NoIdleWorker)）；等待中的 step 可直接 cancel、running 的不可 cancel；术语「入队/执行失败/DB 错误」分立 |
 | v2.3 | 前端原型（mock / index / workflow / job / client / op）严格对齐 API 结构；bindings 定稿结构化对象（outputName/inputName）、EdgeCondition 定稿字符串枚举；遣词修正：「与并发阈值无关」→「数值派生自同一配置、语义不同」 |
-| v2.4 | `job_queue_running_max` 补**下限 1**（范围 1..10，上限 = 默认值故只能调小）；ZIP 导入包体积上限明确**沿用 `op_import_max_bytes`**（与 `client_import_max_bytes` 关系写清，不新造键）；`GET /api/workspaces` 的「最近使用」时间基准明确为 `created_at_ms`（入队时刻）；补「行内编号对照表」与引用/编号统一约定 |
