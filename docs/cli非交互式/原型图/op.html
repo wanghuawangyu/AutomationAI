@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -246,7 +246,7 @@
           <!-- 超时 -->
           <div class="field" style="max-width:220px">
             <label>超时（秒）</label>
-            <input type="number" id="opTimeout" value="60" />
+            <input type="number" id="opTimeout" value="300" />
             <div class="hint">超时是终止信号，不参与重试</div>
           </div>
 
@@ -277,7 +277,7 @@
           <div class="field" style="margin-top:16px">
             <label id="contentLabel">内容（Prompt）</label>
             <textarea id="contentArea" placeholder="在当前工作区运行测试，并输出结果 JSON">在当前工作区运行测试，并输出结果 JSON</textarea>
-            <div class="hint" id="contentHint">prompt 模板：支持 {{name}} 引用本 OP 入参、{{workspace}} 引用工作区（见 proposal-01 §8.4）</div>
+            <div class="hint" id="contentHint">prompt 模板，支持 {{workspace}}、入参变量等占位符</div>
           </div>
         </div>
 
@@ -695,7 +695,7 @@
       document.getElementById('editorTitleText').textContent = '新建 OP'; document.getElementById('editorName').textContent = ''; document.getElementById('editorVersion').textContent = 'v1';
       document.getElementById('opName').value = '';
       document.getElementById('opDesc').value = '';
-      document.getElementById('opTimeout').value = '60';   // G6：新建时预填默认超时 60（必填，范围 1..86400）
+      document.getElementById('opTimeout').value = '';
       editorVersion = 'v1';
       currentOpName = '';
       currentOpType = 'prompt';
@@ -820,7 +820,7 @@
   var contentMap = {
     prompt: {
       label: '内容（Prompt）',
-      hint: 'prompt 模板：支持 {{name}} 引用本 OP 入参、{{workspace}} 引用工作区（见 proposal-01 §8.4）',
+      hint: 'prompt 模板，支持 {{workspace}}、入参变量等占位符',
       placeholder: '在当前工作区运行测试，并输出结果 JSON'
     },
     bash: {
@@ -878,13 +878,10 @@
     var name = document.getElementById('opName').value.trim();
     if (!name) { alert('请填写 OP 名称'); return; }
     if (name.length > 512) { alert('名称长度不能超过 512 字符'); return; }   // R6-G3：proposal-01:78 —— name ≤ 512 字符（后端同样校验）
-    // G6：超时必填，整数，范围 1..86400（默认 60；0/负数/非整数 → 400 VALIDATION_ERROR）
-    var toRaw = document.getElementById('opTimeout').value; var toSec = Number(toRaw);
-    if (toRaw === '' || !Number.isInteger(toSec) || toSec < 1 || toSec > 86400) { alert('超时必须为 1..86400 之间的整数'); return; }
     var payload = {
       name: name,
       description: document.getElementById('opDesc').value,
-      timeoutSeconds: toSec,   // crud-02：超时为**整数秒**（范围 1..86400，默认 60）
+      timeoutSeconds: parseInt(document.getElementById('opTimeout').value, 10) || 60,   // crud-02：超时为**整数秒**（默认 60）
       type: currentOpType,
       content: document.getElementById('contentArea').value,
       inputs: collectParams('#inputTable', true),
@@ -1086,14 +1083,6 @@
 
   /* ---------- 导入文件选择 ---------- */
   var importFileText = '';   // R6-G2：所选 YAML 的**文本内容**（直接作为 POST /api/ops/import 的 yaml 字段提交）
-  /* 二.17（P3）：导入体积上限统一经 GET /api/settings 读取（与 index.html 口径一致，页面**不直读 mock 全局 SETTINGS**，
-     避免真实后端下退化为常量）；接口未返回前用常量兜底（与 op.op_import_max_bytes 默认值 1 MiB 一致）。 */
-  var DEFAULT_OP_IMPORT_MAX_BYTES = 1048576;
-  var OP_IMPORT_MAX_BYTES = DEFAULT_OP_IMPORT_MAX_BYTES;
-  mockFetch('/api/settings').then(function (s) {
-    var v = parseInt(((s || {}).op || {}).op_import_max_bytes, 10);
-    if (v > 0) OP_IMPORT_MAX_BYTES = v;
-  });
   function openImportModal() {
     importFileText = '';
     document.getElementById('importFileName').textContent = '未选择文件';
@@ -1114,9 +1103,8 @@
     var tree = document.getElementById('importTree');
     tree.style.display = 'block';
     /* R6-G2：crud-02 3.2.8 的请求体 { yaml } 为 YAML 文本内容，故必须把所选文件的文本读出来再提交；
-       超过 op.op_import_max_bytes（crud-06 3.3 配置项）→ 提示并保持禁用。 */
-    /* 二.17（P3）：大小上限取 OP_IMPORT_MAX_BYTES（页面启动时经 GET /api/settings 缓存），超限 → 提示并保持禁用。 */
-    var maxBytes = OP_IMPORT_MAX_BYTES;
+       超过 op.op_import_max_bytes（crud-06 上限，与 mock 的 SETTING_LIMITS 同一份来源）→ 提示并保持禁用。 */
+    var maxBytes = (typeof SETTING_LIMITS !== 'undefined' && SETTING_LIMITS['op.op_import_max_bytes']) || 104857600;
     if (file.size > maxBytes) {
       tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）\n超过上限 op_import_max_bytes（' + maxBytes + ' 字节）';
       alert('导入失败：文件大小 ' + file.size + ' 字节，超过上限 op_import_max_bytes（' + maxBytes + ' 字节）');

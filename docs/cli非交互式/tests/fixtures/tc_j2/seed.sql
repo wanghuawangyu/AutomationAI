@@ -20,7 +20,7 @@ CREATE TEMP TABLE IF NOT EXISTS _now AS SELECT CAST(strftime('%s','now') AS INTE
 
 -- ------------------------------------------------------------
 -- 3 条 failed job_runs
---   数据集行 4 job_log_scan (6m前) / 数据集行 8 job_cleanup (12m前) / 数据集行 10 job_report (24m前)
+--   #4 job_log_scan (6m前) / #8 job_cleanup (12m前) / #10 job_report (24m前)
 -- ------------------------------------------------------------
 INSERT INTO job_runs
 (run_id, job_id, job_kind, job_version, triggered_by,
@@ -84,11 +84,3 @@ INSERT INTO step_records
 SELECT 'rec-tc-j2-03','run-tc-j2-03','step-tc-j2-03',1,1,o.op_id,o.version,o.name,'job','failed','{}',
        (SELECT ms FROM _now)-1440000, (SELECT ms FROM _now)-1440000+3800, 3800
 FROM ops o WHERE o.name='op_always_fail';
-
--- ------------------------------------------------------------
--- 行数自检（机械门禁可读：期望 job_runs=3 / step_records=3）
---   若前置 Job（job_log_scan / job_cleanup / job_report）未建，上面的
---   INSERT ... SELECT 会静默 0 行；本 SELECT 使门禁可判「注入是否真的发生」。
--- ------------------------------------------------------------
-SELECT 'tc_j2_seed_check: job_runs=' || (SELECT count(*) FROM job_runs WHERE run_id LIKE 'run-tc-j2-%')
-       || ' step_records=' || (SELECT count(*) FROM step_records WHERE record_id LIKE 'rec-tc-j2-%') AS tc_j2_seed_check;

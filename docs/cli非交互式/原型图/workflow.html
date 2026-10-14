@@ -125,7 +125,7 @@
   .param-table .pt-row input,.param-table .pt-row select{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:12.5px;outline:none;background:#fbfbfd}
   .param-table .pt-row input:focus,.param-table .pt-row select:focus{border-color:#b9cbfb;background:#fff}
   .pt-in{grid-template-columns:1.1fr .8fr .7fr 1fr 1.6fr 34px}
-  .pt-out{grid-template-columns:1.1fr 1.3fr 1fr 1.3fr 34px}
+  .pt-out{grid-template-columns:1fr 1.6fr 1.4fr 34px}
   .pt-del{width:26px;height:26px;border:0;background:#fff;color:#c3c8d0;border-radius:5px;cursor:pointer;font-size:15px;line-height:1}
   .pt-del:hover{background:#fdf2f2;color:var(--failed)}
 
@@ -557,8 +557,8 @@
         <input type="text" id="exportFileName" value="workflow-deploy_workflow-v2.zip" />
       </div>
       <div class="tree" id="exportTree">workflow-deploy_workflow-v2.zip
-├── workflow.yaml
 ├── manifest.json
+├── workflow.yaml
 └── ops/
     ├── check_tests.yaml
     ├── review.yaml
@@ -645,19 +645,6 @@
       }
     });
     return nodes;
-  }
-
-  /* D5：按 OP 类型过滤 Client（复用 op.html 的 clientsForType 思路，映射见 proposal-01 §8.3） */
-  function clientsForOpType(type) {
-    return (CLIENTS || []).filter(function (c) { return c.type === type; });
-  }
-  /* D3：该 OP 类型下 createdAtMs 最早的匹配 Client（无则 null）——拖拽创建节点时默认选中 */
-  function defaultClientIdForOp(opDef) {
-    if (!opDef) return null;
-    var list = clientsForOpType(opDef.type).slice().sort(function (a, b) {
-      return Number(a.createdAtMs || 0) - Number(b.createdAtMs || 0);
-    });
-    return list.length ? list[0].clientId : null;
   }
 
   function buildEdgesFromWf(wfName) {
@@ -1090,8 +1077,7 @@
     var outputTable = document.getElementById('wfOutputTable');
 
     var inputHead = '<div class="pt-head pt-in"><span>name</span><span>type</span><span>required</span><span>default</span><span>description</span><span></span></div>';
-    // 二.1（G13 / P2 采纳 A）：from 改为**双下拉**（节点 × 该节点出参），不再要求用户手输 workflowNodeId.outputName
-    var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from（节点）</span><span>from（出参）</span><span>description</span><span></span></div>';
+    var outputHead = '<div class="pt-head pt-out"><span>name</span><span>from (workflowNodeId.outputName)</span><span>description</span><span></span></div>';
 
     if (isNew || !wf) {
       // 新建：入参 / 出参均为空（proposal-01 §10.9 新建默认值）
@@ -1119,52 +1105,18 @@
     inputTable.innerHTML = inputHtml;
 
     var outputHtml = outputHead;
-    var wfNodes = wf.nodes || [];
     (wf.outputs || []).forEach(function (o) {
-      outputHtml += wfOutputRowHtml(o, wfNodes);
+      var fromVal = o.from ? ((o.from.workflowNodeId || '') + '.' + (o.from.outputName || '')) : '';
+      outputHtml +=
+        '<div class="pt-row pt-out">' +
+          '<input type="text" value="' + escapeAttr(o.name || '') + '" />' +
+          '<input type="text" value="' + escapeAttr(fromVal) + '" placeholder="workflowNodeId.outputName" />' +
+          '<input type="text" value="' + escapeAttr(o.description || '') + '" placeholder="description" />' +
+          '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
+        '</div>';
     });
     if (!(wf.outputs || []).length) outputHtml += '<div class="pt-empty">无出参</div>';
     outputTable.innerHTML = outputHtml;
-  }
-
-  /* 二.1（G13 / P2 采纳 A）：出参行 = name + 节点下拉 + 出参下拉 + description。
-     节点下拉 option 文案 =「{节点画布名} · {OP 名}」，出参下拉随所选节点动态重建，整体读作「节点 · OP · 出参」（proposal-01 §10.11） */
-  function wfNodeOptionLabel(n) {
-    var def = OP_BY_ID[n.opId];
-    return (n.label || n.workflowNodeId) + (def ? ' · ' + def.name : '');
-  }
-  function wfNodeFromOptions(selectedId, nodes) {
-    return '<option value="">— 选择节点 —</option>' + (nodes || []).filter(function (n) { return n.kind === 'op'; }).map(function (n) {
-      return '<option value="' + escText(n.workflowNodeId) + '"' + (n.workflowNodeId === selectedId ? ' selected' : '') + '>' + escText(wfNodeOptionLabel(n)) + '</option>';
-    }).join('');
-  }
-  function wfOutputNameOptions(nodeId, selectedName, nodes) {
-    var node = null;
-    (nodes || []).forEach(function (x) { if (x.workflowNodeId === nodeId) node = x; });
-    var def = node ? OP_BY_ID[node.opId] : null;
-    if (!def) return '<option value="">— 选择出参 —</option>';
-    return '<option value="">— 选择出参 —</option>' + (def.outputs || []).map(function (o) {
-      return '<option value="' + escText(o.name) + '"' + (o.name === selectedName ? ' selected' : '') + '>' + escText(o.name) + '</option>';
-    }).join('');
-  }
-  function wfOutputRowHtml(o, nodes) {
-    var from = (o && o.from) || {};
-    return '<div class="pt-row pt-out">' +
-      '<input type="text" value="' + escapeAttr(o && o.name || '') + '" />' +
-      '<select onchange="onWfOutputNodeChange(this)">' + wfNodeFromOptions(from.workflowNodeId || '', nodes) + '</select>' +
-      '<select>' + wfOutputNameOptions(from.workflowNodeId || '', from.outputName || '', nodes) + '</select>' +
-      '<input type="text" value="' + escapeAttr(o && o.description || '') + '" placeholder="description" />' +
-      '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>' +
-    '</div>';
-  }
-  /* 节点下拉变更：按该节点的 OP 出参重建同一行的出参下拉（节点与出参须成对，不得交叉） */
-  function onWfOutputNodeChange(sel) {
-    var ns = curNodes();
-    var nodes = Object.keys(ns).map(function (id) { return ns[id]; });
-    var row = sel.closest('.pt-row');
-    if (!row) return;
-    var outSel = row.querySelectorAll('select')[1];
-    if (outSel) outSel.innerHTML = wfOutputNameOptions(sel.value || '', '', nodes);
   }
 
   function addWorkflowInput() {
@@ -1185,9 +1137,11 @@
     var table = document.getElementById('wfOutputTable');
     var row = document.createElement('div');
     row.className = 'pt-row pt-out';
-    var ns = curNodes();
-    var nodes = Object.keys(ns).map(function (id) { return ns[id]; });
-    row.innerHTML = wfOutputRowHtml({}, nodes);
+    row.innerHTML =
+      '<input type="text" placeholder="name" />' +
+      '<input type="text" placeholder="workflowNodeId.outputName" />' +
+      '<input type="text" placeholder="description" />' +
+      '<button class="pt-del" onclick="this.closest(\'.pt-row\').remove()">✕</button>';
     table.appendChild(row);
   }
 
@@ -1331,10 +1285,10 @@
 
   function createNode(op, x, y) {
     var id = genNodeId();
-    /* D4：bindings 为结构化对象（API 结构）——按 OP 入参名建 **unbound** 槽（未绑定 = 无来源） */
+    /* bindings：结构化对象（API 结构）——按 OP 入参名建空槽 */
     var bindings = {};
     (op.inputs || []).forEach(function (inp) {
-      bindings[inp.name] = { kind: 'unbound' };
+      bindings[inp.name] = { kind: 'literal', value: '' };
     });
 
     curNodes()[id] = {
@@ -1343,7 +1297,7 @@
       kind: 'op',
       opId: op.opId,
       opVersion: op.version,
-      clientId: defaultClientIdForOp(op),   // D3：默认选中该 OP 类型下 createdAtMs 最早的匹配 Client
+      clientId: null,
       bindings: bindings,
       retry: null,
       outdated: false,
@@ -1483,19 +1437,15 @@
               ' · OP 最新: v' + opLatestVer + '</span></div>';
     }
 
-    /* Client（D5：仅列出与该节点 OP 类型匹配的 Client；value = clientId，label = name） */
+    /* Client（value = clientId，label = name） */
     html += '<div class="panel-section" style="margin-top:16px">';
-    html += '<label class="ps-label">Client<span class="required">*</span></label>';
+    html += '<label class="ps-label">Client</label>';
     html += '<select class="ps-select" onchange="setNodeClient(this.value)">';
-    html += '<option value="">— 未指定（创建时默认选中类型匹配的 Client）—</option>';
-    var clientOpts = opDef ? clientsForOpType(opDef.type) : [];
-    clientOpts.forEach(function (c) {
+    html += '<option value="">— 未指定（执行时回退 Job.target.clientId） —</option>';
+    CLIENTS.forEach(function (c) {
       html += '<option value="' + escText(c.clientId) + '"' + (draft.clientId === c.clientId ? ' selected' : '') + '>' + escText(c.name) + '</option>';
     });
     html += '</select>';
-    if (opDef && !clientOpts.length) {
-      html += '<div class="panel-hint">请先在 Client 管理中创建 ' + escText(opDef.type) + ' 类型的 Client</div>';
-    }
     html += '</div>';
 
     /* 参数绑定（结构化对象：{ "<paramName>": {kind, workflowNodeId?, outputName?, inputName?, value?} }） */
@@ -1506,20 +1456,12 @@
       html += '<div class="panel-hint">该节点无入参</div>';
     } else {
       bindNames.forEach(function (pname) {
-        var b = draft.bindings[pname] || { kind: 'unbound' };
+        var b = draft.bindings[pname] || { kind: 'literal', value: '' };
         var pn = escText(pname);     // R6-S1：参数名允许任意 UTF-8 字符 → 文本/属性一律转义
         var pj = escJsStr(pname);    // 内联处理器中的字符串字面量
         html += '<div class="binding-item">';
         html += '<div class="bi-name">' + pn + '</div>';
         html += '<div class="bi-opts">';
-
-        /* 未绑定（D4：拖拽创建的初始态；无来源） */
-        html += '<label class="bi-opt">' +
-                  '<input type="radio" name="bk_' + pn + '"' + ((!b.kind || b.kind === 'unbound') ? ' checked' : '') +
-                  ' onchange="setBindingKind(\'' + pj + '\',\'unbound\')" />' +
-                  '<span>未绑定</span>' +
-                  '<span class="bi-field"></span>' +
-                '</label>';
 
         /* 前置节点出参 */
         html += '<label class="bi-opt">' +
@@ -1595,11 +1537,9 @@
   function buildNodeOutputOptions(currentId, binding) {
     var html = '<option value="">— 选择 —</option>';
     var nodes = curNodes();
-    /* D4：只列「从 Start 可达且位于当前节点之前」的节点出参（前置节点 = 反向可达集） */
-    var predIds = wfPredecessorIds(currentId);
 
     Object.keys(nodes).forEach(function (nid) {
-      if (!predIds[nid]) return;   // 仅前置节点
+      if (nid === currentId) return;
       var n = nodes[nid];
       if (n.kind !== 'op') return;
       var def = OP_BY_ID[n.opId];
@@ -1612,37 +1552,6 @@
     });
 
     return html;
-  }
-
-  /* D4 / M1 / M2（二.6 采纳 (a)）：当前节点的前置节点集合 =
-     沿入边反向可达 ∩ 从 Start 可达 ∩ 非「从当前节点正向可达」（允许环下经回跳边与当前节点互达的下游不算前置）；不含自身 */
-  function wfPredecessorIds(nodeId) {
-    var nodes = curNodes(), edges = curEdges();
-    var rev = {}, adj = {};
-    Object.keys(nodes).forEach(function (id) { rev[id] = []; adj[id] = []; });
-    edges.forEach(function (e) {
-      if (rev[e.from] === undefined || rev[e.to] === undefined) return;
-      rev[e.to].push(e.from);
-      adj[e.from].push(e.to);
-    });
-    var reach = function (root, g) {
-      var seen = {}, stack = [root];
-      while (stack.length) {
-        var cur = stack.pop();
-        if (seen[cur]) continue;
-        seen[cur] = true;
-        (g[cur] || []).forEach(function (t) { if (!seen[t]) stack.push(t); });
-      }
-      return seen;
-    };
-    var startId = null;
-    Object.keys(nodes).forEach(function (id) { if (nodes[id].kind === 'start') startId = id; });
-    var fromStart = startId ? reach(startId, adj) : {};
-    var back = reach(nodeId, rev);
-    var fwd = reach(nodeId, adj);
-    Object.keys(back).forEach(function (p) { if (!fromStart[p] || fwd[p]) delete back[p]; });
-    delete back[nodeId];
-    return back;
   }
 
   function buildWorkflowInputOptions(binding) {
@@ -1667,8 +1576,6 @@
       editingDraft.bindings[pname] = { kind: 'node_output', workflowNodeId: b.workflowNodeId || '', outputName: b.outputName || '' };
     } else if (kind === 'workflow_input') {
       editingDraft.bindings[pname] = { kind: 'workflow_input', inputName: b.inputName || '' };
-    } else if (kind === 'unbound') {
-      editingDraft.bindings[pname] = { kind: 'unbound' };
     } else {
       editingDraft.bindings[pname] = { kind: 'literal', value: b.value || '' };
     }
@@ -1769,14 +1676,9 @@
     if (input) input.value = value;
   }
 
-  /* ==================== 校验（R6-G1 / D8） ====================
-     crud-03 3.3.6 `POST /api/workflows/{workflowId}/validate` → `{valid, errors}`；规则集见 proposal-01 §10.14。
-     **定位（P-2 / 二.7）**：本面板 `WF_CHECK_RULES` **仅作演示**，**不作为校验规格基线**；规格一律以
-     `proposal-01 §10.14`（界面可见 13 项）+ `crud-03 §3.3「校验规则」`（完整 17 条）为准 —— 本面板 = `§10.14` 的
-     **13 项**（含规则 18「出参来源必须有效」）；`crud-03` 另有的 A 组规则 9（opId + opVersion）/ 16（Start 无
-     on_failure 出边）不在界面可见项内，仅由 `mock-data.js` 的校验内核判定。
-     D8：不做「无环」判定（允许环路）；D3/D5/D4：新增 client / client_type / binding_pred 三条规则。
-     弹窗标题取当前 Workflow 名，检查项按接口返回逐条渲染（valid=false 时 ✗ 并附接口文案）。 */
+  /* ==================== 校验（R6-G1） ====================
+     crud-03 3.3.6 `POST /api/workflows/{workflowId}/validate` → `{valid, errors}`；规则集与失败文案见 proposal-01-界面设计.md §10.14
+     （**11 条规则** / **8 条失败提示**）。弹窗标题取当前 Workflow 名，检查项按接口返回逐条渲染（valid=false 时 ✗ 并附接口文案）。 */
   var WF_CHECK_RULES = [
     { key: 'start',     text: '有且仅有一个 Start 节点' },
     { key: 'end',       text: '有且仅有一个 End 节点' },
@@ -1786,14 +1688,12 @@
     { key: 'end_in',    text: 'End 节点至少一条入边' },
     { key: 'reach',     text: '所有 OP 节点从 Start 可达' },
     { key: 'toward',    text: '所有 OP 节点能到达 End' },
-    { key: 'client',      text: '所有 OP 节点必须指定 Client' },
-    { key: 'client_type', text: 'Client 类型必须与 OP 类型匹配' },   // L-8：见 proposal-01 §10.14 第 10 行 / crud-03 规则 11；类型不匹配返回 400 CLIENT_TYPE_MISMATCH
-    { key: 'binding_pred', text: '参数绑定必须指向前置节点' },   // m3/L-2：与 §10.14 第 11 行对齐
-    { key: 'required',  text: '所有 required 入参必须有来源' },   // 与 §10.14 第 12 行对齐
-    { key: 'output_from', text: '出参来源必须有效' }   // 二.7 / S-1：crud-03 规则 18（proposal-01 §10.14 第 13 行）
+    { key: 'acyclic',   text: 'DAG 无环（循环回跳除外）' },
+    { key: 'required',  text: '所有 required 入参必须有来源' },
+    { key: 'converge',  text: '有多条入边的节点必须有明确汇聚' }
   ];
 
-  /* 接口 errors 文案 → 规则 key（proposal-01 §10.14 的 13 项；未命中的 errors 作为附加条目列出） */
+  /* 接口 errors 文案 → 规则 key（§10.14 的 8 条失败文案 + 其余 3 条规则的补充文案） */
   function wfErrRuleKey(msg) {
     var m = String(msg || '');
     if (m.indexOf('从 Start 不可达') >= 0) return 'reach';
@@ -1804,16 +1704,14 @@
     if (m.indexOf('End 节点至少需要一条入边') >= 0) return 'end_in';
     if (m.indexOf('缺少 Start') >= 0 || m.indexOf('只能有一个 Start') >= 0) return 'start';
     if (m.indexOf('缺少 End') >= 0 || m.indexOf('只能有一个 End') >= 0) return 'end';
-    if (m.indexOf('必须指定 Client') >= 0) return 'client';
-    if (m.indexOf('类型不匹配') >= 0) return 'client_type';
-    if (m.indexOf('出参') >= 0 && m.indexOf('来源') >= 0) return 'output_from';   // 二.7 / S-1：crud-03 规则 18 的两条文案
-    if (m.indexOf('前置节点') >= 0) return 'binding_pred';
+    if (m.indexOf('环') >= 0) return 'acyclic';
+    if (m.indexOf('汇聚') >= 0) return 'converge';
     if (m.indexOf('没有来源') >= 0 || m.indexOf('缺少来源') >= 0) return 'required';
     return '';
   }
 
-  /* 渲染校验结果：逐条渲染 **13 项**规则；接口判失败的规则置 ✗ 并附接口文案，其余 ✓；
-     不在 **13 项**内的 errors（如「引用的 OP 不存在」）作为附加条目列出，不丢信息。 */
+  /* 渲染校验结果：逐条渲染 11 条规则；接口判失败的规则置 ✗ 并附接口文案，其余 ✓；
+     不在 11 条内的 errors（如「引用的 OP 不存在」）作为附加条目列出，不丢信息。 */
   function renderValidateResult(wfName, res, notice) {
     var errors = (res && res.errors) || [];
     document.getElementById('validateWfName').textContent = wfName;
@@ -1842,7 +1740,7 @@
   }
 
   /* 调用校验接口（crud-03 3.3.6）：opts.alwaysShow = 校验通过也弹窗（[校验] 按钮）；
-     opts.failNotice = 校验未通过时的提示语（仅 [校验] 按钮与 [执行] 前调用；保存不调用，见 D2）；opts.onValid = 通过后的后续动作。 */
+     opts.failNotice = 校验未通过时的提示语（保存 / 执行前调用 → 阻止后续动作）；opts.onValid = 通过后的后续动作。 */
   function runWorkflowValidate(wfName, opts) {
     opts = opts || {};
     var wf = WORKFLOW_BY_NAME[wfName];
@@ -1926,7 +1824,7 @@
     }
     // R6-G1：执行前调用校验接口（crud-03 3.3.6「前端在保存或执行前调用」）——拓扑不合法则取消执行
     runWorkflowValidate(name, {
-      failNotice: '拓扑不合法，无法执行',   // L6/P4-A：与 proposal-01 §10.9 指定的前端提示逐字一致
+      failNotice: '校验未通过，已取消执行（请先修复上述拓扑错误）',
       onFail: function () { closeModal('confirmModal'); },
       onValid: submit
     });
@@ -1986,29 +1884,12 @@
         refreshWorkflowList();   // 保存后重新拉取列表（新建的 Workflow 才会出现在列表里）
       });
     };
-    // D2：保存不要求拓扑校验通过（允许保存草稿）；仅做 **节点字段级** 必填校验（D3/D5：OP 节点必须指定 Client 且类型匹配）
-    var nodeClientErr = firstNodeClientError();
-    if (nodeClientErr) { alert(nodeClientErr); return; }
-    submit();
-  }
-
-  /* D3/D5：保存前的节点字段级校验（对当前画布节点）：返回首个错误文案或 '' */
-  function firstNodeClientError() {
-    var ns = curNodes();
-    var ids = Object.keys(ns);
-    for (var i = 0; i < ids.length; i++) {
-      var n = ns[ids[i]];
-      if (!n || n.kind !== 'op') continue;
-      if (!n.clientId) return 'OP 节点必须指定 Client（节点 ' + (n.label || n.workflowNodeId) + '）';   // m7：与 mock 后端同口径（带节点标识）
-      var opDef = OP_BY_ID[n.opId];
-      if (opDef) {
-        var cl = CLIENT_BY_ID[n.clientId];
-        if (cl && cl.type !== opDef.type) {
-          return 'Client 类型与 OP 类型不匹配：OP ' + opDef.name + ' 为 ' + opDef.type + '，Client ' + cl.name + ' 为 ' + cl.type;
-        }
-      }
+    // R6-G1：保存前调用校验接口（crud-03 3.3.6「前端在保存或执行前调用，以提示拓扑错误」）——拓扑不合法则取消保存
+    if (existing) {
+      runWorkflowValidate(currentWf, { failNotice: '校验未通过，已取消保存（请先修复上述拓扑错误）', onValid: submit });
+      return;
     }
-    return '';
+    submit();
   }
 
   /* 从工作流入参 / 出参表格收集参数（行结构与 OP 编辑器一致）
@@ -2022,11 +1903,11 @@
       if (isInput) {
         out.push({ name: name, type: cells[1].value, required: cells[2].value === '是', default: cells[3].value || null, description: cells[4].value });
       } else {
-        // 二.1：出参来源由双下拉收集（节点 + 出参），存储仍为 workflowNodeId.outputName
+        var parts = String(cells[1].value || '').split('.');
         out.push({
           name: name,
-          from: { workflowNodeId: cells[1].value || '', outputName: cells[2].value || '' },
-          description: cells[3].value
+          from: { workflowNodeId: parts[0] || '', outputName: parts[1] || '' },
+          description: cells[2].value
         });
       }
     });
@@ -2067,25 +1948,15 @@
     exportTargetName = name;
     exportTargetVersion = version;
     document.getElementById('exportFileName').value = 'workflow-' + name + '-' + version + '.zip';   // D4：默认名带 workflow- 前缀（crud-03 3.3.8）
-    // L10 / m8：ZIP 成员顺序 = workflow.yaml → manifest.json → ops/（不再排在 manifest 之后）；
-    // ops/ 成员由该 Workflow 节点引用的 OP 动态生成（不再硬编码为 deploy_workflow 的成员）
-    var opNames = [];
-    var expWf = WORKFLOW_BY_NAME[name];
-    ((expWf && expWf.nodes) || []).forEach(function (n) {
-      if (n.kind !== 'op') return;
-      var def = OP_BY_ID[n.opId];
-      var nm = def ? def.name : null;
-      if (nm && opNames.indexOf(nm) < 0) opNames.push(nm);
-    });
-    var tree = 'workflow-' + name + '-' + version + '.zip\n' +
+    document.getElementById('exportTree').textContent =
+      'workflow-' + name + '-' + version + '.zip\n' +
+      '├── manifest.json\n' +
       '├── workflow.yaml\n' +
-      '├── manifest.json\n';
-    if (opNames.length) {
-      tree += '└── ops/\n' + opNames.map(function (nm, i) {
-        return '    ' + (i === opNames.length - 1 ? '└── ' : '├── ') + nm + '.yaml';
-      }).join('\n');
-    }
-    document.getElementById('exportTree').textContent = tree;
+      '└── ops/\n' +
+      '    ├── check_tests.yaml\n' +
+      '    ├── review.yaml\n' +
+      '    ├── deploy.yaml\n' +
+      '    └── notify.yaml';
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');

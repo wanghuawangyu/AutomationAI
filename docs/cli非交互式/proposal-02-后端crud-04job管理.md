@@ -32,7 +32,6 @@
   "kind": "persistent",
   "version": 1,
   "target": {"kind":"workflow","workflowId":"...","workflowVersion":1},
-  "targetName": "deploy_workflow",
   "workspace": "/path/ws-003",
   "inputs": {"env": "prod"},
   "trigger": {"kind":"schedule","cron":"0 * * * *"},
@@ -221,18 +220,12 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、target 非法、target=op 缺 target.clientId、trigger 缺失/非法、**workspace 缺失/空** |
-| 400 | `CLIENT_TYPE_MISMATCH` | **target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（如 op 为 bash 类型却指定了 prompt 类 Client；bash/python/powershell/prompt 须同类对应，与 crud-02 3.2.6 同一校验口径）；`message` 固定为：`Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>` |
+| 400 | `CLIENT_TYPE_MISMATCH` | **target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（如 op 为 bash 类型却指定了 prompt 类 Client；bash/python/powershell/prompt 须同类对应，与 crud-02 3.2.6 同一校验口径） |
 | 400 | `CRON_INVALID` | cron 表达式非法（`trigger.kind=schedule` 时） |
 | 404 | `OP_NOT_FOUND` / `WORKFLOW_NOT_FOUND` / `CLIENT_NOT_FOUND` | target 引用的 OP / Workflow 不存在，或 target=op 时 target.clientId 引用的 Client 不存在 |
 | 409 | `JOB_NAME_EXISTS` | name 已存在 |
 
 > 说明：请求体 `enabled` 可省略，**默认 `true`**（schedule 类 Job 创建即启用）；manual Job 的 `enabled` 恒视为 `true`（不参与运行判断，见 3.4.6）。
-
-> **校验顺序（创建侧；显式列表，D12 体例：字段级缺失优先 → 语义 / 一致性）**：
-> ① **字段级缺失 / 非法**（返回首个命中）→ 400 `VALIDATION_ERROR`：`name` 为空或超 512 字符、`target` 缺失 / `kind` 非法、target=op 缺 `target.clientId`、`trigger` 缺失 / `kind` 非法、`workspace` 缺失 / 空；
-> ② **语义 / 一致性**（按序）：`trigger.kind=schedule` 且 cron 非法 → 400 `CRON_INVALID`；target 引用的 OP / Workflow /（target=op 时）Client 不存在 → 404；target=op 时 Client 类型与目标 OP 类型不匹配 → 400 `CLIENT_TYPE_MISMATCH`；`inputs` 键名不匹配 target 参数定义 → 400 `VALIDATION_ERROR`；`name` 唯一性 → 409 `JOB_NAME_EXISTS`。
-
-> 字段级缺失优先于语义判定，与导入侧 3.4.10「导入校验顺序」同体例。
 
 ---
 
@@ -248,8 +241,6 @@
 
 > **全量替换语义**：PUT 为**全量替换**——`job` 为完整定义，未提供的可选字段按默认值 / 清空处理（不做部分字段合并）；前端部分修改需先取详情再整体提交。
 
-> **审计字段规则（D9）**：请求体若携带 `jobId` / `createdAtMs` / `updatedAtMs`（系统生成字段），后端**一律忽略（不报错）**——PUT 语义为「整体替换可编辑字段」。（与 crud-06 配置接口的**只读项**不同：配置只读项被**显式拒绝**（400）；实体审计字段仅忽略。）
-
 **成功响应 `200 OK`**：返回更新后的 Job 对象。
 
 **错误响应**：
@@ -257,14 +248,10 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | 请求体字段非法（含 `workspace` 缺失/空——PUT 为全量替换，与 3.4.3 同口径） |
-| 400 | `CLIENT_TYPE_MISMATCH` | **更新后 target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（同一校验口径见 3.4.3）；`message` 固定为：`Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>` |
+| 400 | `CLIENT_TYPE_MISMATCH` | **更新后 target=op 时 target.clientId 引用的 Client 类型与目标 OP 类型不匹配**（同一校验口径见 3.4.3） |
 | 400 | `CRON_INVALID` | cron 表达式非法（`trigger.kind=schedule` 时） |
 | 404 | `JOB_NOT_FOUND` / `OP_NOT_FOUND` / `WORKFLOW_NOT_FOUND` / `CLIENT_NOT_FOUND` | jobId 不存在，或更新后 target 引用的 OP / Workflow / Client 不存在 |
 | 409 | `JOB_NAME_EXISTS` | name 与其他 Job 冲突 |
-
-> **校验顺序（更新侧；显式列表，D12 体例：字段级缺失优先 → 语义 / 一致性）**：
-> ① **字段级缺失 / 非法** → 400 `VALIDATION_ERROR`：`job` 缺失 / 字段非法（含 `workspace` 缺失 / 空——PUT 全量替换，与 3.4.3 同口径）、`target` 缺失 / `kind` 非法、target=op 缺 `target.clientId`、`trigger` 缺失 / 非法；
-> ② **语义 / 一致性**（按序）：`trigger.kind=schedule` 且 cron 非法 → 400 `CRON_INVALID`；更新后 target 引用的 OP / Workflow / Client 不存在 → 404；target=op 时 Client 类型与目标 OP 类型不匹配 → 400 `CLIENT_TYPE_MISMATCH`；`name` 与其他 Job 冲突 → 409 `JOB_NAME_EXISTS`。
 
 ---
 
@@ -274,7 +261,7 @@
 
 - **有在途运行时拒绝删除**：若该 Job 存在 `waiting` / `running` / `terminating` 的 JobRun → **409 `JOB_HAS_ACTIVE_RUNS`**（防悬挂；`terminating` 仍在途——已提交终止、等待在跑 OP 收敛，仍占并发名额，见 crud-05 4.6；需先终止完成/等待终态后删除）。
 - **历史保留与展示**：已终态的 `job_runs` 随 Job 删除**保留**（`job_id` 作快照引用，不再是强外键，见 `schema.sql`）；运行历史用 Run 自身的**名称快照 `name`**（persistent = 时任 jobs.name）展示 Job 名称，不依赖 `jobs` 表；已删 Job 的 Run **可查看详情**但**不可跳转到 Job 定义**，[重跑] 需 target（op/workflow）仍存在（否则 404 `TARGET_NOT_FOUND`），[重试] 仅依赖 target=workflow 及五条件（Job 已删则不检查 Job.needsUpdate，视为 false）。
-- **删除的原子性（约定-删除原子性）**：并发检查（count waiting/running/terminating）与删除在**同一事务（`BEGIN IMMEDIATE`）**内执行（先查后删）；与创建侧对称，防「检查通过后、Run 才插入」产生悬挂 Run。
+- **删除的原子性（#5）**：并发检查（count waiting/running/terminating）与删除在**同一事务（`BEGIN IMMEDIATE`）**内执行（先查后删）；与创建侧对称，防「检查通过后、Run 才插入」产生悬挂 Run。
 - **重试的「五条件」摘要**（详见 proposal-01 §12.8.2 / crud-05 4.8）：① target=Workflow；② Run 已结束且**存在失败/超时 step**（failed / timeout / cancelled 均可）；③ 版本一致（Run 快照版本 = 当前版本）；④ Workflow.needsUpdate=false；⑤ Job.needsUpdate=false（Job 已删 → 视为 false）。**waiting / running / terminating 不可重试**。
 
 **路径参数**：`jobId`（32 位 UUID，必填）
@@ -314,11 +301,13 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | jobId 格式非法；**target=Workflow 时创建 Run 前定义完整性校验不通过**（crud-03 3.3 分组 A + 分组 B，共 15 条可判定规则，见 crud-03 4.4「创建 Run 前校验」） |
+| 400 | `VALIDATION_ERROR` | jobId 格式非法 |
 | 400 | `CLIENT_TYPE_MISMATCH` | **target=op 时 target.clientId 当前引用的 Client 类型与目标 OP 类型不匹配**（Client 可被编辑更换类型，故运行时仍须校验；同一校验口径见 3.4.3） |
 | 404 | `JOB_NOT_FOUND` | jobId 不存在 |
 | 409 | `JOB_NEEDS_UPDATE` | needsUpdate=true，需更新后才能运行 |
-| 409 | `CONCURRENCY_CONFLICT` | 并发策略 skip 且已有 waiting/running/terminating 实例；或队列深度达上限（**queue / parallel 均适用**：全局 waiting 计数 ≥ `job_queue_waiting_max`，见 3.4.6.1「适用范围（全入口生效）」） |
+| 409 | `CONCURRENCY_CONFLICT` | 并发策略 skip 且已有 waiting/running/terminating 实例；或队列深度达上限（**queue / parallel 均适用**：全局 waiting 计数 ≥ `job_queue_waiting_max`，见下注 #3） |
+
+> **校验顺序（返回首个命中）**：`needsUpdate` → `CLIENT_TYPE_MISMATCH` → `concurrency`（即优先 `JOB_NEEDS_UPDATE` > `CLIENT_TYPE_MISMATCH` > `CONCURRENCY_CONFLICT`）；**enabled 不参与运行校验**（禁用仅停定时，不影响手动运行，见 4.5.1/4.5.4）。
 
 **手动运行的并发策略（`concurrency`）精确语义**：
 
@@ -328,30 +317,13 @@
 | `queue` | **允许创建 waiting 排队**（同 Job 可多个 waiting）；**全局 waiting 队列深度上限**（下注）达限 → 409 `CONCURRENCY_CONFLICT` | 所有 waiting 均落在 **`job_runs` 全局队列**（非 Job 私有队列），由 Task Runner 按 created_at FIFO 与全局并发配额调度；同 Job 多实例按入库顺序逐个执行 |
 | `parallel` | **允许创建 waiting**，**Job 内无上限** | 并行度仅受 Task Runner **全局并发配额**约束；同 Job 可多实例同时运行 |
 
-#### 3.4.6.1 适用范围（全入口生效）
+> **`job_queue_waiting_max` 的语义（#4）**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ settings `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running','terminating')`）。
+>
+> **适用范围（#3，全入口生效）**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
 
-> **约定-全入口生效**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
-
-#### 3.4.6.2 `job_queue_waiting_max` 的语义
-
-> **约定-`job_queue_waiting_max` 语义**：它是 **全局 waiting 队列深度上限**（非 Job 级）——判定为 `SELECT count(*) FROM job_runs WHERE status='waiting'`（**全局、跨 Job**）≥ 配置项 `job_queue_waiting_max`（**默认 20、用户可调、上限 1000**，见 crud-06 一）→ 409 `CONCURRENCY_CONFLICT`；与 `skip` 的「同 Job 在途数」判定不同（后者为 `... WHERE job_id=? AND status IN ('waiting','running','terminating')`）。
-
-- `queue` / `parallel` **真正差别**：**Job 内串行 vs 并行**（`queue` 同 Job 多实例逐个执行、`parallel` 同 Job 多实例同时运行）；**全局 waiting 上限（`job_queue_waiting_max`）对两者及各创建入口一律生效**（全入口，见 3.4.6.1「适用范围（全入口生效）」）——它并非 queue/parallel 的区分标志。
+- `queue` / `parallel` **真正差别**：**Job 内串行 vs 并行**（`queue` 同 Job 多实例逐个执行、`parallel` 同 Job 多实例同时运行）；**全局 waiting 上限（`job_queue_waiting_max`）对两者及各创建入口一律生效**（全入口，见上注 #3）——它并非 queue/parallel 的区分标志。
+- **原子性（#4，落点 = `TaskRunner.add_job` 内部）**：**全部并发相关校验与创建 JobRun 都在 `add_job` 内、同一事务（`BEGIN IMMEDIATE`）内**执行——依次 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running','terminating')`（`skip` 判定）、`SELECT count(*) … status='waiting'`（全局 waiting 上限，crud-04 3.4.6 #3），再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。**API / Scheduler 只做参数校验与入口分发，不自查不自插**（否则「先查后调 add_*」会使同事务保证失效）；`JobRunRequest` 仅传 `run_id / job_id / inputs / workspace`，concurrency 规则由 `add_job` 按 `job_id` 内部读取。
 - **manual Job 的 `enabled`**：`enabled` 仅对 schedule 语义有效（是否注册定时）；**manual Job 的 `enabled` 固定为 true、不参与运行判断**（disable 只停定时，不影响手动运行）。
-
-#### 3.4.6.3 校验顺序（D12）
-
-> **校验顺序（返回首个命中；显式列表，D12：全局 waiting 上限最先）**：
-> ① **全局 waiting 上限**（`job_queue_waiting_max`，见 3.4.6.1「适用范围（全入口生效）」/ 3.4.6.2「`job_queue_waiting_max` 的语义」）→ 409 `CONCURRENCY_CONFLICT`（**最先判定**，与 crud-05 3.5.7/3.5.8 的运行入口顺序一致）；
-> ② `needsUpdate` → 409 `JOB_NEEDS_UPDATE`；
-> ③ `CLIENT_TYPE_MISMATCH` → 400（target=op 时按定义校验 Client 类型）；
-> ④ `concurrency=skip` 且同 Job 已有 waiting/running/terminating → 409 `CONCURRENCY_CONFLICT`（① 先于 ④）；
-> ⑤ **创建 Run 前定义完整性校验**（仅 target=Workflow 时：所引用 Workflow 定义按 crud-03 3.3 分组 A + 分组 B 共 15 条可判定规则校验）→ 400 `VALIDATION_ERROR`（**落点见 crud-03 4.4「创建 Run 前校验」**，与 ① 同为落库 Run 前必拦）。
-> **enabled 不参与运行校验**（禁用仅停定时，不影响手动运行，见 4.5.1/4.5.4）。
-
-#### 3.4.6.4 原子性（add_job 单事务）
-
-> **原子性（约定-add_job 内单事务，落点 = `TaskRunner.add_job` 内部）**：**全部并发相关校验与创建 JobRun 都在 `add_job` 内、同一事务（`BEGIN IMMEDIATE`）内**执行——依次 `SELECT count(*) FROM job_runs WHERE job_id=? AND status IN ('waiting','running','terminating')`（`skip` 判定）、`SELECT count(*) … status='waiting'`（全局 waiting 上限，见 3.4.6.1「适用范围（全入口生效）」），再 INSERT；SQLite 单写者 + 写事务串行化保证「检查-创建」原子，防止 skip 被并发请求 / 手动与 cron 同时击穿。**API / Scheduler 只做参数校验与入口分发，不自查不自插**（否则「先查后调 add_*」会使同事务保证失效）；`JobRunRequest` 仅传 `run_id / job_id / inputs / workspace`，concurrency 规则由 `add_job` 按 `job_id` 内部读取。
 
 ---
 
@@ -475,10 +447,10 @@ enabled: true
 | schemaVersion | integer | 包格式版本，当前 1 |
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
-| job | object | Job 名称与版本（**锚定包内 `job.yaml` 的 `name`**，即导入的**名称锚之一**）：`manifest.job.name` 必须与包内 `job.yaml` 的 `name` 一致——不一致 → 400 `VALIDATION_ERROR`（`message` 按 D11 格式指明位置），**不静默以文件内容为准**（校验细节见 3.4.10） |
-| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.4.10）。**导入不校验本字段**：`clientId` 的**存在性与唯一性均不校验**，也不作任何 id 复用依据（以 `name` 匹配为准）——包内多条 `clientId` 重复仅为数据质量问题，不报错 |
-| target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` **仅作包内定位**（`workflows/<文件内 name>.yaml` / `ops/<文件内 name>.yaml` 为**导出端约定**；导入端**不校验文件名**，只校验 `file` 指向成员**存在**及其**内容**的 `name`，见 3.4.10） |
-| ops | object[] | 包内 OP 依赖：`{name, version, file}`。`name` 为**导入名称锚之一**（与其 `file` 指向文件内的 `name` 逐条比对，见 3.4.10）；`file` **仅作包内定位**（导出端约定为 `ops/<文件内 name>.yaml`；导入端**不校验文件名**）。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身 |
+| job | object | Job 名称与版本（锚定 `job.yaml`） |
+| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.4.10） |
+| target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` 为包内相对路径——`workflows/<name>.yaml`（kind=workflow）或 `ops/<name>.yaml`（kind=op） |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: ops/<name>.yaml`） |
 
 > 旧版 `workflows[]` 数组已由 `target` 取代，**包内不出现**；若出现视为字段非法 → 400 `VALIDATION_ERROR`。
 
@@ -489,14 +461,9 @@ enabled: true
 "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
 ```
 
-> 双表达约定（约定-名称表达与 id 双表达）：`workflows/<name>.yaml` / `ops/<name>.yaml` 的**内部引用**以**名称**表达（Workflow 节点 `opName` / `clientName`；OP 无内部引用）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`）——导入时由 `manifest.json` 的 `target` / `ops` **名称锚**解析并重映射为新 uuid（见 3.4.10）。
+> 双表达约定（#1）：`workflows/<name>.yaml` / `ops/<name>.yaml` 的**内部引用**以**名称**表达（Workflow 节点 `opName` / `clientName`；OP 无内部引用）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`）——导入时由 `manifest.json` 的 `target` / `ops` **名称锚**解析并重映射为新 uuid（见 3.4.10）。
 
-**错误响应**：
-
-| 状态码 | code | 场景 |
-|-|-|-|
-| 400 | `VALIDATION_ERROR` | jobId 格式非法 |
-| 404 | `JOB_NOT_FOUND` | jobId 不存在 |
+**错误响应**：404 `JOB_NOT_FOUND`。
 
 ---
 
@@ -514,62 +481,32 @@ enabled: true
 
 **成功响应 `200 OK`**：返回导入创建的 Job 对象；若依赖被复用且版本与包内声明不一致，响应体附带 `warnings` 列表（如 `["op check_tests: 包内 v2，环境现有 v3（已复用现有）"]`）；相关工作流可能因此 `needsUpdate=true`（见 3.3.10）。
 
-**导入校验顺序（D12，显式列表，返回首个命中）**：
-
-| 序 | 校验 | 不通过时 |
-|-|-|-|
-| ① | 包解析与结构校验（ZIP 解析失败、包体积超限、成员路径非法、成员缺失、name 超 512 字符、`job.yaml` 缺 `workspace`、拓扑 / `opName` 集合等结构与上限问题） | 400 `VALIDATION_ERROR` |
-| ② | **名称锚不一致**（见下「名称锚一致性校验」） | 400 `VALIDATION_ERROR` |
-| ③ | `kind` 不一致（`job.yaml.target.kind` ≠ `manifest.target.kind`） | 400 `VALIDATION_ERROR` |
-| ④ | 同名实体已存在 | 409 `JOB_NAME_EXISTS` |
-| ⑤ | Client 缺失 → 409 `CLIENT_NOT_FOUND`；Client 类型不符 → 400 `CLIENT_TYPE_MISMATCH` | 见左 |
-
-**名称锚一致性校验（决策-导入名称锚一致性；D10/D11）**：
-
-- **纳入校验的名称锚（D10；四项锚逐一对应，各自成立）**：
-  1. **`manifest.job.name` ↔ 包内 `job.yaml` 的 `name`**；
-  2. **`manifest.target.name` ↔ `manifest.target.file` 指向文件内的 `name`**（`kind=op` → `ops/<file>` 内 `name`）；
-  3. **目标 Workflow 文件 `workflows/<name>.yaml` 内的 `name` ↔ `manifest.target.name`**（`kind=workflow` 时；与 crud-03 的 `manifest.workflow.name` 锚同位）；
-  4. **`manifest.ops[].name` ↔ 其 `file` 指向文件内的 `name`**（逐条比对）。
-  **四项锚互不要求相等**（Job 名、目标实体名、包内文件名是不同事物），**尤其不得要求 `manifest.job.name` 与 `manifest.target.name` 相等**（样例即是 `job.name=hourly_check` 对 `target.name=deploy_workflow`）。
-- **`file` / `target.file` / `ops[].file` 仅作包内定位**（成员必须**真实存在**，缺失 → 400）；**不校验文件名 / 目录名**与实际 `name` 字符串一致，**只校验文件内容的 `name`**。
-- 任一项不一致 → **400 `VALIDATION_ERROR`**，**不静默以文件内容为准**；`message` 固定格式（**D11**；**前端原样展示 message，不做解析**）：
-  `名称锚不一致：manifest.<锚字段>=<值>，<包内路径> 内 name=<值>`
-  （示例：`名称锚不一致：manifest.target.name=deploy_workflow，workflows/deploy_workflow.yaml 内 name=deploy_v2`；`名称锚不一致：manifest.job.name=hourly_check，job.yaml 内 name=hourly_check_v2`）
-- **`name` 与 `version` 分开对待（G3）**：**`name` 不一致一律拒绝**（上条）；**仅 `version` 为声明参考**，与文件不一致时以文件内容为准（沿用包内版本，保真还原；复用环境已有实体且版本差异 → 计入 `warnings`）。
-- 用户需手动修改包内文件 / manifest 后**重新选择文件并重新导入**（前端**不做**内容校验，直接提交 ZIP）。
-- **同名判重的名称（不得混用）**：Job 判重与入库**统一使用校验通过后的 `manifest.job.name`**（= 包内 `job.yaml` 的 `name`，**两处必相等**）；`manifest.target.name` 与 `file` 名**不参与** Job 判重（`target` 只按上列各项名称锚各自校验）；**不得要求 `manifest.job.name` 与 `manifest.target.name` 相等**。
-
 **导入冲突与依赖解析策略**：
 
 | 对象 | 策略 |
 |-|-|
-| Job 本身 | 同名已存在 → 409 `JOB_NAME_EXISTS`；否则新建，`version` **重置为 1**（**理由（约定-导入等同新建，版本重置为 1）**：导入 Job 等同新建，与 3.4.3 创建语义一致——Job.version 为自增修订号，从 1 起） |
-| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：先比对 `job.yaml.target.kind` 与 `manifest.target.kind`（不一致 → 400 `VALIDATION_ERROR`），再读 `manifest.target.file`（`workflows/<文件内 name>.yaml` 或 `ops/<文件内 name>.yaml`）解析实体——`kind=workflow` → 解析 `workflows/…`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `ops/…`（含 `target.clientId` 重映射）。**名称锚一致性校验见上「名称锚一致性校验」（D10/D11）**；**`name` 不一致一律拒绝（400）；仅 `version` 为声明参考**。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（约定-版本保真）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
-| 包内 OP（`manifest.ops` + `ops/<opName>.yaml`） | 目标 Workflow 引用的全部 OP（或目标 OP 本身）**按 name 匹配**：不存在 → 按包内定义创建（沿用包内 `version`）；已存在 → 复用现有（不覆盖）；目标 Workflow 的**节点级 `opName`/`clientName` 按 crud-03 3.3.9 策略重映射**为新 uuid。**一致性约束（G2）**：① 节点 `opName` 必须能在 `manifest.ops` 中**命中**（未命中 → 400 `VALIDATION_ERROR`）；② `manifest.ops` 的 name 集合与全部节点 `opName` 集合必须**相等**（多出 / 缺少 → 400 `VALIDATION_ERROR`）；③ 每条 `manifest.ops[].name` 必须等于其 `file` 指向文件的 `name`（名称锚，见上） |
+| Job 本身 | 同名已存在 → 409 `JOB_NAME_EXISTS`；否则新建，`version` **重置为 1**（**理由（#2）**：导入 Job 等同新建，与 3.4.3 创建语义一致——Job.version 为自增修订号，从 1 起） |
+| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：先比对 `job.yaml.target.kind` 与 `manifest.target.kind`（不一致 → 400 `VALIDATION_ERROR`），再读 `manifest.target.file`（`workflows/<name>.yaml` 或 `ops/<name>.yaml`）解析实体——`kind=workflow` → 解析 `workflows/<name>.yaml`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `ops/<name>.yaml`（含 `target.clientId` 重映射）；`manifest.target.name` / `version` 为名称与版本锚（与文件内容不一致时以文件内容为准，见 3.4.9 字段表）。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（#2）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
+| 包内 OP（`manifest.ops` + `ops/<opName>.yaml`） | 目标 Workflow 引用的全部 OP（或目标 OP 本身）**按 name 匹配**：不存在 → 按包内定义创建（沿用包内 `version`）；已存在 → 复用现有（不覆盖）；目标 Workflow 的**节点级 `opName`/`clientName` 按 crud-03 3.3.9 策略重映射**为新 uuid |
 | Job.target | 解析后指向目标实体（见上）；`target.xxxVersion` 取**解析后实际引用的当前版本** |
-| Job.inputs 键名（约定-inputs 键名校验） | **复用 3.4.3 同一校验**：inputs 的 name 须匹配 target（OP/Workflow）的参数定义；不匹配 → 400 `VALIDATION_ERROR` |
-| 版本差异告警（约定-版本差异告警） | 复用的 OP/Workflow 版本与包内/manifest 声明不一致 → 计入响应 `warnings`（导入仍成功，不报错）；相关 Workflow 可能立即 `needsUpdate=true` |
+| Job.inputs 键名（#4） | **复用 3.4.3 同一校验**：inputs 的 name 须匹配 target（OP/Workflow）的参数定义；不匹配 → 400 `VALIDATION_ERROR` |
+| 版本差异告警（#5） | 复用的 OP/Workflow 版本与包内/manifest 声明不一致 → 计入响应 `warnings`（导入仍成功，不报错）；相关 Workflow 可能立即 `needsUpdate=true` |
 | 包内 Client（`job.yaml` 的 `target.clientId` 或 `workflows/<name>.yaml` 节点 `clientName`） | **按 name 匹配 Client**：存在 → 用其 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**；需先在目标环境注册同名 Client） |
-| **旧 id → 新 id 重映射（约定-旧 id 重映射）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称锚**（含 `target.file` 定位文件）为切入，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
-| **导入后的 `enabled`（约定-导入后 enabled）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
+| **旧 id → 新 id 重映射（#3）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称锚**（含 `target.file` 定位文件）为切入，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
+| **导入后的 `enabled`（#7）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
 
 > 默认采用「不覆盖已有定义」的保守策略，避免破坏现有 Workflow/Job 引用；如需强制覆盖或严格版本比对，后续可用 manifest 扩展。
 >
-> `job.yaml.version`（约定-仅供参考）：**仅供参考**（记录导出时版本）；导入一律将 Job.version **重置为 1**（见上表），该字段不参与导入逻辑。
+> `job.yaml.version`（#6）：**仅供参考**（记录导出时版本）；导入一律将 Job.version **重置为 1**（见上表），该字段不参与导入逻辑。
 >
-> **导入的原子性（约定-导入原子性）**：整个导入（校验 → 创建/复用 OP、Workflow → 创建 Job）在**单一事务**内完成，且为 **`BEGIN IMMEDIATE` 单写事务**（SQLite 单写者串行化 + 名称 `UNIQUE` 约束兜底，见 N9）；任一步失败（如 `CLIENT_NOT_FOUND`）→ **整体回滚**，不产生任何半成品。**并发同名导入**：`UNIQUE` 冲突映射为 409 `JOB_NAME_EXISTS`（不映射 500）；**不做去重幂等**，重复导入同名包 → 409。
->
-> **导入边界与解包安全（N7）**：ZIP **包体积上限沿用现有配置项 `op_import_max_bytes`**（crud-06 一；包内主体为 OP YAML，故沿用该键作「同一把尺」，**不新造配置键**），超限 → 400 `VALIDATION_ERROR`；ZIP 成员名必须为**包内相对路径**（拒绝绝对路径、`..`、盘符与反斜杠逃逸；成员数与解压后总大小须有界），违规 → 400 `VALIDATION_ERROR`。
->
-> **包内 `ops/*.yaml` 的字段校验（引 crud-02）**：导入时对包内 `ops/*.yaml` 的每个**新建 OP**按 **crud-02 3.2.8（OP 导入）同一口径**校验——`type` / `content` 缺失或非法、**`timeoutSeconds` 缺失或超范围（范围 1..86400）** → **400 `VALIDATION_ERROR`**（接口层 `timeoutSeconds` **必填**，缺失**不取默认 60**；见 crud-02 3.2.8 / 3.2.6）；已存在同名 OP 则复用现有（不覆盖）。
+> **导入的原子性（#5）**：整个导入（校验 → 创建/复用 OP、Workflow → 创建 Job）在**单一事务**内完成；任一步失败（如 `CLIENT_NOT_FOUND`）→ **整体回滚**，不产生任何半成品。
 
 **错误响应**：
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法：**name 超 512 字符**、**`manifest.target.file` / `manifest.ops[].file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**、**`manifest.target.name` / `manifest.job.name` / `manifest.ops[].name` 与包内文件实际 `name` 不一致（`message` 按 D11 格式指明位置，用户修改后重新导入）**、**包体积超限**、**成员路径非法**、**节点 `opName` 未命中 `manifest.ops` / 集合不相等**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」 |
-| 400 | `CLIENT_TYPE_MISMATCH` | 包内 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理）；`message` 固定为：`Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>` |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」） |
+| 400 | `CLIENT_TYPE_MISMATCH` | 包内 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理） |
 | 409 | `JOB_NAME_EXISTS` | 同名 Job 已存在（导入冲突） |
 | 409 | `CLIENT_NOT_FOUND` | 包内引用的 Client（按 name 匹配）在目标环境不存在；响应体列出缺失的 Client 名称（见上表） |
 
@@ -605,20 +542,15 @@ enabled: true
 { "needsUpdate": true }
 ```
 
-**错误响应**：
-
-| 状态码 | code | 场景 |
-|-|-|-|
-| 400 | `VALIDATION_ERROR` | jobId 格式非法 |
-| 404 | `JOB_NOT_FOUND` | jobId 不存在 |
+**错误响应**：404 `JOB_NOT_FOUND`。
 
 ---
 
 ### 4.5 定时调度（Scheduler）
 
-**职责**：Scheduler 是独立的后台模块，负责把 `trigger.kind=schedule` 的 Job 按 cron 表达式**到点唤醒**，到点后**触发一次运行**（由 `TaskRunner.add_job` 创建 JobRun，Scheduler **不自行创建**，见 4.5.2）——不亲自执行 OP，也不参与 DAG 调度（执行由 Task Runner / Engine / WorkerPool，见 crud-05 4.6、crud-03 4.3/4.4）。
+**职责**：Scheduler 是独立的后台模块，负责把 `trigger.kind=schedule` 的 Job 按 cron 表达式**到点唤醒**，到点后**只负责创建一次运行（JobRun）并投递给 Task Runner**——不亲自执行 OP，也不参与 DAG 调度（执行由 Task Runner / Engine / WorkerPool，见 crud-05 4.6、crud-03 4.3/4.4）。
 
-> **到点触发与手动运行同一套校验**：Scheduler 到点触发前，与 3.4.6 手动运行走**同一套校验**（`needsUpdate` / `CLIENT_TYPE_MISMATCH` / `concurrency` / 全局 waiting 上限；**顺序差异仅影响日志级别**：cron 入口各项均落「跳过」，其中 waiting 上限判定在 `add_job` 事务内、见 4.5.2；手动入口 waiting 上限最先、见 3.4.6.3「校验顺序（D12）」）；命中校验 → 本次触发跳过（**记日志**，不创建 JobRun，见 4.5.2），不阻塞后续调度。
+> **到点触发与手动运行同一校验**：Scheduler 到点创建 JobRun 前，与 3.4.6 手动运行走**同一校验顺序**（`needsUpdate` → `CLIENT_TYPE_MISMATCH`（target=op 时校验 Client 当前类型与 OP 类型，因 Client 可被编辑更换类型）→ `concurrency`）；命中校验 → 本次触发跳过（记 error 日志，不创建 JobRun），不阻塞后续调度。
 
 **选型**：`tokio-cron-scheduler`（基于 cron 表达式；与本项目 Rust + tokio 栈一致，见 `proposal-02-后端设计.md` 技术栈）。
 
@@ -630,7 +562,7 @@ enabled: true
 | 时区 | **固定本机时区（`Local`）**（配置管理 v2 已删除 `scheduler_timezone`，不提供时区覆盖） |
 | 校验 | 创建 / 更新 Job 时解析校验；非法 → 400 `CRON_INVALID` |
 
-#### 4.5.1 注册与热更新（生命周期）
+**4.5.1 注册与热更新（生命周期）**
 
 Scheduler 与 Job 定义保持同步，分为启动加载与运行时热更新：
 
@@ -650,7 +582,7 @@ Daemon 启动:
 - **注册幂等**：同一 jobId 重复注册以最新配置为准（先取消后注册）。
 - **与手动运行无关**：disable 仅停定时，`POST /api/jobs/{jobId}/run` 手动触发仍可用（只要未被 needsUpdate 拦截）。
 
-#### 4.5.2 cron 触发流程（到点）
+**4.5.2 cron 触发流程（到点）**
 
 ```text
 cron 到点 (jobId):
@@ -659,32 +591,29 @@ cron 到点 (jobId):
   │        - trigger.kind != schedule    → 跳过
   │        - needsUpdate=true            → 跳过，记 warning（不静默跑旧定义）
   │        - cron 已解析失败 / 非法      → 跳过，记 error（**防御性检查**：注册时已校验；此处防持久化定义在注册后被人为改坏的异常）
-  ├─ 2. 前置校验（needsUpdate 已在 1 判定；此处 CLIENT_TYPE_MISMATCH）→ **命中即跳过（记日志，不创建 JobRun）**
-  │        - target=op 时校验 `target.clientId` 当前引用的 Client 类型与 OP 类型一致（Client 可被编辑更换类型）→ 不一致：跳过，记 warning
-  │        - target=Workflow 时：**创建 Run 前定义完整性校验**不通过（crud-03 3.3 分组 A + B 共 15 条可判定规则，见 crud-03 4.4「创建 Run 前校验」）→ 跳过，记 warning
-  ├─ 3. 调 `TaskRunner.add_job(req)`（schedule 入口）——**由 `add_job` 在同一 `BEGIN IMMEDIATE` 事务内**完成全部并发校验与 JobRun 插入（**Scheduler 不自查不自插**；**唯一口径见 3.4.6.4「原子性（add_job 单事务）」**）：
-  │        - 同 Job 在途实例计数（`job_id=? AND status IN ('waiting','running','terminating')`）——**cron 固定 skip 语义**：存在在途即跳过
-  │        - 全局 waiting 上限（`job_queue_waiting_max`，见 3.4.6.1「适用范围（全入口生效）」）：`count(*) FROM job_runs WHERE status='waiting'`（全局）≥ 上限即跳过
-  │        - JobRun 插入：triggered_by=schedule、status=waiting、快照 target/target_version/inputs/workspace（含名称快照 name/target_name）
-  │        - **命中在途 / 上限 → 本次触发跳过（不报 409、不排队；下个 cron 周期重试）**
-  └─ 4. 投递即返回（`add_job` 入队成功即返回，不阻塞调度线程）；执行由后台完成
+  ├─ 2. 并发占用检查（统计该 Job 的 job_runs 中 status ∈ {waiting, running, terminating} 的实例）:
+  │        - **只要存在任一 waiting / running / terminating 实例 → 本次 cron 不触发（跳过），不 queue、不 parallel**
+  │        - 仅当无 waiting / running / terminating 实例时，才继续创建 JobRun
+  │        - **全局 waiting 上限（job_queue_waiting_max，#3）**：`count(*) FROM job_runs WHERE status='waiting'`（全局）≥ job_queue_waiting_max（默认 20、可调、上限 1000）→ 本次 cron **跳过不触发**（不报 409、不排队；下个 cron 周期重试）
+  │        - **步骤 2-3 在同一事务（`BEGIN IMMEDIATE`）内**：先查后插，保证与手动运行 / 并发 cron 的『检查-创建』原子（#1）
+  ├─ 3. 创建 JobRun: triggered_by=schedule、status=waiting、快照 target/target_version/inputs/workspace（含名称快照 name/target_name）
+  └─ 4. TaskRunner.add_job(req) → 投递即返回（不阻塞调度线程）；执行由后台完成
 ```
 
-- **Scheduler 不自查不自插（D7）**：全部并发校验（同 Job 在途、全局 waiting 上限）与 JobRun 插入**都在 `TaskRunner.add_job` 内部的同一 `BEGIN IMMEDIATE` 事务内**完成（口径基准 = 3.4.6.4「原子性（add_job 单事务）」）；Scheduler 只做重读 Job / 前置校验 / 调用 `add_job` / 投递即返回，**不自行先查后插**（否则同事务保证失效、甚至重复落库）。
-- **Scheduler 不直接执行**：与手动运行（3.4.6）同链路：`add_job` 内建 JobRun → Engine/WorkerPool。
+- **Scheduler 不直接执行**：与手动运行（3.4.6）同链路：创建 JobRun → `TaskRunner.add_job` → Engine/WorkerPool。
 - **触发源**：`job_runs.triggered_by='schedule'`（区别于 manual / single_op / single_workflow / retry）。
 - **cron 固定按 skip 语义**：定时触发**只要该 Job 已有 waiting / running / terminating 实例即跳过本次**（不排队、不并行；terminating 等收敛，仍占在途名额）；`concurrency` 的 `queue` / `parallel` 仅作用于**手动运行**（3.4.6）等其它入口。
 
-#### 4.5.3 错过触发与重叠（missed / overlap）
+**4.5.3 错过触发与重叠（missed / overlap）**
 
 | 场景 | 处理 |
 |-|-|
 | 上一实例仍在跑 / 已在 waiting，cron 又到点 | **cron 跳过本次**（只要存在 waiting / running / terminating 实例即不触发，terminating 等收敛） |
 | Daemon 停机期间错过的 cron 点 | **不补跑**（missed runs 直接跳过）；重启后按**下一个** cron 点触发 |
-| 同一时刻多个 Job 到点 | 各自独立触发；实际并行度由 Task Runner 全局并发配额（配置项，见 crud-06 一）约束 |
+| 同一时刻多个 Job 到点 | 各自独立创建 JobRun；实际并行度由 Task Runner 全局并发配额（settings）约束 |
 | cron 触发的`waiting` 任务堆积 | 由 Task Runner 按配额逐个调度；**不会因堆积而丢任务**（落库排队） |
 
-#### 4.5.4 与 needsUpdate / enabled / 版本的交互
+**4.5.4 与 needsUpdate / enabled / 版本的交互**
 
 | 状态 | cron 到点时 | 手动 [运行] |
 |-|-|-|
@@ -694,13 +623,13 @@ cron 到点 (jobId):
 
 > schedule 类 Job 修改后（3.4.4）**重新注册**定时触发；`bumpVersion` **只决定 `Job.version` 是否 +1**，与定时注册 / 触发无关；target 引用的版本快照以编辑请求中的 `target.xxxVersion` 为准。
 
-#### 4.5.5 nextRunAtMs（下次触发时间）
+**4.5.5 nextRunAtMs（下次触发时间）**
 
 - 由 Scheduler 依据当前 cron 计算，作为 **Job 的计算字段**（不落库）随 3.4.1 列表 / 3.4.2 详情返回；manual 或 `enabled=false`（或 needsUpdate）时为 `null`。
 - 供界面展示“下次触发”提示；重启后自动重算。
 - **模块接口**：Scheduler 暴露查询方法 `next_run_at(job_id) -> Option<Ms>`（内存态，注册时缓存；未注册 / 禁用 / needsUpdate → `None`）；Job 响应组装时调用该方法填充 `nextRunAtMs`。
 
-#### 4.5.6 错误与日志
+**4.5.6 错误与日志**
 
 | 场景 | 处理 |
 |-|-|

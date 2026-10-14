@@ -12,11 +12,6 @@
 -- ============================================================
 
 PRAGMA foreign_keys = ON;
--- 注（G9）：`foreign_keys` 是**连接级**开关，本 PRAGMA 仅对当前连接有效、**不随 DB 持久化**。
---   应用必须对**每一个新建连接**显式置 ON（sqlx `SqliteConnectOptions::foreign_keys(true)` /
---   rusqlite `conn.pragma_update(None, "foreign_keys", "ON")`，见 T3.1 连接池初始化），
---   否则所有 FK 约束与 `ON DELETE CASCADE` 静默失效（可插入孤儿 workflow_nodes、删 workflow 不级联删节点）。
---   另：所有依赖级联的删除（如删 Workflow 连带 workflow_nodes）在 Repository 层**显式 SQL 兜底**，不单独依赖级联。
 PRAGMA journal_mode = WAL;
 -- DB 结构版本（= 接口附加返回的 db_version，见 crud-06 3.3）；结构变更时同步 +1 并在 db/migrate.rs 做幂等升级
 PRAGMA user_version = 1;
@@ -109,9 +104,8 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
     -- kind = op 时使用
     op_id           TEXT,
     op_version      INTEGER,
-    client_id       TEXT,                                -- 接口层必填 (crud-03 校验规则 10); 存储层可空以兼容历史/导入遗留空值 (运行期回退 Job.target.clientId, 仍空 -> run_failed, 见 crud-03 3.3 兼容路径)
-    -- bindings: {"paramName": {"kind":"node_output"|"workflow_input"|"literal"|"unbound", ...}}
-    --   "unbound" = 拖拽初始态 / 视为无来源 (判据见 crud-03 3.3)
+    client_id       TEXT,                                -- 可为空, 执行时再选
+    -- bindings: {"paramName": {"kind":"node_output"|"workflow_input"|"literal", ...}}
     bindings        TEXT,                                -- JSON object
     -- retry: {"on":"failure","max":3,"backoff":"exponential","interval":1000}
     retry           TEXT,                                -- JSON object, 可空
@@ -185,9 +179,9 @@ CREATE TABLE IF NOT EXISTS job_runs (
     timeout_step_id TEXT,
     timeout_op_name TEXT,
 
-    -- 重试溯源（仅 retry 写入；rerun 不写、两列均为 NULL，见 crud-05 3.5.7 / 3.5.8）
-    retry_from_run_id    TEXT,                           -- 上游 job_runs.run_id
-    retry_from_record_id TEXT,                           -- 上游 step_records.record_id（StepRecord 主键；= 源 Run 的失败/超时 step 记录）
+    -- 重跑/重试溯源
+    retry_from_run_id  TEXT,                             -- 上游 job_runs.run_id
+    retry_from_step_id TEXT,                             -- 上游 step_records.record_id
 
     started_at_ms   TEXT,
     finished_at_ms  TEXT,
@@ -216,9 +210,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_updated ON job_runs(updated_at_ms);  -- 状�
 --                        循环回跳重新激活同一节点时 +1; 节点内部重试不递增
 --        retry_seq     : 同一 activation 内的第几次尝试(含首次), 首次=1, 每次 apply_retry +1
 --      (run_id, step_id, activation_seq, retry_seq) 唯一标识一次实际执行。
---      本轮尝试计数 = 同 (run_id, step_id, activation_seq) 记录数 = 每轮尝试次数（首次执行计入）,
---                     即 retry.max 的判定基准（retry.max=3 -> 每轮 3 次尝试, 见 crud-03 4.3.0 / 4.3.2）;
---      执行总次数上限 = min(max×3, max_loop_multiplier) = 同 (run_id, step_id) 的 step_records 记录数 (含全部 activation × 尝试次数)。
+--      重试计数 = 同 (run_id, step_id, activation_seq) 记录数 - 1;
+--      执行总次数上限 = min(max×3, max_loop_multiplier) = 同 (run_id, step_id) 的 step_records 记录数 (含全部 activation × attempt)。
 --    ★ WorkerPool 的 run_job / run_step 在此插入 status=waiting 记录（任务入 DB 排队，
 --      App 重启不丢失），由 WorkerPool 调度线程指派 Worker 执行并推进 waiting → running → 终态；
 --      启动时 status=running 的残留记录由 WorkerPool 重新指派重跑（复用原 record_id）。
@@ -234,8 +227,8 @@ CREATE TABLE IF NOT EXISTS step_records (
     op_name         TEXT NOT NULL,                       -- 快照: OP 名称
     client_id       TEXT,                                -- 执行时按 client_id 加载 Client（或存配置快照）
     source          TEXT NOT NULL DEFAULT 'job'
-                    CHECK (source IN ('job','step')),    -- 任务来源: job=单次 OP/Job (Runner 触发, 完成调 JobComplete 钩子, 对应 static JOB_COMPLETE)
-                                                         --            step=workflow 步骤 (Engine 触发, 完成调 StepComplete 钩子, 对应 static STEP_COMPLETE)
+                    CHECK (source IN ('job','step')),    -- 任务来源: job=单次 OP/Job (Runner 触发, 完成调 job_complete 钩子)
+                                                         --            step=workflow 步骤 (Engine 触发, 完成调 step_complete 钩子)
 
     status          TEXT NOT NULL DEFAULT 'waiting'
                     CHECK (status IN ('waiting','running','success','failed','timeout','cancelled')),  -- cancelled = 被终止/取消
@@ -271,15 +264,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_steps_execution ON step_records(run_id, ste
 --    "节点完成→决定下一步" 产生一条调度事件并持久化于此;
 --    **写即处理、无事件循环**: 事件 INSERT 后立即由 process_event 同步处理
 --    (谁产生谁调用), 仅崩溃残留的 processed=0 事件由 recover 一次性重放
---    数据生命周期 (软删 = engine_event_retention_days 天, 默认 1; 硬删 = 软删 + 1 天, 不随配置缩放; 见 crud-06 一):
+--    数据生命周期:
 --      成功完成的 workflow → 完成即物理删除本 run 的事件
---      失败的 workflow(可重试) → 保留; 最终不重试: engine_event_retention_days 天后软删除
---        (置 soft_deleted_at_ms), 再 1 天后物理删除（默认 1 → 2 天）
+--      失败的 workflow(可重试) → 保留; 最终不重试: 1 天后软删除
+--        (置 soft_deleted_at_ms), 2 天后物理删除
 -- ============================================================
 -- ★ Engine 的 notify 与后台线程持久化：
 --   Runner / 终止接口调 engine.notify(msg) 时，EngineStart / Terminate **不投内存 inbox**，
---   而是作为事件直接 INSERT 到本表（engine_start / terminate，payload 承载 inputs/workspace/reason；
---   `engine_start` 另可含 `resumeFromRecordId`——仅重试路径, = job_runs.retry_from_record_id, 见 crud-03 4.3.4），
+--   而是作为事件直接 INSERT 到本表（engine_start / terminate，payload 承载 inputs/workspace/reason），
 --   写库成功后**立即由 process_event 同步处理**（写即处理，无事件循环 / 无唤醒信号），
 --   处理完成才返回（写库失败视为投递失败）。
 --   App 重启后：未消费事件仍在（notify 不丢），Engine::recover 一次性处理残留
@@ -294,11 +286,11 @@ CREATE TABLE IF NOT EXISTS engine_events (
     step_id         TEXT,                                -- 相关节点 (workflow_node.workflow_node_id)
     step_status     TEXT CHECK (step_status IN ('success','failed','timeout')),
 
-    payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照 / EngineStart 的 inputs+workspace（另可含 resumeFromRecordId, 仅重试路径 = job_runs.retry_from_record_id） / Terminate 的 reason
+    payload         TEXT,                                -- JSON: 节点出参 / 下一批就绪节点 / 上下文快照 / EngineStart 的 inputs+workspace / Terminate 的 reason
     processed       INTEGER NOT NULL DEFAULT 0,          -- 0=未消费 1=已消费 (崩溃恢复重放依据)
     created_at_ms   TEXT NOT NULL DEFAULT (strftime('%s','now') || '000'),
     processed_at_ms TEXT,
-    soft_deleted_at_ms TEXT,                             -- NULL=active; 非NULL=软删除时间(失败数据保留 engine_event_retention_days 天后置位; 硬删 = 软删 + 1 天)
+    soft_deleted_at_ms TEXT,                             -- NULL=active; 非NULL=软删除时间(失败数据保留1天后置位)
 
     FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE
 );
@@ -308,8 +300,32 @@ CREATE INDEX IF NOT EXISTS idx_evts_processed ON engine_events(processed);
 CREATE INDEX IF NOT EXISTS idx_evts_created   ON engine_events(created_at_ms);
 
 -- ============================================================
--- 9. run_node_state —— Engine 运行态“节点就绪”可选 checkpoint 表 (见 crud-03 4.3.3)
---    ⚠ 可选：不是热路径（热路径 = 内存 RunContext）。
+-- 9. run_edge_state —— Engine 运行态“边状态”可选 checkpoint 表 (见 crud-03 4.3.3)
+--    ⚠ 可选：不是热路径（热路径 = 内存 RunContext）。用途:
+--      (1) 恢复加速: 把 RunContext 周期性/结束时快照至本表，重启优先读快照、减少重放量;
+--      (2) 运维/诊断: 直接 SQL 观察某 run 的边状态。
+--    可选存当前 activation 的边状态（pending/activated/dropped）;
+--    engine_events 仍为唯一事实来源。数据生命周期同 engine_events。
+--    edges 无独立 id，edge_key = "<from_workflow_node_id>|<to_workflow_node_id>|<condition>"。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS run_edge_state (
+    run_id        TEXT NOT NULL,                        -- job_runs.run_id
+    edge_key      TEXT NOT NULL,                        -- <from_workflow_node_id>|<to_workflow_node_id>|<condition>
+    from_workflow_node_id  TEXT NOT NULL,                        -- 源节点 (便于按节点批量更新其出边)
+    state         TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (state IN ('pending','activated','dropped')),
+    updated_at_ms TEXT NOT NULL,
+
+    PRIMARY KEY (run_id, edge_key),
+    FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_edge_state_run  ON run_edge_state(run_id);
+CREATE INDEX IF NOT EXISTS idx_run_edge_state_from ON run_edge_state(run_id, from_workflow_node_id);
+
+-- ============================================================
+-- 10. run_node_state —— Engine 运行态“节点就绪”可选 checkpoint 表 (见 crud-03 4.3.3)
+--    ⚠ 可选：不是热路径（热路径 = 内存 RunContext），与 run_edge_state 同生命周期。
 --    可选存“当前 activation”的就绪快照，用于恢复加速/诊断:
 --      节点就绪 = pending_in_edges = 0 且 activated_in_edges >= 1
 --    循环回跳重入 N 时 activation_seq+1 并重置 pending(=N 入度)/activated(=0)。

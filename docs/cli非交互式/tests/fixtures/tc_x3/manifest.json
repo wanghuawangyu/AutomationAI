@@ -6,7 +6,7 @@
   "workflow": { "name": "wf_tc_x3_multi", "version": 1 },
   "clients": [
     { "name": "Claude Code", "clientId": "a1b2c3d4e5f60718293a4b5c6d7e8f90" },
-    { "name": "bash-build", "clientId": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1" }
+    { "name": "bash-build", "clientId": "b2c3d4e5f60718293a4b5c6d7e8f90a1" }
   ],
   "ops": [
     { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" },

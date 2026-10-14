@@ -257,7 +257,7 @@ Client ←（执行时下拉选择）← OP ← Workflow
 | 规则 | 说明 |
 |-|-|
 | CliProfile 只配置非交互式参数 | 使用 headless 参数 |
-| stdin 仅作注入通道 | **注入后立即 EOF，不接 TTY、不进入交互等待**（stdin 只用于喂入参数/prompt，见 crud-01 5.3「注入通道」） |
+| stdin 仅作注入通道 | **注入后立即 EOF，不接 TTY、不进入交互等待**（stdin 只用于喂入参数/prompt，见 crud-01 5.x 注入通道表） |
 | 超时保护 | OP 必须配置 timeoutSeconds |
 
 ### 7.5 交互性传播链（保留占位，当前恒 false）
@@ -1323,15 +1323,9 @@ workflow-deploy_workflow-v2.zip
 | End 至少一条入边 | 否则校验不通过 |
 | 所有 OP 节点从 Start 可达 | 否则校验不通过 |
 | 所有 OP 节点能到达 End | 否则校验不通过 |
-| 所有 OP 节点的 clientId 非空 | 缺失 → 校验不通过（D3） |
-| OP 节点的 Client 类型须与 OP 类型一致 | Client 存在但 `Client.type` ≠ 该节点 OP 的类型 → 校验不通过，400 `CLIENT_TYPE_MISMATCH`（与 §8.3 / crud-02 3.2.6 / crud-03 3.3 同口径） |
-| 参数绑定必须指向前置节点 | 节点 X 的入参 Y 绑定了下游节点 Z 的出参 → 校验不通过；来源仅限从 Start 可达且位于当前节点之前的节点（D4）。**在允许环的图中（D8），前置集 = 「从 Start 可达且位于当前节点之前」并剔除自身节点与从当前节点正向可达的节点**（后者在回跳环上位于当前节点之后，不得作为来源） |
-| 所有 required 入参必须有来源 | `bindings[name]` 不存在，**或** `kind="unbound"`，**或** `kind="literal"` 且 `value` 为空字符串 → 视为**无来源**，required 缺失 → 校验不通过（D4） |
-| 出参来源必须有效 | 每个 `Workflow.outputs[].from` 的 `workflowNodeId` 必须**存在且为 op 节点**，`outputName` 必须在该节点 OP 定义的 `outputs[].name` 中；任一不满足 → 校验不通过（决策-出参来源校验；与 crud-03 3.3「校验规则」规则 18 同口径） |
-
-> **不校验「环」（D8）**：拓扑校验**允许环路**（含回跳边），不拒绝环。回跳由**运行时计数约束**（见 crud-03 4.3）：回跳边在运行期以「目标节点是否已执行过」推导（不在 edges 数据里额外标记），回跳上限 `min(max × 3, max_loop_multiplier)` 兜底终止。校验端**不做环判定**。
->
-> **本表范围**：本表为**界面可见的校验规则行（13 行；另本节失败提示表 22 行）**；完整规则集与「保存 / `[校验]` / 创建 Run 前」的规则分区见 **crud-03 3.3「校验规则」**——契约完整集**共 17 条** = A 组 `9/10/11/16`（4 条）+ B 组 `1–7/13–15/18`（11 条）+ C 组 `12/17`（2 条），编号 8 留空，与本表按语义对应；本表未逐条列出的绑定与出边类约束（如 op 节点必须绑定 `opId` + `opVersion`（规则 9）、`bindings` 引用的前置节点出参必须存在（规则 13）、Start 不允许 `on_failure` 出边（规则 16））以 crud-03 为准。
+| DAG 无环（除循环回跳） | 循环回跳由重试 + 条件边实现，不算环 |
+| 所有 required 入参必须有来源 | 否则校验不通过 |
+| 有多条入边的节点必须有明确汇聚 | 由 DAG 边决定 |
 
 **校验失败时的提示**：
 
@@ -1345,20 +1339,6 @@ workflow-deploy_workflow-v2.zip
 | End 无入边 | "End 节点至少需要一条入边" |
 | 节点从 Start 不可达 | "节点 X 从 Start 不可达" |
 | 节点无法到达 End | "节点 X 无法到达 End" |
-| 多个 Start | "Workflow 只能有一个 Start 节点（当前 N 个）" |
-| 多个 End | "Workflow 只能有一个 End 节点（当前 N 个）" |
-| 连线引用了不存在的节点 | "有 N 条连线引用了不存在的节点" |
-| 节点引用的 OP 不存在 | "节点 X 引用的 OP 不存在" |
-| Client 类型与 OP 类型不匹配 | "Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>"（400 `CLIENT_TYPE_MISMATCH`；message 逐字固定，同 §8.3 / crud-02 3.2.6 / crud-03 3.3） |
-| 节点未绑定 opId | "节点 X 未绑定 opId"（规则 9） |
-| 节点未绑定 opVersion | "节点 X 未绑定 opVersion"（规则 9） |
-| OP 节点未指定 Client | "OP 节点必须指定 Client（节点 X）"（规则 10） |
-| 节点 required 入参无来源 | "节点 X 的 required 入参 Y 没有来源"（规则 15） |
-| 入参绑定了不存在的节点出参 | "节点 X 的入参 Y 绑定了不存在的节点出参"（规则 13） |
-| 入参绑定了非前置节点的出参 | "节点 X 的入参 Y 绑定了非前置节点 Z 的出参"（规则 14） |
-| Start 有 on_failure 出边 | "Start 节点不允许 on_failure 出边（Start 无失败语义）"（规则 16） |
-| 出参的来源节点不存在 | "出参 X 的来源节点不存在" |
-| 出参的来源出参不存在 | "出参 X 的来源出参不存在" |
 
 ---
 
@@ -1758,7 +1738,7 @@ interface RunResult {
 |-|-|-|
 | [重跑] | 从头重新执行（用最新版本），**对 OP target 和 Workflow target 都可用** | 仅终态（success / failed / timeout / cancelled）；waiting（等待中）/ running（运行中）/ terminating（终止中）不可重跑 |
 | [终止] | 终止正在运行的 Run（**按 target 分两类**：Workflow run——不 kill 在跑 OP，停止后续调度、取消未开始步骤、等其跑完落 cancelled；OP run——仅其 **OP 步骤**未开始（step `waiting` 排队）可终止并直接落 cancelled，**step 已开始执行（`step_records.status=running`）不支持终止**） | 仅 running（运行中）展示；terminating（终止中）无操作（已提交终止，等待收敛）；**判定依据 = 该 Run 的 OP 步骤（`step_records.status`）：target=OP 且其 OP 步骤已开始执行 → 按钮置灰 / 点击提示「终止失败：OP 正在运行，不可终止」** |
-| [重试] | 从失败 step 开始重试（已完成节点不重复执行，见 §12.8） | **仅 target=Workflow** + Run 已结束（failed / timeout / **cancelled（终止前存在失败/超时 step）**）且存在失败或超时 step + **目标 Workflow 仍存在**（已删除 → 404 `TARGET_NOT_FOUND`，不可重试） + 版本一致 + Workflow.needsUpdate=false + Job.needsUpdate=false |
+| [重试] | 从失败 OP 开始重试 | **仅 target=Workflow** + 失败（含超时）+ 版本一致 + Workflow.needsUpdate=false + Job.needsUpdate=false |
 
 ### 12.5 第二层 A：OP 执行详情
 
@@ -1805,8 +1785,6 @@ interface RunResult {
 > - 入参/出参用表格展示：左列=参数名固定宽度，右列=参数值，多个参数换行展示。
 > - 每次执行（重试 / 循环回跳，执行历史下拉切换）的入参、出参、输出一一对应，切换时同步更新。
 > - **版本对比提示条**（仅执行版本 ≠ 当前版本时显示）：条内两个按钮 [查看 v{执行版本} 定义] / [查看 v{当前版本} 定义]；点击弹出对话框展示**该版本的定义摘要**——OP 为「名称 / 类型 / 查看版本（对照当前最新）/ 超时 / 入参 / 出参 / 正文摘要」，正文取该次执行的 `step.bodySnapshot` 快照（见 §12.3 StepRecord 字段）。**不保留历史版本定义**（无 OP 历史版本表），两按钮的差别仅在「按哪个版本号对照展示」，执行版本与当前版本不一致时以提示条 + 版本号对比呈现，不提供逐字段 diff（与原型 `showOpDef(versionText)` 一致）。
-> - **刷新**：详情页头部提供 [刷新] [自动刷新: 开] 开关；自动刷新打开且该 Run 有运行中 step 时按 §12.10 轮询轻量接口 `GET /api/runs/{runId}/status`，**无 running step 时自动停止轮询**。
-> - **状态三态口径（与 §12.6 节点状态一致）**：非终态 Run 中无执行记录的节点显示「等待中」（`◌ 等待中`）、运行中显示「运行中」；仅当 Run 处于**终态**（success / failed / timeout / cancelled）时，无执行记录的节点才显示「⊘ 未执行」（**不得**对非终态 Run 误标「未执行」）；状态图标限用 §12.6 节点状态表字符集（`✓ ✗ ⏱ ● ◌ ✕ ⊘`）。
 
 ### 12.6 第二层 B：Workflow 执行详情
 
@@ -1898,13 +1876,8 @@ interface RunResult {
 | 失败 | 🔴 红框 | ✗ |
 | 超时 | 🟠 橙框 | ⏱ |
 | 运行中 | 🟡 黄框 | ● |
-| 等待中 | ⚪ 灰框（实线） | ◌ |
 | 已取消（cancelled） | ⚫ 深灰框 | ✕ |
-| 未执行 / 跳过 | ⚪ 灰框（虚线） | ⊘ |
-
-> 说明：节点状态文案以本表为准；节点级「等待中」统一显示为 `◌ 等待中`（与 §12.4 结果徽标的 Run 级 `⏳ 等待中` 区分）。**`未执行 / 跳过` 仅用于终态 Run**——非终态 Run 中无执行记录的节点统一显示「等待中」，**不得**在 Run 未结束时标「未执行」；**未执行 / 跳过** = Run 结束时该节点无 StepRecord，或最终记录为 cancelled 之前的 waiting 记录。OP 执行详情（§12.5）按同一三态口径渲染。
->
-> **两层状态口径不同（勿混）**：**Run 级状态 / 结果徽标**（§12.4「结果」列、§11.3「最近运行结果」）描述 **Run 整体**；**节点级状态**（本表）描述 **单个节点在本次 Run 中的执行情况**。同一个 `⊘` 在两处语义不同：Run 级结果徽标中的 `⊘ cancelled 已取消` 表示 **Run 整体被取消**，而节点级 `⊘`（本表）表示 **该节点未执行 / 跳过**；节点级 `✕` 才表示 **该节点被取消**。
+| 未执行 / 跳过 | ⚪ 灰框 | ⊘ |
 
 **Start / End 在运行历史中的状态**：
 
@@ -1963,7 +1936,7 @@ interface RunResult {
 
 | 条件 | 说明 |
 |-|-|
-| target 为 Workflow | 只有 Workflow 才有"从失败 step 开始续跑"的概念；**且目标 Workflow 仍存在**（已删除 → 不可重试，404 `TARGET_NOT_FOUND`） |
+| target 为 Workflow | 只有 Workflow 才有"从失败 OP 开始"的概念 |
 | Run 已结束且存在失败/超时 step | failed / timeout / **cancelled（终止前有失败/超时 step）** 均可；waiting / running / terminating 不可（未结束） |
 | 失败 Run 的版本 = 当前最新版本 | 版本一致才允许重试 |
 | Workflow.needsUpdate = false | 无需更新 |
@@ -2901,42 +2874,25 @@ Client / OP / Workflow / Job 四个管理列表均采用**行内展开/折叠**�
 | `D1` | ② **DB 排队**（入队 = 写 `step_records` waiting，池满不报错）+ **超时自子进程 spawn 起算**（排队时长不计入）+ **waiting 的 step 可直接 cancel** | crud-03 4.4；crud-05 4.6；crud-01 5.1 |
 | `D2` | ① `timeRange` **固定枚举**（无自定义区间，不含 `startMs`/`endMs`） | proposal-01 §12.4；tasks 附二 C2 |
 | `D2` | ② **术语澄清**：「派发 = 入 DB 排队」≠「执行失败」≠「DB 错误」 | crud-03 4.4 |
-| `D2` | ③ **允许保存草稿（D2 闭环）**：保存仅做字段 / 结构类校验，拓扑 / 连通 / 绑定类校验推迟到 `[校验]` 与创建 Run 前 | crud-03 3.3 |
 | `D3` | ① 同一 step 多次执行（重试 / 循环回跳）**一律以最后一条 StepRecord 为准**（不做 `attempts` 内嵌数组） | proposal-01 §12.3；crud-05 3.5.5 |
 | `D3` | ② 导出 `count` **单一来源在后端**（`POST /api/runs/export` 返回 `count`，前端文件名取此值） | crud-05 3.5.10 |
 | `D4` | `=B`：**Job 列表不支持终止 / 重跑 / 重试**（`lastRun` 仅展示、不构成控制入口；这类操作只在运行历史界面） | proposal-01 §11.3；crud-04 3.4.1 |
 | `D4` | （本次新增）`job_queue_waiting_max` 触顶即拒新建 = **已接受的预期行为**，无需额外运维动作 | crud-03 4.4 |
-| `D5` | ① 导出**文件名校验范围 = 全部导出**（前端落盘前仅拒 `/`、`\`、`..`；不校验其它字符或扩展名） | crud-05 3.5.10；crud-01 3.1.7；crud-02 3.2.7；crud-03 3.3.8；crud-04 3.4.9 |
-| `D5` | ② **Client 类型匹配为硬契约**（前后端双保险）：前端所有 Client 下拉按 `OP.type` 过滤 + 后端在 Job / Workflow 提交时校验 `Client.type` 与 `OP.type` 一致（不一致 → 400 `CLIENT_TYPE_MISMATCH`） | proposal-01 §8.3 / §8.5 / §10.11 / §11.4；crud-02 3.2.6；crud-03 3.3 |
-| `D6` | ① `GET /api/workspaces` 数据源 = `job_runs.workspace` **去重 + 最近使用倒序**（不读配置或独立工作区表） | crud-06 3.6 |
-| `D6` | ② **重试续跑（resume seed）**：重试从源失败 / 超时 step 续跑，边状态初值（前缀边复制 + 死枝闭包）见 crud-03 4.3.4② | crud-03 4.3.4；crud-05 3.5.8 |
+| `D5` | 导出**文件名校验范围 = 全部导出**（前端落盘前仅拒 `/`、`\`、`..`；不校验其它字符或扩展名） | crud-05 3.5.10；crud-01 3.1.7；crud-02 3.2.7；crud-03 3.3.8；crud-04 3.4.9 |
+| `D6` | `GET /api/workspaces` 数据源 = `job_runs.workspace` **去重 + 最近使用倒序**（不读配置或独立工作区表） | crud-06 3.6 |
 | `D7` | 导出**文件名允许自定义**（默认名预填、可编辑；文件名不经接口，由前端落盘时使用） | crud-05 3.5.10；proposal-01 §12.11 |
-| `D9` | PUT 请求体携带系统生成字段（`clientId`/`workflowId`/`jobId`/`createdAtMs`/`updatedAtMs`）**一律忽略、不报错**（语义 = 整体替换可编辑字段；与配置只读项「显式拒绝 400」不同） | crud-01 3.1.4；crud-03 3.3.4；crud-04 3.4.4 |
-| `D10` | 导入名称锚**纳入校验的锚集合**（Workflow：`manifest.workflow.name` ↔ `workflow.yaml` 内 `name`、`manifest.ops[].name` ↔ 其 `file` 内 `name`；Job：`manifest.job.name` ↔ `job.yaml` 内 `name`、`manifest.target.name` ↔ `target.file` 内 `name`） | crud-03 3.3.9；crud-04 3.4.10 |
-| `D11` | 名称锚不一致 → 400 `VALIDATION_ERROR`，`message` **固定格式**（`名称锚不一致：manifest.<锚字段>=<值>，<包内路径> 内 name=<值>`；前端原样展示、不解析） | crud-03 3.3.9；crud-04 3.4.10 |
-| `D12` | 运行入口**校验顺序**（显式列表、返回首个命中；**全局 waiting 上限最先**） | crud-04 3.4.6；crud-05 3.5.7 / 3.5.8 |
-| `D13` | ① **被测前端口径**：被测前端 = T2 产出的 `ui/`（真实 HTTP API 直连后端）；`原型图/` 仅原型演示、**不作验证依据**；自 T2.1 起即 `fetch('/api/...')`，`mock-data.js` 不进 `ui/` | tasks.md T2.1；tests/集成测试用例.md「测试环境」 |
-| `D18` | **事件保留换算**：软删 = `engine_event_retention_days`（天）；硬删 = 软删 **+ 1 天**（默认 1 → 2 天） | crud-06 一；crud-03 4.3；tasks.md T9.15；schema.sql 第 6 节 |
 | `C1` | ① 操作按钮可用性**按 `can-retry` 五条件动态决定**（不写死；不可点则置灰 + 以 `reason` 作 tooltip） | proposal-01 §12.4 |
 | `C1` | ② **应用形态 = 非 Tauri**（普通 Rust 单体二进制，前端静态文件打包进二进制） | tasks.md 附二 C1；proposal-02 §1.1 |
-| `C4` | **crud-06 内部序号**：配置类接口一览（3.1–3.6）的编号，与 tasks 附二 C1/C2 **无对应关系** | crud-06 三「接口定义」 |
+| `C4` | **crud-06 内部序号**：配置类接口一览（3.1–3.6）的编号，与 tasks 附二 C1/C2 **无对应关系** | crud-06 §三（接口一览） |
 | `C7` | **crud-03 内部序号**：Worker 池相对并行度偏小 / 大量 step 停在 waiting 的运维提示 | crud-03 4.4 |
 | `U1` | 「执行体并发（15）」> 「Job 级并发（10）」的**维度差异**解释（非同一限制、非冲突） | crud-03 4.4；crud-05 4.6 |
 | `U13` | **StepComplete 写事件失败的兜底**：Worker 已写终态但事件 INSERT 失败 → 立即重试一次（幂等），仍失败交 Runner「运行中事件补齐」 | crud-03 4.3.0；crud-05 4.6 |
 | `T26` | **运行中 `process_event` 失败兜底**：调用方立即重试一次（幂等），仍失败则事件保持 processed=0，由 Runner 常驻轮询扫描重放 | crud-03 4.3.0；crud-05 4.6 |
 | `S1` | ① 池满时 step 在 waiting 积压的**边界与可接受性**（有界、不占内存、不丢任务） | crud-03 4.4 |
 | `S1` | ② `engine_start` 事件 **payload 定义快照的写入窗口**（崩溃落在 INSERT 与 UPDATE 之间 → 重放回退首次处理路径） | crud-03 4.3.0 |
-| `V11-B` | **失败传播**：任一 op failed 且无 activated 出边（无 `on_failure`/`always`）→ 置整个 Run failed（**不 abort 在飞**，等收敛落终态，`terminated_by=error`） | crud-03 4.3.1；proposal-01 §十五（循环场景） |
-| `D8` | 拓扑校验**允许环路**（不校验「环」；回跳由运行期计数兜底终止，见 §10.14 与 crud-03 4.3.0 ③） | proposal-01 §10.14；crud-03 3.3「校验规则」 |
-| `D14` | `max_loop_multiplier = 0` = **不施加绝对上限**（仍受 `max × 3` 约束，**不是无限**） | proposal-01 §15.2；crud-06 一 |
-| `D15` | `cancelled` Run 在**终止前存在失败 / 超时 step** 时 [重试] 可点 | proposal-01 §12.4 / §12.6；crud-05 3.5.9 |
-| `D16` | 触发筛选为 **5 个单值枚举一一对应**（`manual` / `schedule` / `single_op` / `single_workflow` / `retry`），不做多值合并 | proposal-01 §12.4 / §18.1.3；crud-05 3.5.1 |
-| `D17` | `job_runs.retry_from_record_id` = 源失败 / 超时 **StepRecord 主键**（原名 `retry_from_step_id` 已改名；仅 `retry` 入口写入，`rerun` 不写） | crud-03 4.3.4；crud-05 3.5.8；schema.sql 第 6 节 |
-| `决策-导入名称锚一致性` | 导入包 manifest 名称锚与包内文件 `name` **四项逐一对应**一致（任一不一致 → 400 `VALIDATION_ERROR`） | proposal-01 §8.9；crud-03 3.3.9；crud-04 3.4.10 |
-| `决策-出参来源校验` | 每个 `Workflow.outputs[].from` 必须指向**存在的 op 节点**且 `outputName` 在该 OP 出参中；否则校验不通过 | proposal-01 §10.14；crud-03 3.3「校验规则」 |
+| `V11-B` | **失败传播**：任一 op failed 且无 activated 出边（无 `on_failure`/`always`）→ 置整个 Run failed（**不 abort 在飞**，等收敛落终态，`terminated_by=error`） | crud-03 4.3.1；proposal-01 §15 |
 
-> **引用规范**：行内编号**不构成全局唯一 id**——同一字母在不同章节可指不同决策（见上表分义项），**引用必须带出处**（如「见 crud-03 4.4」）。**跨文件引用一律具名**（如 `crud-04 3.4.6.2「job_queue_waiting_max 的语义」`），**不得转引对方的局部 `#n` 编号**（如「crud-04 3.4.6 #3」）。
-> **同文件引用**：出现在同一文件内的编号视为该文件**内部条目号**，出处即该小节标题（如 `crud-03 4.4`），同文件引用可省略出处。
+> **引用规范**：行内编号**不构成全局唯一 id**——同一字母在不同章节可指不同决策（见上表分义项），**引用必须带出处**（如「见 crud-03 4.4」）。
 > **后续建议**：新增决策改用 **`决策-<主题>`**（如 `决策-超时计时起点`）命名，避免一符多义；历史编号按本表保留、不再新增同字母编号。
 
 ---

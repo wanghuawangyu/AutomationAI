@@ -51,7 +51,7 @@
 | type | enum | `prompt` / `bash` / `python` / `powershell` |
 | description | string \| null | 描述 |
 | content | string | OP 正文（脚本 / prompt 内容） |
-| timeoutSeconds | integer | 超时秒数，只属于 OP；**范围 1..86400**；**接口层必填**（创建 / 更新请求体与导入 YAML 缺失或超范围 → 400 `VALIDATION_ERROR`）；60 仅为新建表单**预填建议值**，非接口默认 |
+| timeoutSeconds | integer | 超时秒数，只属于 OP，默认 60 |
 | interactive | boolean | 占位，恒为 false，界面不暴露 |
 | version | integer | 版本号，默认 1 |
 | inputs | OpInput[] | 入参定义：`[{name, type:"string", required, default, description}]` |
@@ -68,10 +68,8 @@
 > - 时间字段 JSON 中统一为 string（毫秒时间戳）。
 > - 列表分页 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
->
-> **行内编号对照表（本文件用例）**：行内编号**不构成全局唯一 id**（同一字母在不同章节 / 文件可指不同决策，见 `proposal-01 §20.1`），本文件出现者及出处如下——`D5` = 导出默认文件名的校验范围 = **全部导出**（出处本文件 3.2.7 / crud-05 3.5.10）；`D9` = PUT 携带实体审计字段**一律忽略、不报错**（出处本文件 3.2.4）。**跨文件引用一律具名**（如「crud-04 3.4.6.2「`job_queue_waiting_max` 的语义」」），不使用别文件的小节内编号；**章号 / 节号写法**见 `proposal-02-后端设计.md` 顶部「引用与编号约定」。
 
-**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` 第 2 节 ops 全列对齐）：
+**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` §2 ops 全列对齐）：
 
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
@@ -80,7 +78,7 @@
 | `Op.type` | `ops.type` | prompt/bash/python/powershell |
 | `Op.description` | `ops.description` | 可空 |
 | `Op.content` | `ops.content` | OP 正文（脚本/prompt 内容） |
-| `Op.timeoutSeconds` | `ops.timeout_seconds` | 超时秒数，只属于 OP；范围 1..86400；接口层必填（缺失或超范围 → 400 `VALIDATION_ERROR`）；60 仅为新建表单预填建议值 |
+| `Op.timeoutSeconds` | `ops.timeout_seconds` | 超时秒数，只属于 OP，默认 60 |
 | `Op.interactive` | `ops.interactive` | 占位字段，默认 false，界面不暴露 |
 | `Op.version` | `ops.version` | 版本号，默认 1 |
 | `Op.inputs` | `ops.inputs` | 入参定义，JSON 数组 |
@@ -163,7 +161,7 @@
 | type | enum | 是 | prompt/bash/python/powershell |
 | content | string | 是 | OP 正文 |
 | description | string \| null | 否 | 描述 |
-| timeoutSeconds | integer | 是 | 超时秒数，**范围 1..86400**；**缺失 / 非整数 / 超范围 → 400 `VALIDATION_ERROR`**；60 仅为新建表单预填建议值（非接口默认） |
+| timeoutSeconds | integer | 否 | 默认 60（秒） |
 | inputs | OpInput[] | 否 | 默认 `[]` |
 | outputs | OpOutput[] | 否 | 默认 `[]` |
 
@@ -173,7 +171,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、content 为空、type 非法、**timeoutSeconds 缺失或超范围（须 1..86400）**、inputs/outputs 结构非法 |
+| 400 | `VALIDATION_ERROR` | name 为空或超 512 字符、content 为空、type 非法、inputs/outputs 结构非法 |
 | 409 | `OP_NAME_EXISTS` | name 已存在 |
 
 ---
@@ -206,9 +204,7 @@
 | 字段 | 类型 | 必填 | 说明 |
 |-|-|-|-|
 | bumpVersion | boolean | 是 | `false`=覆盖当前版本；`true`=version+1 |
-| op | OpCreateRequest | 是 | 更新的内容（**不含 `opId` / `version` / `createdAtMs` / `updatedAtMs`**；即使携带也**一律忽略、不报错**，见下「审计字段规则」） |
-
-> **审计字段规则（D9）**：请求体若携带 `opId` / `version` / `createdAtMs` / `updatedAtMs`（系统生成字段），后端**一律忽略、不报错**（语义 = 整体替换可编辑字段；`version` 是否递增**只由 `bumpVersion` 决定**）。**与配置只读项的区别**：配置接口（crud-06 3.4）对只读项（`db_path` / `workspace_root` / `config_version` / `db_version`）**明确拒绝并返回 400 `VALIDATION_ERROR`**；实体审计字段则**忽略、不报错**——二者语义不同，不可混用。
+| op | OpCreateRequest | 是 | 更新的内容（不含 id/version/时间戳） |
 
 **成功响应 `200 OK`**：返回更新后的 OP 对象。
 
@@ -216,7 +212,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | 请求体字段非法（**携带 `opId` / `version` / 审计字段不属于错误**——忽略并正常更新，见上「审计字段规则」；**`timeoutSeconds` 缺失或超范围同 3.2.3**） |
+| 400 | `VALIDATION_ERROR` | 请求体字段非法 |
 | 404 | `OP_NOT_FOUND` | opId 不存在 |
 | 409 | `OP_NAME_EXISTS` | 修改后的 name 与其他 OP 冲突 |
 
@@ -279,9 +275,9 @@
 | 状态码 | code | 场景 |
 |-|-|-|
 | 400 | `VALIDATION_ERROR` | clientId/workspace 缺失、inputs 含未定义参数、id 非法 |
-| 400 | `CLIENT_TYPE_MISMATCH` | **client.type 与 op.type 不匹配**（bash/python/powershell/prompt 须同类对应；如 bash 类 OP 指定了 prompt 类 Client）；`message` 固定为：`Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>`（本处为**同一校验口径基准**，crud-03 3.3 规则 11 / crud-04 3.4.3 均引此处） |
+| 400 | `CLIENT_TYPE_MISMATCH` | **client.type 与 op.type 不匹配**（bash/python/powershell/prompt 须同类对应；如 bash 类 OP 指定了 prompt 类 Client） |
 | 404 | `OP_NOT_FOUND` / `CLIENT_NOT_FOUND` | OP 或 Client 不存在 |
-| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达配置项 `job_queue_waiting_max`（`ai-automation.json`，默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6.2「`job_queue_waiting_max` 的语义」） |
+| 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
 
 ---
 
@@ -313,15 +309,13 @@
 | type | enum | 是 | `prompt` / `bash` / `python` / `powershell` |
 | description | string | 否 | 描述 |
 | content | string | 是 | OP 正文（脚本 / prompt 内容）；多行文本以 YAML 块标量（`\|`）表示 |
-| timeoutSeconds | integer | 是 | 超时秒数，**范围 1..86400**；**导入 / 请求体缺失或超范围 → 400 `VALIDATION_ERROR`**（60 仅为新建表单预填建议值，非接口默认） |
+| timeoutSeconds | integer | 否 | 超时秒数，缺省 60 |
 | interactive | boolean | 否 | 占位，恒为 false |
 | version | integer | 是 | 当前版本号（导出时快照；导入时沿用） |
 | inputs | list | 否 | 入参定义 `[{name, type:"string", required, default, description}]` |
 | outputs | list | 否 | 出参定义 `[{name, type:"string", description}]` |
 
-> **不入 YAML**：`opId` / `createdAtMs` / `updatedAtMs`——导入时由后端重新生成 / 创建（**`opId` 由后端重新生成**；引用它的一方（Workflow / ZIP 包）按其**名称**重映射，见 crud-03 3.3.9）。`content` 多行时导出为块标量（`\|`），导入解析后还原为 `OP.content`。
-
-> **`timeoutSeconds` 必填口径（导入 / 请求体统一）**：创建 / 更新请求体（3.2.3 / 3.2.4）与导入 YAML（3.2.8）中 `timeoutSeconds` 均为**必填**——**缺失或超出 `1..86400` → 400 `VALIDATION_ERROR`**。界面新建表单预填 60 仅为**建议值**，后端不以 60 作缺省（见 3.2.3 / 3.2.8 错误表）。
+> **不入 YAML**：`opId` / `createdAtMs` / `updatedAtMs`——导入时由后端重新生成 / 创建（`opId` 由名称锚重映射，见 3.2.8 / crud-03 3.3.9）。`content` 多行时导出为块标量（`\|`），导入解析后还原为 `OP.content`。
 
 **完整样例**：
 
@@ -347,18 +341,13 @@ outputs:
     description: 是否通过
 ```
 
-**错误响应**：
-
-| 状态码 | code | 场景 |
-|-|-|-|
-| 400 | `VALIDATION_ERROR` | opId 格式非法 |
-| 404 | `OP_NOT_FOUND` | opId 不存在 |
+**错误响应**：404 `OP_NOT_FOUND`。
 
 ---
 
 ### 3.2.8 POST /api/ops/import —— 从 YAML 导入 OP
 
-**功能说明**：从 YAML 文本解析并创建 OP，用于 OP 从外部迁移导入；若同名 OP 已存在返回 409（导入冲突）。YAML 字段按 3.2.7「OP YAML 格式规范」解析——`type` / `content` / **`timeoutSeconds`** 缺失或 `inputs` / `outputs` 结构非法 → 400 `VALIDATION_ERROR`；导入的 OP `version` **沿用包内值**（保真还原，`needsUpdate` 快照比对基准）。
+**功能说明**：从 YAML 文本解析并创建 OP，用于 OP 从外部迁移导入；若同名 OP 已存在返回 409（导入冲突）。YAML 字段按 3.2.7「OP YAML 格式规范」解析——`type` / `content` 缺失或 `inputs` / `outputs` 结构非法 → 400 `VALIDATION_ERROR`；导入的 OP `version` **沿用包内值**（保真还原，`needsUpdate` 快照比对基准）。
 
 **路径参数**：无　**查询参数**：无
 
@@ -378,7 +367,7 @@ outputs:
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（**name 超 512 字符**、**timeoutSeconds 缺失或超范围（必填，须 1..86400）**、**请求体字节数超配置项 `op_import_max_bytes`**（`ai-automation.json`，默认 1 MiB，见 crud-06 一）等） |
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（**name 超 512 字符**、**请求体字节数超 settings `op_import_max_bytes`**（默认 1 MiB，见 crud-06 一）等） |
 | 409 | `OP_NAME_EXISTS` | 同名 OP 已存在（导入冲突） |
 
 ---

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -312,7 +312,6 @@
                 <option value="">— 请选择 Client —</option>
               </select>
               <div class="hint">ℹ Client 为 OP 专有，选择后存放在 target 内（target=OP 时必选）</div>
-              <div class="hint" id="clientTypeHint" style="display:none"></div>
             </div>
           </div>
 
@@ -482,8 +481,8 @@
         <input type="text" id="exportFileName" value="job-hourly_check-v1.zip" />
       </div>
       <div class="tree" id="exportTree">job-hourly_check-v1.zip
-├── job.yaml
 ├── manifest.json
+├── job.yaml
 ├── workflows/
 │   └── deploy_workflow.yaml
 └── ops/
@@ -736,7 +735,7 @@
     var clientName = (t.kind === 'op' && t.clientId)
       ? escText(CLIENT_BY_ID[t.clientId] ? CLIENT_BY_ID[t.clientId].name : '(已删除)')
       : null;
-    var cronText = (job.trigger && job.trigger.kind === 'schedule') ? 'Cron: ' + (job.trigger.cron || '') : '手动';   // L-7：与列表列及 proposal-01 §14（Job「触发方式」列「手动 / Cron 表达式」）一致
+    var cronText = (job.trigger && job.trigger.kind === 'schedule') ? 'Cron: ' + (job.trigger.cron || '') : '手动触发';
     var note = job.needsUpdate ? '需要更新' : '';
     var params = job.inputs || {};
 
@@ -837,9 +836,8 @@
       if (kind === 'op') {
         // 编辑 / 复制：按 API 结构回填（target.opId / target.clientId）
         document.getElementById('opSelect').value = (jobDef.target.opId) || '';
-        // 一.4 修复：先把原 clientId 取出，重建（按 OP 类型过滤的）选项时作为 keepValue 传入；
-        // 否则下拉此刻只有占位项，赋值无效且 keep 取到空串 → 既有 Client 被清空、[保存] 必报错
-        onOpSelected((jobDef.target.clientId) || '');
+        document.getElementById('clientSelect').value = (jobDef.target.clientId) || '';
+        onOpSelected();
       } else {
         document.getElementById('wfSelect').value = (jobDef.target.workflowId) || '';
         onWfSelected();
@@ -892,44 +890,16 @@
   function initSelects() {
     document.getElementById('opSelect').innerHTML = '<option value="">— 请选择 OP —</option>' +
       OPS.map(function (o) { return '<option value="' + escText(o.opId) + '">' + escText(o.name) + '</option>'; }).join('');
-    document.getElementById('clientSelect').innerHTML = '<option value="">— 请选择 Client —</option>';   // D5：Client 下拉按所选 OP 类型过滤（见 onOpSelected），此处不预填全部 Client
+    document.getElementById('clientSelect').innerHTML = '<option value="">— 请选择 Client —</option>' +
+      CLIENTS.map(function (c) { return '<option value="' + escText(c.clientId) + '">' + escText(c.name) + '</option>'; }).join('');
     document.getElementById('wfSelect').innerHTML = '<option value="">— 请选择 Workflow —</option>' +
       WORKFLOWS.map(function (w) { return '<option value="' + escText(w.workflowId) + '">' + escText(w.name) + '</option>'; }).join('');
   }
   initSelects();
 
-  /* D5：按 OP 类型过滤 Client（映射见 proposal-01 §8.3；复用 op.html 的 clientsForType 思路） */
-  function clientsForOpType(type) {
-    return (CLIENTS || []).filter(function (c) { return c.type === type; });
-  }
-  /* D5：重建 Client 下拉——仅列出与所选 OP 类型匹配的 Client；无匹配时给出提示
-     一.4：keepValue 显式给定时以它为准（编辑 / 复制回填路径），否则沿用下拉当前值；
-     给定值不在过滤后的列表里（类型不匹配 / Client 已删）→ 不保留并提示重选 */
-  function refreshClientOptions(op, keepValue) {
-    var sel = document.getElementById('clientSelect');
-    var hint = document.getElementById('clientTypeHint');
-    var keep = (keepValue != null) ? keepValue : sel.value;
-    var list = op ? clientsForOpType(op.type) : [];
-    var keepValid = !!keep && list.some(function (c) { return c.clientId === keep; });
-    if (!keepValid) keep = '';
-    sel.innerHTML = '<option value="">— 请选择 Client —</option>' + list.map(function (c) {
-      return '<option value="' + escText(c.clientId) + '"' + (c.clientId === keep ? ' selected' : '') + '>' + escText(c.name) + '</option>';
-    }).join('');
-    if (op && !list.length) {
-      if (hint) { hint.textContent = '请先在 Client 管理中创建 ' + op.type + ' 类型的 Client'; hint.style.display = 'block'; }
-    } else if (hint && keepValue && !keepValid) {
-      hint.textContent = '当前 Client 类型与 OP 类型不匹配，请重新选择 ' + op.type + ' 类型的 Client';
-      hint.style.display = 'block';
-    } else if (hint) {
-      hint.style.display = 'none';
-      hint.textContent = '';
-    }
-  }
-
-  /* 选择 OP 后带出参数（opSelect.value = opId；参数名取自 OP 定义）；keepValue 见 refreshClientOptions */
-  function onOpSelected(keepValue) {
+  /* 选择 OP 后带出参数（opSelect.value = opId；参数名取自 OP 定义） */
+  function onOpSelected() {
     var op = OP_BY_ID[document.getElementById('opSelect').value];
-    refreshClientOptions(op || null, keepValue);   // D5：Client 下拉按 OP 类型过滤
     if (!op) { renderInitialInputs([]); return; }
     renderInitialInputs((op.inputs || []).map(function (i) { return i.name; }));
   }
@@ -1059,14 +1029,6 @@
     if (kindEl.value === 'op') {
       if (!document.getElementById('opSelect').value) return '请选择要执行的 OP';
       if (!document.getElementById('clientSelect').value) return '请选择 Client（target=OP 时必选）';
-      // D5：Client 类型必须与 OP 类型一致
-      var selOp = OP_BY_ID[document.getElementById('opSelect').value];
-      var selCl = CLIENT_BY_ID[document.getElementById('clientSelect').value];
-      // m3：UI 已按 OP 类型过滤 clientSelect 选项、不匹配值会被丢弃，故该分支在现实现下**不可达**；
-      // 保留为**双保险**（后端仍以 400 CLIENT_TYPE_MISMATCH 为准，见 crud-04 3.4.3），勿误判为活路径。
-      if (selOp && selCl && selOp.type !== selCl.type) {
-        return 'Client 类型与 OP 类型不匹配：OP ' + selOp.name + ' 为 ' + selOp.type + '，Client ' + selCl.name + ' 为 ' + selCl.type;
-      }
     } else if (!document.getElementById('wfSelect').value) {
       return '请选择要执行的 Workflow';
     }
@@ -1122,8 +1084,8 @@
     document.getElementById('exportFileName').value = 'job-' + name + '-' + version + '.zip';   // D4：默认名带 job- 前缀（crud-04 3.4.9）
 
     var tree = 'job-' + name + '-' + version + '.zip\n' +
-      '├── job.yaml\n' +
-      '├── manifest.json\n';
+      '├── manifest.json\n' +
+      '├── job.yaml\n';
 
     if (type === 'workflow') {
       tree += '├── workflows/\n' +

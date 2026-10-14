@@ -4,18 +4,18 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>运行历史 · AI 自动化</title>
-<script src="xlsx-lite.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="mock-data.js"></script>
 <script>
- /* L-9：导出组件为**本地内置库**（xlsx-lite.js，不依赖 CDN）。轻量检测：未加载时在按钮旁给出可见提示（不阻断页面）。
+ /* M3：「全部导出」依赖 CDN 的 SheetJS。轻量检测：CDN 不可达时在按钮旁给出可见提示（不引入新依赖、不阻断页面）。
     真正的拦截在 exportAll()/doExport() 中（明确 alert + 复位弹窗，不得静默无响应或抛未捕获异常）。 */
- window.__xlsxReady = (typeof XLSX !== 'undefined' && !!XLSX.utils);
+ window.__xlsxReady = (typeof XLSX !== 'undefined');
  document.addEventListener('DOMContentLoaded', function () {
    if (window.__xlsxReady) return;
    var hint = document.getElementById('exportCdnHint');
    if (hint) hint.style.display = 'inline';
    var btn = document.getElementById('exportAllBtn');
-   if (btn) btn.title = '导出组件未加载（请确认已随页面部署 xlsx-lite.js）';
+   if (btn) btn.title = '导出组件未加载（SheetJS CDN 不可达），请检查网络后重试';
  });
 </script>
 <link rel="stylesheet" href="workflow-canvas.css" />
@@ -158,8 +158,6 @@
   .lb-timeout{background:#fdf3e3;border-color:#d97706}
   .lb-running{background:#fef9e3;border-color:#eab308}
   .lb-wait{background:#f3f4f6;border-color:#9ca3af}
-  .lb-skip{background:#f9fafb;border-color:#9ca3af;border-style:dashed}   /* 一.6/UI-L1：未执行（与「等待中」区分） */
-  .lb-cancelled{background:#f3f4f6;border-color:#374151}                 /* 一.6/UI-L1：已取消（深灰框） */
   .lb-system{background:#e8f7ee;border-color:#16a34a;border-radius:50%}
 
   .exec-dag-scroll{overflow:auto;background:var(--bg)}
@@ -232,7 +230,7 @@
           <span class="last-updated" id="daemonStatus"></span><span class="last-updated" id="lastUpdated">最后更新 12:03:41</span>
           <button class="btn" onclick="manualRefresh()">刷新</button>
           <button class="btn toggle on" id="autoRefresh">自动刷新: 开</button>
-          <button class="btn btn-primary" id="exportAllBtn" onclick="exportAll()">全部导出</button><span class="last-updated" id="exportCdnHint" style="display:none;color:var(--failed)">导出组件未加载（请确认已随页面部署 xlsx-lite.js）</span>
+          <button class="btn btn-primary" id="exportAllBtn" onclick="exportAll()">全部导出</button><span class="last-updated" id="exportCdnHint" style="display:none;color:var(--failed)">导出组件未加载（SheetJS CDN 不可达）</span>
         </div>
       </div>
 
@@ -242,12 +240,12 @@
           <div class="filter-row">
             <select class="select" id="typeFilter" onchange="applyFilters()"><option value="">全部类型</option><option value="op">OP</option><option value="workflow">Workflow</option></select>
             <select class="select" id="sourceFilter" onchange="applyFilters()"><option value="">全部来源</option><option value="persistent">持久 Job</option><option value="virtual">单次执行</option></select>
-            <select class="select" id="triggerFilter" onchange="applyFilters()"><option value="">全部触发</option><option value="manual">手动</option><option value="schedule">定时</option><option value="single_op">单次执行 · OP</option><option value="single_workflow">单次执行 · Workflow</option><option value="retry">重试</option></select>
+            <select class="select" id="triggerFilter" onchange="applyFilters()"><option value="">全部触发</option><option value="manual">手动</option><option value="schedule">定时</option><option value="single_op">单次执行·OP</option><option value="single_workflow">单次执行·Workflow</option><option value="retry">重试</option></select>
             <select class="select" id="statusFilter" onchange="applyFilters()"><option value="">全部状态</option><option value="waiting">等待中</option><option value="running">运行中</option><option value="terminating">终止中</option><option value="success">成功</option><option value="failed">失败</option><option value="timeout">超时</option><option value="cancelled">已取消</option></select>
             <!-- 选项由 GET /api/workspaces 填充（crud-06 3.6） -->
             <select class="select" id="workspaceFilter" onchange="applyFilters()"><option value="">全部工作区</option></select>
             <!-- version = job_version（Job 修订号），显示与提交均为数字（crud-05 3.5.1） -->
-            <select class="select" id="versionFilter" onchange="applyFilters()"><option value="">全部版本</option></select>
+            <select class="select" id="versionFilter" onchange="applyFilters()"><option value="">全部版本</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
             <select class="select" id="timeFilter" onchange="applyFilters()"><option value="">时间 ▾</option><option value="last_1h">最近 1 小时</option><option value="last_24h">最近 24 小时</option><option value="last_2d">最近 2 天</option><option value="last_3d">最近 3 天</option><option value="last_5d">最近 5 天</option><option value="last_7d">最近 7 天</option><option value="last_30d">最近 30 天</option></select>
           </div>
         </div>
@@ -264,11 +262,9 @@
       <div class="detail-head">
         <div>
           <h1>执行详情: <span id="opDetailName">check_tests</span></h1>
-          <p class="sub" id="opDetailTrigger">触发: 单次执行 · OP</p>
+          <p class="sub" id="opDetailTrigger">触发: 虚拟 Job / 单次执行</p>
         </div>
         <div class="head-actions">
-          <button class="btn" id="opDetailRefreshBtn" onclick="manualRefreshDetail()">刷新</button>
-          <button class="btn toggle on" id="opDetailAutoRefresh" onclick="toggleDetailAutoRefresh('op')">自动刷新: 开</button>
           <button class="btn" id="opRerunBtn" onclick="openRerun('check_tests')">重跑</button>
         </div>
       </div>
@@ -291,7 +287,7 @@
         <div class="info-item"><div class="info-k">状态</div><div class="info-v" id="opInfoStatus"><span class="badge badge-success">✓ 成功</span></div></div>
         <div class="info-item"><div class="info-k">耗时</div><div class="info-v" id="opInfoDuration">12.3s</div></div>
         <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono" id="opInfoWorkspace">/path/to/workspace</div></div>
-        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="opInfoTrigger">单次执行 · OP</div></div>
+        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="opInfoTrigger">虚拟 Job / 单次执行</div></div>
       </div>
 
       <!-- 执行历史：同一 step 的多次执行记录 -->
@@ -337,10 +333,10 @@
       <div class="detail-head">
         <div>
           <h1>执行详情: <span id="wfDetailName">deploy_workflow</span></h1>
-          <p class="sub" id="wfDetailTrigger">触发: 持久 Job · 手动</p>
+          <p class="sub" id="wfDetailTrigger">触发: 持久 Job / 手动</p>
         </div>
         <div class="head-actions" id="wfHeadActions">
-          <!-- 由 JS 渲染：成功 → [重跑]；失败/超时/取消 → [重试]（can-retry 决定可点）+ [重跑]；运行中 → [终止] -->
+          <!-- 由 JS 渲染：失败 → [重试] [重跑]，运行中 → [终止]，超时 → [重跑] -->
         </div>
       </div>
 
@@ -370,7 +366,7 @@
         <div class="info-item"><div class="info-k">状态</div><div class="info-v" id="wfInfoStatus"><span class="badge badge-failed">✗ 失败</span></div></div>
         <div class="info-item"><div class="info-k">耗时</div><div class="info-v" id="wfInfoDuration">8.1s</div></div>
         <div class="info-item"><div class="info-k">工作区</div><div class="info-v mono" id="wfInfoWorkspace">/path/to/workspace</div></div>
-        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="wfInfoTrigger">持久 Job · 手动</div></div>
+        <div class="info-item"><div class="info-k">触发</div><div class="info-v" id="wfInfoTrigger">持久 Job / 手动</div></div>
       </div>
 
       <!-- Workflow 入参 / 出参（本次执行实际值） -->
@@ -423,9 +419,7 @@
             <span class="legend-item"><i class="legend-box lb-failed"></i>失败</span>
             <span class="legend-item"><i class="legend-box lb-timeout"></i>超时</span>
             <span class="legend-item"><i class="legend-box lb-running"></i>运行中</span>
-            <span class="legend-item"><i class="legend-box lb-wait"></i>等待中</span>
-            <span class="legend-item"><i class="legend-box lb-skip"></i>未执行</span>
-            <span class="legend-item"><i class="legend-box lb-cancelled"></i>已取消</span>
+            <span class="legend-item"><i class="legend-box lb-wait"></i>等待中 / 未执行</span>
           </div>
         </div>
 
@@ -458,7 +452,7 @@
           <input type="radio" name="retryMode" checked />
           <div>
             <div class="opt-title">从失败节点开始重试</div>
-            <div class="opt-desc">固定方式（已完成的前置节点不会重复执行，续跑见 §12.8）</div>
+            <div class="opt-desc">固定方式</div>
           </div>
         </label>
       </div>
@@ -515,7 +509,7 @@
         即将终止正在运行的 Run：<strong id="terminateName">deploy_workflow</strong>
       </div>
       <div style="margin-top:12px;font-size:12.5px;color:#96660a;background:#fff8e9;border:1px solid #f3e4bd;border-radius:8px;padding:10px 13px">
-        ⚠ 终止后当前 Run 状态为 cancelled，未执行的节点无执行记录（显示为未执行）。若终止前已有失败/超时 step，则可 [重试]（从该 step 起）；否则仅 [重跑]。
+        ⚠ 终止后当前 Run 状态为 cancelled，未执行的节点无执行记录（显示为未执行），不支持重试，只能重跑。
       </div>
     </div>
     <div class="modal-foot">
@@ -566,9 +560,6 @@
     Object.keys(views).forEach(function (k) {
       views[k].classList.toggle('active', k === name);
     });
-    // G10/§12.10：切入 / 切走详情视图时启停该视图的轮询（切走即停止；列表页开关与此互不干扰）
-    if (name === 'opDetail' || name === 'wfDetail') startDetailPoll(name === 'opDetail' ? 'op' : 'wf');
-    else stopDetailPoll();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -579,7 +570,7 @@
   /* ==================== 自动刷新开关（按 general.poll_interval_ms 轮询，crud-06 一） ==================== */
   var autoRefreshBtn = document.getElementById('autoRefresh');
   var autoRefreshTimer = null;
-  // M3/N6：前端轮询间隔经 GET /api/settings 读取（crud-06 3.3 / proposal-01 §12.10「轮询与刷新」D1 定稿）——
+  // M3/N6：前端轮询间隔经 GET /api/settings 读取（crud-06 3.3 / proposal-01 §18.2 D1 定稿）——
   // 页面不持有也不读取 mock 全局 SETTINGS（真实后端下该全局不存在，原兜底分支会成为 ReferenceError 隐患）
   var DEFAULT_POLL_INTERVAL_MS = 2000;   // N6：接口未返回前的**常量**兜底（与 general.poll_interval_ms 默认值一致）
   var pollIntervalCache = null;
@@ -613,90 +604,6 @@
     autoRefreshBtn.textContent = on ? '自动刷新: 开' : '自动刷新: 关';
     if (on) startAutoRefresh(); else stopAutoRefresh();
   });
-
-  /* ==================== Run 详情：刷新 / 自动刷新（§12.10 G10） ====================
-     - 详情页头部提供 [刷新] [自动刷新: 开] 开关；开关状态为**详情视图独立**，与列表页 autoRefresh 互不干扰。
-     - 自动刷新开且该 Run **有运行中的 Step** 时，按 general.poll_interval_ms（默认 2000）轮询轻量接口
-       GET /api/runs/{runId}/status（§17.5）；仅当该 Run 的状态 / 最后更新时间变化时才重取完整详情
-       GET /api/runs/{runId} 并重绘执行画布节点状态（只更新该 Run）。
-     - 无 running step 时自动停止轮询；切走详情视图（showView）即停止。 */
-  var detailAutoOn = { op: true, wf: true };   // §12.5/§12.6/§12.10：开关文案即 [自动刷新: 开] → 默认开
-  var detailPollTimer = null;
-  var detailPollView = null;    // 'op' | 'wf'
-  var detailPollRunId = null;
-  var currentOpRunData = null;  // 当前 OP 详情所查看的 Run 快照
-  var currentWfRunData = null;  // 当前 Workflow 详情所查看的 Run 快照
-  var currentOpDetailArgs = null;   // 重绘 OP 详情所需参数（刷新 / 轮询复用）
-
-  function detailRunSnapshot(view) {
-    if (view === 'op') return currentOpRunData;
-    if (view === 'wf') return currentWfRunData;
-    return null;
-  }
-  // 有运行中的 Step 才轮询（§12.10：无 running step 时自动停止）
-  function detailHasRunningStep(run) {
-    return !!(run && (run.steps || []).some(function (s) { return s.status === 'running'; }));
-  }
-  function stopDetailPoll() {
-    if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
-    detailPollView = null;
-    detailPollRunId = null;
-  }
-  function startDetailPoll(view) {
-    stopDetailPoll();
-    if (!detailAutoOn[view]) return;                      // 开关关 → 不轮询（手动 [刷新] 始终可用）
-    var run = detailRunSnapshot(view);
-    if (!detailHasRunningStep(run)) return;               // 无 running step → 自动停止（不建定时器）
-    detailPollView = view;
-    detailPollRunId = run.runId;
-    detailPollTimer = setInterval(detailPollTick, pollIntervalMs());
-  }
-  function detailPollTick() {
-    var view = detailPollView, runId = detailPollRunId;
-    if (!view || !runId) return;
-    mockFetch('/api/runs/' + runId + '/status').then(function (st) {
-      if (!st || detailPollView !== view) return;         // 已切走视图 → 丢弃迟到的响应
-      var run = detailRunSnapshot(view);
-      if (run && (st.status !== run.status || st.updatedAtMs !== run.updatedAtMs)) {
-        refreshDetailView(view);                          // 有变化 → 重取完整详情 + 重绘画布节点状态
-      }
-      if (!detailHasRunningStep(detailRunSnapshot(view))) stopDetailPoll();   // 无 running step → 自动停止
-    });
-  }
-  function detailRefreshControlsHtml(view) {
-    var on = detailAutoOn[view];
-    return '<button class="btn" id="' + view + 'DetailRefreshBtn" onclick="manualRefreshDetail()">刷新</button>' +
-      '<button class="btn toggle' + (on ? ' on' : '') + '" id="' + view + 'DetailAutoRefresh" onclick="toggleDetailAutoRefresh(\'' + view + '\')">自动刷新: ' + (on ? '开' : '关') + '</button>';
-  }
-  function toggleDetailAutoRefresh(view) {
-    detailAutoOn[view] = !detailAutoOn[view];
-    var btn = document.getElementById(view + 'DetailAutoRefresh');
-    if (btn) {
-      btn.classList.toggle('on', detailAutoOn[view]);
-      btn.textContent = detailAutoOn[view] ? '自动刷新: 开' : '自动刷新: 关';
-    }
-    if (detailAutoOn[view]) startDetailPoll(view); else stopDetailPoll();   // 开启即轮询 / 关闭即停止
-  }
-  function manualRefreshDetail() {
-    // 详情页 [刷新]：始终可用；与轮询走同一链路（重取完整详情 GET /api/runs/{runId}）
-    if (views.opDetail.classList.contains('active')) refreshDetailView('op');
-    else if (views.wfDetail.classList.contains('active')) refreshDetailView('wf');
-  }
-  function refreshDetailView(view) {
-    if (view === 'op' && currentOpDetailArgs) refetchOpDetail();   // 二.16：op 详情刷新 / 轮询重取完整详情
-    else if (view === 'wf' && currentWfRunId) openWfDetail(currentWfRunId);
-  }
-  /* 二.16（P2 / A3）：OP 详情重取完整详情并重绘（与 wf 详情的 openWfDetail 取数路径对称）。
-     [刷新] 与「轮询发现变化」都经此入口；已切走视图则丢弃迟到响应。 */
-  function refetchOpDetail() {
-    var a = currentOpDetailArgs || [];
-    var runId = a[5];
-    if (!runId) { openOpDetail.apply(null, a); return; }   // 无 runId（列表直开）无详情可取
-    mockFetch('/api/runs/' + runId).then(function (run) {
-      if (!run || currentOpRunId !== runId || !views.opDetail.classList.contains('active')) return;
-      renderOpDetail(a[0], a[1], a[2], a[3], a[4], run);
-    });
-  }
 
   function refreshDaemonStatus() {
     // M12：crud-06 3.1 / 3.2 —— 首页展示守护进程是否运行及运行时长（GET /api/system/status + GET /api/system/version）
@@ -791,9 +698,9 @@
     // D5：文件名不可含路径分隔符或 ".."（前端落盘前自校验）
     if (/[\/\\]/.test(fileName) || fileName.indexOf('..') >= 0) { alert('文件名不可包含路径分隔符或 ".."'); return; }
     if (!exportDirHandle) { alert('请先选择导出目录'); return; }
-    // L-9：导出组件（本地内置 xlsx-lite.js）不可用时给明确提示并复位弹窗，不得静默无响应 / 抛未捕获异常
+    // M3：导出组件（CDN SheetJS）不可用时给明确提示并复位弹窗，不得静默无响应 / 抛未捕获异常
     if (typeof XLSX === 'undefined') {
-      alert('导出组件未加载（请确认已随页面部署 xlsx-lite.js），请检查后重试');
+      alert('导出组件未加载（SheetJS CDN 不可达），请检查网络后重试');
       closeModal('exportModal');
       return;
     }
@@ -881,20 +788,8 @@
   loadWorkspaces();
   /* 刷新数据源（手动刷新 / 自动刷新共用）：重新拉取后按当前筛选重渲染
      crud-05 3.5.1：列表响应为 { items, total, page, page_size }，用 listItems 取数组 */
-  /* L5：版本筛选项按当前 Run 集合动态生成（不再硬编码 1/2/3） */
-  function renderVersionOptions() {
-    var sel = document.getElementById('versionFilter');
-    if (!sel) return;
-    var cur = sel.value;
-    var seen = {};
-    (fetchedRuns || []).forEach(function (r) { if (r.jobVersion != null) seen[String(r.jobVersion)] = true; });
-    var list = Object.keys(seen).sort(function (a, b) { return Number(a) - Number(b); });
-    sel.innerHTML = '<option value="">全部版本</option>' + list.map(function (v) {
-      return '<option value="' + escText(v) + '"' + (v === cur ? ' selected' : '') + '>' + escText(v) + '</option>';
-    }).join('');
-  }
   function refreshRuns() {
-    mockFetch('/api/runs').then(function (res) { fetchedRuns = listItems(res); renderVersionOptions(); applyFilters(); });
+    mockFetch('/api/runs').then(function (res) { fetchedRuns = listItems(res); applyFilters(); });
   }
 
   function changePageSize() {
@@ -970,14 +865,10 @@
           ? '<button class="btn btn-sm btn-danger" title="终止失败：OP 正在运行，不可终止" onclick="alert(\'终止失败：OP 正在运行，不可终止\')">终止</button>'
           : '<button class="btn btn-sm btn-danger" onclick="openTerminate(\'' + escText(r.runId) + '\')">终止</button>';
       }
-      // D15/G2：仅失败 / 超时 / 取消展示 [重试]（与 can-retry 判定一致）；成功 Run 只展示 [重跑]（proposal-01 §12.4「按状态显示」）
-      if (r.status === 'failed' || r.status === 'timeout' || r.status === 'cancelled') {
+      if (r.status === 'success' || r.status === 'failed' || r.status === 'timeout' || r.status === 'cancelled') {
         actions += retryInfo.ok
           ? '<button class="btn btn-sm btn-ghost-primary" onclick="openRetry(\'' + escText(r.runId) + '\')">重试</button>'
           : '<button class="btn btn-sm" disabled title="' + escText(retryInfo.reason || '不满足重试条件') + '">重试</button>';
-      }
-      // [重跑] 对全部终态展示（成功 / 失败 / 超时 / 取消）；成功 Run 仅 [重跑]（proposal-01 §12.4「按状态显示」）
-      if (r.status === 'success' || r.status === 'failed' || r.status === 'timeout' || r.status === 'cancelled') {
         actions += rerunInfo.ok
           ? '<button class="btn btn-sm" onclick="openRerun(\'' + escText(r.runId) + '\')">重跑</button>'
           : '<button class="btn btn-sm" disabled title="' + escText(rerunInfo.reason || '不可重跑') + '">重跑</button>';
@@ -1043,9 +934,6 @@
   }
   document.getElementById('view-list').addEventListener('click', runRowAction);
 
-  /* 一.6 / 二.15：Run 终态判定（画布与 OP 详情共用；原为 openWfDetail 内的局部常量） */
-  var RUN_TERMINAL = { success: true, failed: true, timeout: true, cancelled: true };
-
   /* ==================== OP 执行详情 ==================== */
   /* S1：进入 OP 执行详情时先把**所有展示位**重置为「— / 无」，无执行记录时不得残留上一个节点的任何字段 */
   function resetOpDetailSlots() {
@@ -1066,20 +954,9 @@
   }
 
   function openOpDetail(name, execVer, curVer, from, nodeData, runId) {
-    // 二.16（P2 / A3）：OP 详情「[刷新] / 轮询发现变化」统一经 refetchOpDetail() **重取完整详情**
-    // （GET /api/runs/{runId}），与 wf 详情路径对称（原实现只读内存快照 RUN_BY_ID，两路都不取数）。
-    // 首次进入按当前快照**同步**渲染（showView 立即可见），刷新 / 轮询才走取数重绘。
-    currentOpDetailArgs = [name, execVer, curVer, from, nodeData, runId];   // G10：刷新 / 轮询重绘所需的原始参数
-    currentOpRunId = runId || null;
-    renderOpDetail(name, execVer, curVer, from, nodeData, (runId && RUN_BY_ID[runId]) ? Object.assign({}, RUN_BY_ID[runId]) : null);   // 快照取副本（与 wf 详情一致，轮询才能比对出变化）
-  }
-
-  /* OP 执行详情渲染（同步）：openOpDetail 首绘与「重取完整详情」后重绘共用；preRun 为该 Run 的详情快照（可空） */
-  function renderOpDetail(name, execVer, curVer, from, nodeData, preRun) {
     currentOpName = name;
     currentOpFrom = from || 'from-list';
-    // currentOpRunId 由 openOpDetail 设定（renderOpDetail 重绘时保持不变）
-    // currentOpDetailArgs 同上（[刷新] / 轮询重绘入口仍复用 openOpDetail）
+    currentOpRunId = runId || null;
     resetOpDetailSlots();   // S1：先重置再填充（无执行记录时各展示位保持「— / 无」）
     document.getElementById('opDetailName').textContent = name;
     document.getElementById('opExecVer').textContent = execVer;
@@ -1089,7 +966,7 @@
 
     // G8：按调用方传入的 runId 定位 Run，只取**该 Run** 的 step（原实现按 opName 跨 Run 匹配，会展示别的 Run 的记录）
     var stepData = null;
-    var runData = preRun || null;   // 二.16：完整详情由 openOpDetail 重取后传入（null → 走下方兜底）
+    var runData = runId ? (RUN_BY_ID[runId] || null) : null;
     if (runData) {
       for (var k = 0; k < runData.steps.length; k++) {
         var st = runData.steps[k];
@@ -1114,7 +991,6 @@
       }
       if (stepData) break;
     }
-    currentOpRunData = runData || null;   // G10：详情轮询 / 判「无 running step 即停」用的 Run 快照
     if (stepData && stepData.bodySnapshot) {
       document.getElementById('opBodyBlock').textContent = stepData.bodySnapshot;
     }
@@ -1131,7 +1007,6 @@
     }
 
     // 执行历史：同一 step 的多条 StepRecord（D3：每条执行一条记录；默认选中最后一条）
-    var runTerminal = !!(runData && RUN_TERMINAL[runData.status]);   // 二.15：三态判定（仅终态 Run 才把「无记录 / waiting」归为未执行）
     opHistoryData = [];
     var histSelect = document.getElementById('opHistorySelect');
     if (runData && stepData) {
@@ -1140,9 +1015,6 @@
         var badge = h.status === 'success' ? '<span class="badge badge-success">✓ 成功</span>'
           : h.status === 'failed' ? '<span class="badge badge-failed">✗ 失败</span>'
           : h.status === 'timeout' ? '<span class="badge badge-timeout">⏱ 超时</span>'
-          : h.status === 'waiting' ? (runTerminal ? '<span class="badge badge-off">⊘ 未执行</span>' : '<span class="badge badge-waiting">◌ 等待中</span>')
-          : h.status === 'cancelled' ? '<span class="badge badge-off">⊘ 已取消</span>'
-          : h.status === 'terminating' ? '<span class="badge badge-terminating">⏹ 终止中</span>'
           : '<span class="badge badge-running">● 运行中</span>';
         var d = (h.durationMs == null) ? '—' : (h.durationMs / 1000).toFixed(1) + 's';
         return {
@@ -1162,18 +1034,7 @@
         : '<option value="0" selected>（无执行记录）</option>';
     }
     var unexecBar = document.getElementById('opUnexecutedBar');
-    if (unexecBar) {
-      // 二.15（A1/P1）：三态收口 —— 仅**终态** Run 且该节点无执行记录时才标「⊘ 未执行」；非终态不显示该条
-      // （节点保持「等待中」语义），图标须在文档图标集 ✓ ✗ ⏱ ● ✕ ⊘ 内（原实现用「◌」且不看 Run 终态）。
-      var showUnexec = runTerminal && !opHistoryData.length;
-      unexecBar.style.display = showUnexec ? 'inline-flex' : 'none';
-      unexecBar.textContent = showUnexec ? '⊘ 该节点未执行（本次 Run 无该节点的执行记录）' : '';
-    }
-    if (!opHistoryData.length && runData) {
-      // 二.15：无执行记录的节点状态徽标 —— 终态「⊘ 未执行」/ 非终态「◌ 等待中」（与画布节点状态三态一致）
-      var stNoRec = document.getElementById('opInfoStatus');
-      if (stNoRec) stNoRec.innerHTML = runTerminal ? '<span class="badge badge-off">⊘ 未执行</span>' : '<span class="badge badge-waiting">◌ 等待中</span>';
-    }
+    if (unexecBar) unexecBar.style.display = opHistoryData.length ? 'none' : 'inline-flex';
     if (opHistoryData.length) switchOpHistory(0);
 
     // 根据来源展示触发对象（G7：triggeredBy 五值统一映射）
@@ -1309,13 +1170,8 @@
       var wf = result.wf;
       var wfVersion = result.wfVersion;
       currentWfRunId = run.runId;   // G8：从画布进入 OP 执行详情时须带上本 Run 的 runId
-      currentWfRunData = run;       // G10：详情轮询 / 判「无 running step 即停」用的 Run 快照
 
     // 构建节点状态：从 run.steps 中匹配每个 op 节点的执行状态（steps 为扁平数组；同一 step 多条记录时取最后一条，D3）
-    // 一.6（S3）：**仅终态 Run** 才把「无 StepRecord」或「最终记录仍为 waiting」的节点判为未执行；
-    // 非终态 Run 的这类节点保持「等待中」（proposal-01:1920：未执行 = Run 结束时无 StepRecord，或最终记录为 cancelled 之前的 waiting 记录）
-    // 一.6 / 二.15：RUN_TERMINAL 已提为模块级常量（OP 详情三态判定复用）
-    var runTerminal = !!RUN_TERMINAL[run.status];
     currentWfNodes = {};
     (wf.nodes || []).forEach(function (n) {
       var workflowNodeId = n.workflowNodeId;
@@ -1326,19 +1182,18 @@
         currentWfNodes[workflowNodeId].status = 'success';
       } else if (n.kind === 'end') {
         if (run.status === 'success') currentWfNodes[workflowNodeId].status = 'success';
-        else currentWfNodes[workflowNodeId].status = runTerminal ? 'skipped' : 'waiting';   // D7/G9+m1：终态未到达 End = 未执行；非终态 = 未到达
+        else currentWfNodes[workflowNodeId].status = 'waiting';
       } else {
         // op 节点：stepId === workflowNodeId（一条执行 = 一条 StepRecord）
         var matched = lastRecordOf(run, workflowNodeId);
         if (matched) {
-          // 一.6：终态 Run 上最终记录仍是 waiting（如 cancelled 之前的 waiting）→ 归「未执行」（p01:1920）
-          currentWfNodes[workflowNodeId].status = (runTerminal && matched.status === 'waiting') ? 'skipped' : matched.status;
+          currentWfNodes[workflowNodeId].status = matched.status;
           currentWfNodes[workflowNodeId].exitCode = matched.exitCode;
           currentWfNodes[workflowNodeId].error = matched.error;
           currentWfNodes[workflowNodeId].inputs = matched.inputs;
           currentWfNodes[workflowNodeId].outputs = matched.outputs;
         } else {
-          currentWfNodes[workflowNodeId].status = runTerminal ? 'skipped' : 'waiting';   // D7/G9：Run 结束时无 StepRecord = 未执行；非终态仍为等待中
+          currentWfNodes[workflowNodeId].status = 'waiting';
         }
       }
     });
@@ -1417,25 +1272,22 @@
 
     // 操作按钮
     var headActions = document.getElementById('wfHeadActions');
-    var refreshHtml = detailRefreshControlsHtml('wf');   // G10：详情页头部 [刷新] [自动刷新]（状态与列表页互不干扰）
     var retryInfo = canRetryInfo(run);   // M2：经 GET /api/runs/{runId}/can-retry 取权威判定
     var rerunInfo = canRerunOf(run);
     // G9：[终止] 仅 running 展示；waiting / terminating 无操作（proposal-01 §12.6 头部操作按钮表）
     if (run.status === 'running') {
-      headActions.innerHTML = refreshHtml + '<button class="btn btn-danger" onclick="openTerminate(\'' + escJsStr(run.runId) + '\')">终止</button>';   // m1：内联处理器字符串字面量统一经 escJsStr 转义
+      headActions.innerHTML = '<button class="btn btn-danger" onclick="openTerminate(\'' + run.runId + '\')">终止</button>';
     } else if (run.status === 'success' || run.status === 'failed' || run.status === 'timeout' || run.status === 'cancelled') {
-      // D15/G2：失败 / 超时 / 取消可 [重试]（可否点击由 can-retry 决定）；成功 Run 仅 [重跑]
-      var retryBtn = (run.status === 'success') ? '' :
+      headActions.innerHTML =
         (retryInfo.ok
-          ? '<button class="btn btn-ghost-primary" onclick="openRetry(\'' + escJsStr(run.runId) + '\')">重试</button>'   // m1
-          : '<button class="btn" disabled title="' + escText(retryInfo.reason || '不满足重试条件') + '">重试</button>');
-      headActions.innerHTML = refreshHtml + retryBtn +
+          ? '<button class="btn btn-ghost-primary" onclick="openRetry(\'' + run.runId + '\')">重试</button>'
+          : '<button class="btn" disabled title="' + (retryInfo.reason || '不满足重试条件') + '">重试</button>') +
         (rerunInfo.ok
-          ? '<button class="btn" onclick="openRerun(\'' + escJsStr(run.runId) + '\')">重跑</button>'   // m1
-          : '<button class="btn" disabled title="' + escText(rerunInfo.reason || '不可重跑') + '">重跑</button>');
+          ? '<button class="btn" onclick="openRerun(\'' + run.runId + '\')">重跑</button>'
+          : '<button class="btn" disabled title="' + (rerunInfo.reason || '不可重跑') + '">重跑</button>');
     } else {
       // G3：waiting / terminating 无操作（§12.6 头部操作按钮表：等待调度 / 已提交终止，均不给按钮）
-      headActions.innerHTML = refreshHtml + '<span style="color:var(--text-dim);font-size:13px">—</span>';
+      headActions.innerHTML = '<span style="color:var(--text-dim);font-size:13px">—</span>';
     }
 
     // 入参 / 出参（proposal-01 §12.6：入参值读取该 Run 的 JobRun.inputs 运行入参快照）
@@ -1494,9 +1346,7 @@
       failed:   { cls: 'st-failed',   text: '✗ 失败' },
       timeout:  { cls: 'st-timeout',  text: '⏱ 超时' },
       running:  { cls: 'st-running',  text: '● 运行中' },
-      waiting:  { cls: 'st-wait',     text: '◌ 等待中' },
-      cancelled: { cls: 'st-cancelled', text: '✕ 已取消' },   // D7/G9：三态分离，cancelled 不再回落为「等待中」
-      skipped:   { cls: 'st-skip',      text: '⊘ 未执行' }    // D7/G9：Run 结束时该节点无 StepRecord → 未执行
+      waiting:  { cls: 'st-wait',     text: '◌ 等待中' }
     };
 
     WFCanvas.render(canvas, currentWfNodes, currentWfEdges, {
@@ -1505,10 +1355,7 @@
           return n.status === 'success' ? { cls: 'st-success', text: '已开始' } : { cls: 'st-wait', text: '未开始' };
         }
         if (n.kind === 'end') {
-          // m1：End 的节点状态由本函数独占渲染（读 n.status），否则上一个写入的 'skipped' 会成为死代码
-          if (n.status === 'success') return { cls: 'st-success', text: '已到达' };
-          if (n.status === 'skipped') return { cls: 'st-skip', text: '⊘ 未执行' };
-          return { cls: 'st-wait', text: '未到达' };
+          return n.status === 'success' ? { cls: 'st-success', text: '已到达' } : { cls: 'st-wait', text: '未到达' };
         }
         return STATUS_MAP[n.status] || STATUS_MAP.waiting;
       },
@@ -1522,8 +1369,7 @@
         return d ? d.name : (n.label || id);
       },
       edgeDashed: function (edge, to) {
-        // M3：未执行（skipped）与等待中（waiting）的入边均为灰色虚线（proposal-01:1867/1874 标「(未执行)」）
-        return (to.status === 'waiting' || to.status === 'skipped');
+        return (to.status === 'waiting');
       },
       onNodeClick: function (id, n) {
         if (n.kind === 'start' || n.kind === 'end') return;
@@ -1641,7 +1487,6 @@
 
   /* ==================== 初始化 ==================== */
   renderExecCanvas();
-  renderVersionOptions();   // L5：按初始 Run 集合生成版本筛选项
   // G6：自动刷新按钮默认 on，页面加载时须同步启动轮询（否则界面显示“开”却不轮询，首次点击反而切到“关”）
   if (autoRefreshBtn.classList.contains('on')) startAutoRefresh();
   // M12：首页展示守护进程状态与版本（GET /api/system/status + /api/system/version）
