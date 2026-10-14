@@ -19,6 +19,16 @@
  * - 列表接口响应统一为 `{ items, total, page, page_size }`（crud-01 3.1.1 / crud-02 / crud-03 / crud-04 / crud-05），
  *   前端消费列表响应一律用 `listItems(res)` 取数组。
  * - `needsUpdate`（Job / Workflow）是**后端动态计算字段**（不落库），此处为 mock 快照，仅用于界面展示。
+ * - **错误码口径（一.5 / 补充拍板 1）**：Client 类型与 OP 类型不匹配一律 `400 CLIENT_TYPE_MISMATCH`
+ *   （`proposal-02 §10.1` 总表为唯一口径），`message` **逐字**为 crud-03 规则 11 固定串
+ *   `Client 类型与 OP 类型不匹配：OP <opName> 为 <opType>，Client <clientName> 为 <clientType>`；
+ *   **不加「节点 X：」前缀，也不与其它校验错误用「；」合并**（否则不再是固定串）。
+ * - **导入体积上限（P5 / 二.2）**：mock 同样模拟服务端 400——OP/Client 按 YAML 文本 UTF-8 字节数、
+ *   Workflow/Job 按 ZIP 包（base64 解码后）字节数，分别对照 `op_import_max_bytes` / `client_import_max_bytes`。
+ * - **原型校验内核 / 校验面板定位（P-2 / 二.7）**：本文件的 `validateWorkflowOf()` 校验内核与
+ *   `workflow.html` 的校验面板（`WF_CHECK_RULES`）**仅作演示**，**不作为校验规格基线**；
+ *   规格一律以 `proposal-01 §10.14` + `proposal-02-后端crud-03 §3.3「校验规则」` 为准
+ *   （内核注释中的「规则 N」编号与 `crud-03 §3.3` 编号体系一致）。
  */
 
 /** 列表响应 → 数组：兼容 `{items,total,page,page_size}` 包裹结构（各列表接口统一，见文件头注释） */
@@ -45,11 +55,11 @@ function errorText(res) {
 
 /* ---------- triggeredBy 展示映射（5 值全量；proposal-01 §12.4 / crud-05 3.5.1 枚举） ---------- */
 var TRIGGER_TEXT = {
-  manual: '持久 Job / 手动',
-  schedule: '持久 Job / 定时',
+  manual: '持久 Job · 手动',
+  schedule: '持久 Job · 定时',
   single_op: '单次执行 · OP',
   single_workflow: '单次执行 · Workflow',
-  retry: '持久 Job / 重试'
+  retry: '重试'   // L11：重试独立为一档（不同 Job 形态前缀）——virtual Run 重试不再被错标为「持久 Job · 重试」
 };
 function triggerTextOf(triggeredBy) {
   return TRIGGER_TEXT[triggeredBy] || triggeredBy || '';
@@ -87,16 +97,6 @@ function __nameErrs(name) {
   return errs;
 }
 
-/** 名称 → 文件名 slug（crud-01 3.1.7 `client-<name>.yaml`；D5：不可含路径分隔符 / `..`） */
-function slugName(name) {
-  return String(name == null ? '' : name).trim()
-    .replace(/\s+/g, '_')
-    .replace(/[\\/:*?"<>|]+/g, '_')
-    .replace(/\.{2,}/g, '_')
-    .replace(/^\.+/, '')
-    .toLowerCase() || 'client';
-}
-
 // ========== Client 数据（GET /api/clients，crud-01 3.1）==========
 var CLIENTS = [
   {
@@ -126,8 +126,8 @@ var CLIENTS = [
     outputJsonPath: null,
     exitCodeSuccess: [0],
     binaryPath: null,
-    createdAtMs: '1728000000000',
-    updatedAtMs: '1728000000000'
+    createdAtMs: '1728106000000',
+    updatedAtMs: '1728106000000'
   },
   {
     clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
@@ -290,7 +290,7 @@ var OPS = [
     name: 'health_check',
     type: 'bash',
     description: '健康检查',
-    content: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"',
+    content: '#!/usr/bin/env bash\ncurl -sf "$AI_ENDPOINT/health"',   // G17：脚本类入参以环境变量 AI_<NAME> 注入（见 proposal-01 §8.4）
     timeoutSeconds: 30,
     interactive: false,
     version: 1,
@@ -363,7 +363,7 @@ var WORKFLOWS = [
       },
       {
         workflowNodeId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', label: 'node_deploy', kind: 'op', position: { x: 540, y: 50 },
-        opId: '10000000000000000000000000000003', opVersion: 2, clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        opId: '10000000000000000000000000000003', opVersion: 2, clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         bindings: { target_env: { kind: 'workflow_input', inputName: 'target_env' } },
         retry: { on: 'failure', max: 2, backoff: 'linear', interval: 2000 }
       },
@@ -384,7 +384,7 @@ var WORKFLOWS = [
     edges: [
       { from: '0a1b2c3d4e5f60718293a4b5c6d7e8f9', to: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', condition: 'on_success' },
       { from: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', to: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', condition: 'on_success' },
-      { from: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', to: '60718293a4b5c6d7e8f9a1b2c3d4e5f6', condition: 'on_failure' },
+      { from: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', to: '60718293a4b5c6d7e8f9a1b2c3d4e5f6', condition: 'on_failure' },   // 失败分支（普通条件边，非回跳边）；回跳边示例统一用 always（proposal-01 §15.3）
       { from: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', to: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', condition: 'on_success' },
       { from: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', to: '5f60718293a4b5c6d7e8f9a1b2c3d4e5', condition: 'on_success' },
       { from: '5f60718293a4b5c6d7e8f9a1b2c3d4e5', to: '2c3d4e5f60718293a4b5c6d7e8f9a1b2', condition: 'on_success' },
@@ -467,7 +467,7 @@ var WORKFLOWS = [
       { workflowNodeId: 'f9a1b2c3d4e5f60718293a4b5c6d7e8f', label: 'node_start', kind: 'start', position: { x: 20, y: 155 } },
       {
         workflowNodeId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', label: 'node_health', kind: 'op', position: { x: 180, y: 155 },
-        opId: '10000000000000000000000000000008', opVersion: 1, clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
+        opId: '10000000000000000000000000000008', opVersion: 1, clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
         bindings: { endpoint: { kind: 'workflow_input', inputName: 'endpoint' } },
         retry: null
       },
@@ -497,7 +497,7 @@ var JOBS = [
     version: 2,
     description: '清理过期日志',   // N3：crud-04 jobs.description（keyword 匹配维度之一）+ §11.4 编辑器「描述」回填
     kind: 'persistent',
-    target: { kind: 'op', opId: '10000000000000000000000000000006', opVersion: 2, clientId: 'e5f60718293a4b5c6d7e8f90a1b2c3d4' },   // proposal-01 §10.3：daily_cleanup → OP clean_logs v2（落后当前 v3 → needsUpdate）
+    target: { kind: 'op', opId: '10000000000000000000000000000006', opVersion: 2, clientId: 'e5f60718293a4b5c6d7e8f90a1b2c3d4' },   // proposal-01 §11.2 / §13.2：daily_cleanup → OP clean_logs v2（落后当前 v3 → needsUpdate）
     trigger: { kind: 'schedule', cron: '0 2 * * *' },
     enabled: true,
     workspace: '/path/to/workspace',
@@ -621,7 +621,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728105683000,
     finishedAtMs: 1728105695300,
     durationMs: 12300,
@@ -659,7 +659,7 @@ var RUNS = [
       },
       {
         recordId: 'step-004', stepId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', activationSeq: 1, retrySeq: 1,
-        opId: '10000000000000000000000000000003', opVersion: 2, opName: 'deploy', clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        opId: '10000000000000000000000000000003', opVersion: 2, opName: 'deploy', clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         status: 'failed', inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL',
         outputs: null, rawOutput: 'Deploy failed: connection refused', exitCode: 1, error: 'connection refused',
         timeoutMs: 120000, timedOut: false, startedAtMs: 1728104728700, finishedAtMs: 1728104730800, durationMs: 2100
@@ -673,7 +673,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728104710000,
     finishedAtMs: 1728104732600,
     durationMs: 22600,
@@ -697,14 +697,14 @@ var RUNS = [
     steps: [
       {
         recordId: 'step-006', stepId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', activationSeq: 1, retrySeq: 1,
-        opId: '10000000000000000000000000000008', opVersion: 1, opName: 'health_check', clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
-        status: 'failed', inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"',
+        opId: '10000000000000000000000000000008', opVersion: 1, opName: 'health_check', clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        status: 'failed', inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$AI_ENDPOINT/health"',
         outputs: { error: 'connection refused' }, rawOutput: 'Error: Connection refused', exitCode: 1, error: 'connection refused',
         timeoutMs: 30000, timedOut: false, startedAtMs: 1728104400000, finishedAtMs: 1728104408200, durationMs: 8200
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728104400000,
     finishedAtMs: 1728104408200,
     durationMs: 8200,
@@ -735,7 +735,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728103800000,
     finishedAtMs: 1728103806100,
     durationMs: 6100,
@@ -766,7 +766,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728102900000,
     finishedAtMs: 1728102960000,
     durationMs: 60000,
@@ -797,7 +797,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728019200000,
     finishedAtMs: 1728019203200,
     durationMs: 3200,
@@ -828,7 +828,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728106800000,
     finishedAtMs: 1728106812400,
     durationMs: 12400,
@@ -852,14 +852,14 @@ var RUNS = [
     steps: [
       {
         recordId: 'step-011', stepId: '0a1b2c3d4e5f60718293a4b5c6d7e8fa', activationSeq: 1, retrySeq: 1,
-        opId: '10000000000000000000000000000008', opVersion: 1, opName: 'health_check', clientId: 'd4e5f60718293a4b5c6d7e8f90a1b2c3',
-        status: 'success', inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$endpoint/health"',
+        opId: '10000000000000000000000000000008', opVersion: 1, opName: 'health_check', clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        status: 'success', inputs: { endpoint: 'http://svc:8080' }, bodySnapshot: '#!/usr/bin/env bash\ncurl -sf "$AI_ENDPOINT/health"',
         outputs: { healthy: 'true' }, rawOutput: 'Service is healthy', exitCode: 0, error: null,
         timeoutMs: 30000, timedOut: false, startedAtMs: 1728107400000, finishedAtMs: 1728107405300, durationMs: 5300
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728107400000,
     finishedAtMs: 1728107405300,
     durationMs: 5300,
@@ -894,7 +894,7 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728106900000,
     finishedAtMs: 1728106904100,
     durationMs: 4100,
@@ -932,14 +932,14 @@ var RUNS = [
       },
       {
         recordId: 'step-015', stepId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', activationSeq: 1, retrySeq: 1,
-        opId: '10000000000000000000000000000003', opVersion: 2, opName: 'deploy', clientId: 'c3d4e5f60718293a4b5c6d7e8f90a1b2',
+        opId: '10000000000000000000000000000003', opVersion: 2, opName: 'deploy', clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         status: 'waiting', inputs: { target_env: 'prod' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL',
         outputs: null, rawOutput: '', exitCode: null, error: null,
         timeoutMs: 120000, timedOut: false, startedAtMs: null, finishedAtMs: null, durationMs: null
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728108000000,
     finishedAtMs: null,   // 未结束：非终态不展示耗时（§12.4 结果列）
     durationMs: null,
@@ -977,12 +977,57 @@ var RUNS = [
       }
     ],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: 1728108600000,
     finishedAtMs: null,
     durationMs: null,
     createdAtMs: '1728108599000',
     updatedAtMs: '1728108610200'
+  },
+  {
+    runId: 'run-012',
+    name: 'deploy_workflow',
+    jobId: '20000000000000000000000000000003',
+    jobKind: 'persistent',
+    jobVersion: 2,
+    triggeredBy: 'manual',
+    target: { kind: 'workflow', opId: null, opVersion: null, workflowId: 'f0000000000000000000000000000001', workflowVersion: 2, name: 'deploy_workflow' },
+    inputs: { target_env: 'staging' },
+    workspace: '/path/ws-003',
+    status: 'cancelled',   // P6/m4：终态 cancelled 最小夹具，使 D15/G9 与一.6「cancelled 之前的 waiting 记录归未执行」可自动演示
+    terminatedBy: 'cancelled',
+    timeoutStepId: null,
+    timeoutOpName: null,
+    steps: [
+      {
+        recordId: 'step-018', stepId: '1b2c3d4e5f60718293a4b5c6d7e8f9a1', activationSeq: 1, retrySeq: 1,
+        opId: '10000000000000000000000000000001', opVersion: 2, opName: 'check_tests', clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        status: 'success', inputs: { test_cmd: 'pytest' }, bodySnapshot: '在当前工作区运行测试，并输出结果 JSON',
+        outputs: { passed: 'true' }, rawOutput: '10 tests passed', exitCode: 0, error: null,
+        timeoutMs: 300000, timedOut: false, startedAtMs: 1727996400000, finishedAtMs: 1727996410200, durationMs: 10200
+      },
+      {
+        recordId: 'step-019', stepId: '3d4e5f60718293a4b5c6d7e8f9a1b2c3', activationSeq: 1, retrySeq: 1,
+        opId: '10000000000000000000000000000002', opVersion: 2, opName: 'review', clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        status: 'cancelled', inputs: { test_result: 'pass' }, bodySnapshot: '审查测试结果并给出结论',
+        outputs: null, rawOutput: '', exitCode: null, error: null,
+        timeoutMs: 600000, timedOut: false, startedAtMs: 1727996410200, finishedAtMs: 1727996420000, durationMs: 9800
+      },
+      {
+        recordId: 'step-020', stepId: '4e5f60718293a4b5c6d7e8f9a1b2c3d4', activationSeq: 1, retrySeq: 1,
+        opId: '10000000000000000000000000000003', opVersion: 2, opName: 'deploy', clientId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        status: 'waiting', inputs: { target_env: 'staging' }, bodySnapshot: '将当前工作区部署到指定环境，并返回访问 URL',
+        outputs: null, rawOutput: '', exitCode: null, error: null,
+        timeoutMs: 120000, timedOut: false, startedAtMs: null, finishedAtMs: null, durationMs: null
+      }
+    ],
+    retryFromRunId: null,
+    retryFromRecordId: null,
+    startedAtMs: 1727996400000,
+    finishedAtMs: 1727996490000,
+    durationMs: 90000,
+    createdAtMs: '1727996399000',
+    updatedAtMs: '1727996490000'
   }
 ];
 
@@ -1022,7 +1067,8 @@ var RUN_START_AGO_MS = {
   'run-008': 1 * 86400000 + 2 * 3600000,   // hourly_check 最新 Run（成功）；**必须新于 run-003(2d4h)**，否则 hourly_check 会被判为「最近运行失败」
   'run-009': 30 * 60000,            // data_sync 最新 Run（失败）→ 支撑「最近执行失败」chip
   'run-010': 2 * 60000,
-  'run-011': 40 * 60000
+  'run-011': 40 * 60000,
+  'run-012': 5 * 3600000           // 新补 cancelled 夹具：5h 前（早于 manual_deploy 最新 Run run-011，不改各 Job 最新 Run 关系）
 };
 (function __rebaseRunTimestamps() {
   var now = Date.now();
@@ -1179,7 +1225,7 @@ function targetExists(target) {
 }
 
 /**
- * 重试前提（can-retry 五条件，cord-05 3.5.9 / 4.8）：
+ * 重试前提（can-retry 五条件，crud-05 3.5.9 / 4.8）：
  *  ① target=Workflow
  *  ② Run 已结束（failed / timeout / cancelled）**且存在失败或超时 step**
  *  ③ 版本一致（Run 快照版本 = 当前版本）
@@ -1210,7 +1256,7 @@ function canRetryOf(run) {
 }
 
 // ========== Settings 数据（GET /api/settings，与 crud-06 3.3 结构体一致）==========
-// runDir：当前配置目录（由 CLI 入口 -c 指定；未指定默认 ~/.ai-automation）；
+// runDir：当前运行目录（由 CLI 入口 -c 指定；未指定默认 ~/.ai-automation）；
 // ~ 仅为输入简写：后端启动时展开为当前用户家目录的绝对路径（Unix /home/<user>；Windows C:\Users\<user>），
 // 接口返回的 runDir / db_path / workspace_root 一律为已展开的绝对路径（下面用 Windows 形式示例），前端不再做展开/拼接
 var SETTINGS = {
@@ -1247,14 +1293,16 @@ var SETTINGS_DEFAULT = JSON.parse(JSON.stringify(SETTINGS));
 //   worker_pool_size / worker_max_concurrency —— **派生只读**（由 job_queue_running_max 计算得出）
 var READONLY_SETTING_KEYS = ['db_path', 'workspace_root', 'config_version', 'db_version', 'worker_pool_size', 'worker_max_concurrency'];
 
-/* 可配置项的数值上限（R6-G2：由 /api/settings 局部变量上移为模块级常量，页面导入处复用 `op.op_import_max_bytes`） */
+/* 可配置项的数值上限（R6-G2：由 /api/settings 局部变量上移为模块级常量，页面导入处复用 `op.op_import_max_bytes`）。
+   取值可为数字（仅上限）或 `{ max, min }` 对象（同时声明下限，见 crud-06 一 / N-4）。 */
 var SETTING_LIMITS = {
   'general.poll_interval_ms': 60000,
   'client.client_import_max_bytes': 104857600,
   'op.op_import_max_bytes': 104857600,
   'workflow.workflow_max_nodes': 1000,
   'history.job_queue_waiting_max': 1000,
-  'history.job_queue_running_max': 10,
+  // N-4 / 二.8：crud-06 `job_queue_running_max` 合法取值 = 范围 1..10（**下限 1**、上限 10，默认 10）
+  'history.job_queue_running_max': { max: 10, min: 1 },
   'history.history_max_per_job': 1000,
   'history.history_max_total': 100000,
   'history.history_max_age_days': 180,
@@ -1314,7 +1362,7 @@ function __spawnRun(src, triggeredBy, useLatestVersion) {
   newRun.timeoutStepId = null;
   newRun.timeoutOpName = null;
   newRun.retryFromRunId = (triggeredBy === 'retry') ? src.runId : null;
-  newRun.retryFromStepId = (triggeredBy === 'retry') ? (failedStepOf(src) || {}).stepId || null : null;
+  newRun.retryFromRecordId = (triggeredBy === 'retry') ? (failedStepOf(src) || {}).recordId || null : null;   // D17：溯源 StepRecord 主键（record_id）
   newRun.startedAtMs = null;   // crud-05 3.5.0 / proposal-01 §12.3：waiting 记录 startedAtMs 为 null（无开始时间，不匹配任何 timeRange 档）
   newRun.finishedAtMs = null;
   newRun.durationMs = null;
@@ -1382,7 +1430,7 @@ function __createVirtualRun(kind, def, inputs, workspace) {
     timeoutOpName: null,
     steps: [],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: null,   // waiting 记录 startedAtMs 为 null（开始时间由运行器置 running 时写入；crud-05 3.5.0）
     finishedAtMs: null,
     durationMs: null,
@@ -1447,7 +1495,7 @@ function __createJobRun(job) {
     timeoutOpName: null,
     steps: [],
     retryFromRunId: null,
-    retryFromStepId: null,
+    retryFromRecordId: null,
     startedAtMs: null,   // waiting 记录 startedAtMs 为 null（crud-05 3.5.0）
     finishedAtMs: null,
     durationMs: null,
@@ -1484,15 +1532,15 @@ function __createJobRun(job) {
   return run;
 }
 
-/* ==================== Workflow DAG 校验（R6-G1） ====================
+/* ==================== Workflow DAG 校验（R6-G1 / D8） ====================
    crud-03 3.3.6 `POST /api/workflows/{workflowId}/validate` → `{valid, errors}`：
-   「DAG 校验: 连通性、Start/End 存在、节点字段合法（允许回跳环，运行时计数终止）」。
-   规则集 = proposal-01-界面设计.md §10.14 的 **11 条**；errors 用同节的 **8 条失败文案**（缺少 Start / 缺少 End /
-   Start 有入边 / End 有出边 / Start 无出边 / End 无入边 / 节点从 Start 不可达 / 节点无法到达 End），
-   其余 3 条规则（无环、required 入参有来源、多入边节点有明确汇聚）按同一措辞风格补充。
-   回跳环：§10.14 注「循环回跳由重试 + 条件边实现，不算环」→ on_failure 条件边不参与环判定。 */
-var WF_LOOP_EDGE_CONDITION = 'on_failure';
-
+   「DAG 校验: 连通性、Start/End 存在、节点字段合法（**允许环路**，运行时计数终止）」。
+   D8：以 crud-03 §3.3 为契约基准——**拓扑校验不拒绝环**（回跳边由 Engine 运行期以「目标节点是否已执行过」推导，
+   由 min(max×3, max_loop_multiplier) 兜底终止），故本内核**不做环判定**（删除原「DAG 无环」规则）。
+   D3/D4/D5：新增「OP 节点必须指定 Client」「Client 类型必须与 OP 类型匹配」「参数绑定必须指向前置节点」三条规则；
+   原第 8 条「汇聚」已删除（与「required 入参必须有来源」无关）：`crud-03 §3.3` 明确节点汇聚由 DAG 边决定
+   （op 节点为 AND-join），**不作为校验项**，本内核亦不产生该 error（N-4）。
+   errors 文案对齐 proposal-01 §10.14 失败提示表（15 行）与 crud-03 §3.3 各条注（L-3）。 */
 /** 从 root 出发沿邻接表可达的节点集合（传反图即得「能到达 root」的集合） */
 function __reachableSet(root, adj) {
   var seen = {};
@@ -1507,32 +1555,93 @@ function __reachableSet(root, adj) {
   return seen;
 }
 
-/** DFS 找环（忽略 on_failure 回跳边）；返回环路径文案（如 `node_a → node_b → node_a`），无环返回 null */
-function __findWfCycle(nodes, edges, adj) {
-  var labelMap = {};
-  nodes.forEach(function (n) { labelMap[n.workflowNodeId] = n.label || n.workflowNodeId; });
-  var g = {};
-  nodes.forEach(function (n) { g[n.workflowNodeId] = []; });
-  edges.forEach(function (e) {
-    if (adj[e.from] === undefined || adj[e.to] === undefined) return;   // 悬挂边另计
-    if (e.condition === WF_LOOP_EDGE_CONDITION) return;                  // 回跳边不算环
-    g[e.from].push(e.to);
+/** 参数绑定是否构成「有来源」（D4）：不存在 / kind==="unbound" / literal 且 value==="" → 视为无来源 */
+function __bindingHasSource(b) {
+  if (!b || !b.kind) return false;
+  if (b.kind === 'unbound') return false;
+  if (b.kind === 'literal' && String(b.value == null ? '' : b.value) === '') return false;
+  return true;
+}
+
+/** Client 类型与 OP 类型是否匹配（D5 / §8.3）；返回错误文案或 null */
+function __clientTypeMismatch(op, client) {
+  if (!op || !client) return null;
+  if (op.type === client.type) return null;
+  return 'Client 类型与 OP 类型不匹配：OP ' + op.name + ' 为 ' + op.type + '，Client ' + client.name + ' 为 ' + client.type;
+}
+
+/** cron 表达式合法性（crud-04 3.4.3 / 3.4.4 的 `CRON_INVALID`）：标准 5 字段（分 时 日 月 周），
+    字段内支持 `*` / 数字 / 范围 `a-b` / 步长 `/s`（含“星号 + 步长”写法）/ 列表 `,`；不满足即非法。 */
+function __cronToken(tok, min, max) {
+  if (!tok) return false;
+  var m = tok.match(/^(\*|\d+|\d+-\d+)(\/(\d+))?$/);
+  if (!m) return false;
+  if (m[3] !== undefined && parseInt(m[3], 10) < 1) return false;
+  if (m[1] === '*') return true;
+  var r = m[1].split('-');
+  var a = parseInt(r[0], 10), b = r.length > 1 ? parseInt(r[1], 10) : a;
+  if (isNaN(a) || a < min || a > max) return false;
+  if (isNaN(b) || b < min || b > max || b < a) return false;
+  return true;
+}
+function __cronValid(expr) {
+  var parts = String(expr == null ? '' : expr).trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  var ranges = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+  for (var f = 0; f < 5; f++) {
+    var toks = parts[f].split(',');
+    for (var i = 0; i < toks.length; i++) {
+      if (!__cronToken(toks[i], ranges[f][0], ranges[f][1])) return false;
+    }
+  }
+  return true;
+}
+
+/** UTF-8 字节数（导入体积上限判定用；与后端「请求体字节数」同口径，非 JS 字符数） */
+function __utf8Len(s) {
+  var t = String(s == null ? '' : s), n = 0;
+  for (var i = 0; i < t.length; i++) {
+    var c = t.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < t.length) { n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+}
+
+/** base64 字符串解码后的字节数（ZIP 包体积上限判定用）；非法 base64 退化为按文本字节数计 */
+function __b64Bytes(b64) {
+  var s = String(b64 == null ? '' : b64).replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) return __utf8Len(b64);
+  var pad = (s.match(/=+$/) || [''])[0].length;
+  return Math.floor(s.length * 3 / 4) - pad;
+}
+
+/** 取配置项导入体积上限（crud-06：`op_import_max_bytes` / `client_import_max_bytes`，默认 1 MiB） */
+function __importMaxBytes(key) {
+  var grp = (String(key).indexOf('client') === 0) ? 'client' : 'op';
+  var v = parseInt((SETTINGS[grp] || {})[key], 10);
+  return isNaN(v) ? 1048576 : v;
+}
+
+/** D3/D5：OP 节点的 Client 字段级校验（POST / PUT / PUT 与 validate 共用）。
+    返回 { missing, mismatch }：
+      - missing  → clientId 缺失（crud-03 规则 10）→ 400 VALIDATION_ERROR（含节点标识）
+      - mismatch → Client 类型与 OP 类型不一致（规则 11）→ 400 CLIENT_TYPE_MISMATCH（§10.1 总表唯一口径），
+                   message 逐字等于 crud-03:122 固定串（不加「节点 X：」前缀） */
+function __wfNodeClientErrs(wf) {
+  var missing = [], mismatch = [];
+  ((wf && wf.nodes) || []).forEach(function (n) {
+    if (!n || n.kind !== 'op') return;
+    var lbl = n.label || n.workflowNodeId;
+    var opDef = OP_BY_ID[n.opId];
+    if (!n.clientId) { missing.push('OP 节点必须指定 Client（节点 ' + lbl + '）'); return; }
+    if (!opDef) return;   // OP 不存在另有规则报告
+    var mm = __clientTypeMismatch(opDef, CLIENT_BY_ID[n.clientId]);
+    if (mm) mismatch.push(mm);
   });
-  var state = {}, path = [], found = null;
-  var visit = function (id) {
-    if (found) return;
-    state[id] = 1;
-    path.push(id);
-    (g[id] || []).forEach(function (to) {
-      if (found) return;
-      if (state[to] === 1) found = path.slice(path.indexOf(to)).concat([to]);
-      else if (!state[to]) visit(to);
-    });
-    if (!found) { state[id] = 2; path.pop(); }
-  };
-  nodes.forEach(function (n) { if (!found && !state[n.workflowNodeId]) visit(n.workflowNodeId); });
-  if (!found) return null;
-  return found.map(function (id) { return labelMap[id]; }).join(' → ');
+  return { missing: missing, mismatch: mismatch };
 }
 
 /** Workflow DAG 校验内核：返回 { valid, errors }（errors 为空即通过） */
@@ -1544,7 +1653,9 @@ function validateWorkflowOf(wf) {
   var ofKind = function (k) { return nodes.filter(function (n) { return n.kind === k; }); };
   var starts = ofKind('start'), ends = ofKind('end'), opNodes = ofKind('op');
 
-  /* 规则 1 / 2：有且仅有一个 Start / 有且仅有一个 End */
+  /* 规则编号与 `crud-03 §3.3「校验规则」` 体系一致（A 组 9/10/11/16；B 组 1–7/13–15/18；C 组 12/17 为说明性、非校验项）。
+     说明性规则 12（悬挂 clientId）/ 17（允许环）不构成校验失败，本内核不产生 error。 */
+  /* crud-03 规则 1：有且仅有一个 Start、有且仅有一个 End */
   if (!starts.length) errors.push('Workflow 缺少 Start 节点');
   else if (starts.length > 1) errors.push('Workflow 只能有一个 Start 节点（当前 ' + starts.length + ' 个）');
   if (!ends.length) errors.push('Workflow 缺少 End 节点');
@@ -1563,9 +1674,9 @@ function validateWorkflowOf(wf) {
     outDeg[e.from]++; inDeg[e.to]++;
     adj[e.from].push(e.to); rev[e.to].push(e.from);
   });
-  if (dangling) errors.push('有 ' + dangling + ' 条连线引用了不存在的节点');
+  if (dangling) errors.push('有 ' + dangling + ' 条连线引用了不存在的节点');   // B 组：连线必须指向本 Workflow 内存在的节点
 
-  /* 规则 3 / 4 / 5 / 6：Start 无入边、End 无出边、Start 至少一条出边、End 至少一条入边 */
+  /* crud-03 规则 2 / 3 / 4 / 5：Start 无入边、End 无出边、Start 至少一条出边、End 至少一条入边 */
   if (sid) {
     if (inDeg[sid] > 0) errors.push('Start 节点不能有入边');
     if (outDeg[sid] === 0) errors.push('Start 节点至少需要一条出边');
@@ -1575,7 +1686,17 @@ function validateWorkflowOf(wf) {
     if (inDeg[eid] === 0) errors.push('End 节点至少需要一条入边');
   }
 
-  /* 规则 7 / 8：所有 OP 节点从 Start 可达 / 能到达 End */
+  /* crud-03 规则 16（A 组）：Start 无失败语义，不允许 on_failure 出边（恒 on_success / always） */
+  if (sid) {
+    edges.forEach(function (e) {
+      if (e.from === sid && e.condition === 'on_failure') {
+        errors.push('Start 节点不允许 on_failure 出边（Start 无失败语义）');
+      }
+    });
+  }
+
+  /* crud-03 规则 7：所有 op 节点从 Start 可达、且均能到达 End
+     （规则 6「从 start 出发可达 end」由规则 7 蕴含：任一 op 节点从 Start 可达且能到达 End 即成立，故不重复判定） */
   var reach = __reachableSet(sid, adj);
   var toEnd = __reachableSet(eid, rev);
   opNodes.forEach(function (n) {
@@ -1584,12 +1705,35 @@ function validateWorkflowOf(wf) {
     if (!toEnd[n.workflowNodeId]) errors.push('节点 ' + lbl + ' 无法到达 End');
   });
 
-  /* 规则 9：DAG 无环（循环回跳除外） */
-  var cyc = __findWfCycle(nodes, edges, adj);
-  if (cyc) errors.push('DAG 存在环 ' + cyc + '（回跳请用 on_failure 条件边 + 重试）');
+  /* crud-03 规则 9（A 组）：每个 op 节点必须绑定 opId + opVersion */
+  opNodes.forEach(function (n) {
+    var lbl = n.label || n.workflowNodeId;
+    if (!n.opId) errors.push('节点 ' + lbl + ' 未绑定 opId');
+    if (n.opVersion == null) errors.push('节点 ' + lbl + ' 未绑定 opVersion');
+  });
 
-  /* 规则 10：所有 required 入参必须有来源 —— OP 节点必填入参必须有绑定，Workflow required 入参必须被节点引用 */
-  var wfInputUsed = {};
+  /* crud-03 规则 10 / 11（D3/D5）：所有 OP 节点必须指定 Client；Client 类型必须与 OP 类型匹配 */
+  var wfClientErrs = __wfNodeClientErrs(wf);
+  wfClientErrs.missing.concat(wfClientErrs.mismatch).forEach(function (e) { errors.push(e); });
+
+  /* crud-03 规则 15（D4）：所有 required 入参必须有来源（不存在 / kind=unbound / 空 literal 均视为无来源）；
+     规则 14（D4）：参数绑定必须指向前置节点；规则 13：bindings 引用的前置节点出参必须存在。
+     注（S-2）：原「Workflow 级 required 入参须被某节点消费」判定已删除——该条在 `proposal-01 §10.14`
+     与 `crud-03 §3.3` 契约两侧均无（Workflow 入参由运行时提供，未被节点消费不构成非法）。 */
+  var lblOf = {};
+  nodes.forEach(function (n) { lblOf[n.workflowNodeId] = n.label || n.workflowNodeId; });
+  /* D4 / M1 / M2（二.6 采纳 (a)）：前置节点 = 反向可达 ∩ 从 Start 可达 ∩ 非「从当前节点正向可达」。
+     后两条分别排除①不可从 Start 到达的孤立节点、②允许环（D8）下经回跳边与当前节点互相可达的下游节点
+     （否则回跳环下游会被当作「前置」，首次迭代其出参尚无值）。判据见 proposal-01 §10.4 / §10.14。 */
+  var predOf = {};
+  nodes.forEach(function (n) {
+    var back = __reachableSet(n.workflowNodeId, rev);
+    var fwd = __reachableSet(n.workflowNodeId, adj);   // 含自身：自身不得作为前置
+    var set = {};
+    Object.keys(back).forEach(function (k) { if (reach[k] && !fwd[k]) set[k] = true; });
+    predOf[n.workflowNodeId] = set;
+  });
+
   opNodes.forEach(function (n) {
     var lbl = n.label || n.workflowNodeId;
     var opDef = OP_BY_ID[n.opId];
@@ -1597,29 +1741,34 @@ function validateWorkflowOf(wf) {
     var bindings = n.bindings || {};
     (opDef.inputs || []).forEach(function (i) {
       if (i.required !== true) return;
-      if (!bindings[i.name]) errors.push('节点 ' + lbl + ' 的 required 入参 ' + i.name + ' 没有来源');
+      if (!__bindingHasSource(bindings[i.name])) errors.push('节点 ' + lbl + ' 的 required 入参 ' + i.name + ' 没有来源');
     });
     Object.keys(bindings).forEach(function (k) {
       var b = bindings[k] || {};
-      if (b.kind === 'workflow_input') wfInputUsed[b.inputName] = true;
-    });
-  });
-  (wf.inputs || []).forEach(function (i) {
-    if (i.required === true && !wfInputUsed[i.name]) errors.push('Workflow 的 required 入参 ' + i.name + ' 没有来源');
-  });
-
-  /* 规则 11：有多条入边的节点必须有明确汇聚（入度 > 1 的节点，其 required 入参必须各有来源） */
-  opNodes.forEach(function (n) {
-    if (inDeg[n.workflowNodeId] <= 1) return;
-    var opDef = OP_BY_ID[n.opId];
-    if (!opDef) return;
-    (opDef.inputs || []).forEach(function (i) {
-      if (i.required !== true) return;
-      var b = (n.bindings || {})[i.name];
-      if (!b || !b.kind) {
-        errors.push('节点 ' + (n.label || n.workflowNodeId) + ' 有 ' + inDeg[n.workflowNodeId] + ' 条入边，required 入参 ' + i.name + ' 没有明确汇聚来源');
+      /* 参数绑定必须指向前置节点：node_output 的来源节点须为当前节点的前置节点 */
+      if (b.kind === 'node_output') {
+        if (b.workflowNodeId == null || adj[b.workflowNodeId] === undefined) {
+          errors.push('节点 ' + lbl + ' 的入参 ' + k + ' 绑定了不存在的节点出参');
+        } else if (!(predOf[n.workflowNodeId] || {})[b.workflowNodeId]) {
+          errors.push('节点 ' + lbl + ' 的入参 ' + k + ' 绑定了非前置节点 ' + (lblOf[b.workflowNodeId] || b.workflowNodeId) + ' 的出参');
+        }
       }
     });
+  });
+
+  /* crud-03 规则 18（B 组 / 决策-出参来源校验）：每个 `Workflow.outputs[].from` 的 `workflowNodeId`
+     必须**存在且为 op 节点**，`outputName` 必须在该节点 OP 定义的 `outputs[].name` 中；任一不满足 → 校验不通过。
+     文案对齐 proposal-01 §10.14 失败提示表（「出参 X 的来源节点不存在」/「出参 X 的来源出参不存在」）。 */
+  var nodeById = {};
+  nodes.forEach(function (n) { nodeById[n.workflowNodeId] = n; });
+  (wf.outputs || []).forEach(function (o) {
+    var on = (o && o.name) || '';
+    var src = (o && o.from) || null;
+    var srcNode = (src && src.workflowNodeId != null) ? nodeById[src.workflowNodeId] : null;
+    if (!srcNode || srcNode.kind !== 'op') { errors.push('出参 ' + on + ' 的来源节点不存在'); return; }
+    var srcOp = OP_BY_ID[srcNode.opId];
+    var outOk = !!srcOp && (srcOp.outputs || []).some(function (x) { return x.name === src.outputName; });
+    if (!outOk) { errors.push('出参 ' + on + ' 的来源出参不存在'); }
   });
 
   return { valid: errors.length === 0, errors: errors };
@@ -1657,10 +1806,15 @@ function mockFetch(path, options) {
               if (ENUM_KEYS[gk] && ENUM_KEYS[gk].indexOf(val) < 0) { errs.push(gk + ' 取值非法: ' + val); return; }
               if (BOOL_KEYS.indexOf(gk) >= 0 && val !== 'true' && val !== 'false') { errs.push(gk + ' 须为 true/false'); return; }
               if (LIMITS[gk]) {
+                // N-4 / 二.8：条目可为数字（仅上限）或 { max, min } 对象（同时判下限，如 job_queue_running_max 下限 1）
+                var lim = LIMITS[gk];
+                var limMax = (lim && typeof lim === 'object') ? lim.max : lim;
+                var limMin = (lim && typeof lim === 'object') ? lim.min : null;
                 var v = parseInt(val, 10);
                 if (isNaN(v)) { errs.push(gk + ' 须为整数: ' + val); return; }
-                if (!(gk === 'engine.max_loop_multiplier' && v === 0) && v > LIMITS[gk]) {
-                  errs.push(gk + '=' + v + '（上限 ' + LIMITS[gk] + '）');
+                if (limMin != null && v < limMin) { errs.push(gk + '=' + v + '（下限 ' + limMin + '）'); return; }
+                if (!(gk === 'engine.max_loop_multiplier' && v === 0) && limMax != null && v > limMax) {
+                  errs.push(gk + '=' + v + '（上限 ' + limMax + '）');
                 }
               }
             });
@@ -1731,6 +1885,10 @@ function mockFetch(path, options) {
       if (path === '/api/workflows') {
         if (method === 'POST') {
           var wCreateErrs = __nameErrs(body && body.name);   // R6-M1 / R6-G3：name 空或超 512 → 400 VALIDATION_ERROR
+          var wCreateCli = __wfNodeClientErrs(body);   // D3/D5：OP 节点 clientId 必填（VALIDATION_ERROR）+ 类型匹配（CLIENT_TYPE_MISMATCH）
+          // 一.5：类型不匹配单独成码、单独成 message（不与其它校验合并，保持固定串逐字一致）
+          if (wCreateCli.mismatch.length) return resolve(__err('CLIENT_TYPE_MISMATCH', wCreateCli.mismatch[0]));
+          wCreateErrs = wCreateErrs.concat(wCreateCli.missing);
           if (wCreateErrs.length) return resolve(__err('VALIDATION_ERROR', wCreateErrs.join('；')));
           if (body && WORKFLOW_BY_NAME[body.name]) return resolve(__err('WORKFLOW_NAME_EXISTS', 'Workflow 名称已存在: ' + body.name));
           var nb = Object.assign({}, body); delete nb.workflowId; delete nb.version; delete nb.createdAtMs; delete nb.updatedAtMs;
@@ -1744,6 +1902,8 @@ function mockFetch(path, options) {
       if (path === '/api/jobs') {
         if (method === 'POST') {
           // crud-04 3.4.3：target / trigger 缺失或非法、workspace 缺失/空、target=op 缺 target.clientId → 400 VALIDATION_ERROR（先校验后落库）
+          // 二.18（P4）：创建侧校验顺序与 crud-04 3.4.3/3.4.4 的显式列表一致 —— **字段级缺失/结构非法优先 → 语义/一致性（Client 类型匹配）**；
+          // 命中即返回，不合并、不越过。
           var newJobErrs = [];
           newJobErrs = newJobErrs.concat(__nameErrs(body && body.name));   // R6-M1 / R6-G3：name 空或超 512 统一口径
           if (!body || !body.target || (body.target.kind !== 'op' && body.target.kind !== 'workflow')) newJobErrs.push('target 非法');
@@ -1751,6 +1911,31 @@ function mockFetch(path, options) {
           if (!body || !body.trigger || (body.trigger.kind !== 'manual' && body.trigger.kind !== 'schedule')) newJobErrs.push('trigger 缺失/非法');
           if (!body || !body.workspace) newJobErrs.push('workspace 缺失/空');
           if (newJobErrs.length) return resolve(__err('VALIDATION_ERROR', newJobErrs.join('；')));
+          // 四.4（P2/m2）：② 语义 / 一致性（按序，与 crud-04 3.4.3 显式列表一致）——
+          // cron 非法 → 400 CRON_INVALID；target 引用的 OP / Workflow /（target=op 时）Client 不存在 → 404
+          if (body.trigger.kind === 'schedule' && !__cronValid(body.trigger.cron)) {
+            return resolve(__err('CRON_INVALID', 'cron 表达式非法: ' + body.trigger.cron));
+          }
+          if (body.target.kind === 'op') {
+            if (!OP_BY_ID[body.target.opId]) return resolve(__err('OP_NOT_FOUND', 'OP 不存在: ' + body.target.opId));
+            if (!CLIENT_BY_ID[body.target.clientId]) return resolve(__err('CLIENT_NOT_FOUND', 'Client 不存在: ' + body.target.clientId));
+          } else if (!WORKFLOW_BY_ID[body.target.workflowId]) {
+            return resolve(__err('WORKFLOW_NOT_FOUND', 'Workflow 不存在: ' + body.target.workflowId));
+          }
+          // 一.5（D5）：字段级校验通过后，才判 target=OP 时 Client 类型必须与目标 OP 类型一致 → 400 CLIENT_TYPE_MISMATCH，
+          // message 逐字为 crud-03 规则 11 固定串；命中即返回，不与其它校验用「；」合并
+          if (body && body.target && body.target.kind === 'op') {
+            var newJobMm = __clientTypeMismatch(OP_BY_ID[body.target.opId], CLIENT_BY_ID[body.target.clientId]);
+            if (newJobMm) return resolve(__err('CLIENT_TYPE_MISMATCH', newJobMm));
+          }
+          // inputs 键名须匹配 target（OP / Workflow）的参数定义，不匹配 → 400 VALIDATION_ERROR（crud-04 3.4.3 ②）
+          var newJobInputKeys = Object.keys(body.inputs || {});
+          if (newJobInputKeys.length) {
+            var newJobDef = body.target.kind === 'op' ? OP_BY_ID[body.target.opId] : WORKFLOW_BY_ID[body.target.workflowId];
+            var newJobDefNames = ((newJobDef || {}).inputs || []).map(function (x) { return x.name; });
+            var newJobBadKey = newJobInputKeys.filter(function (k) { return newJobDefNames.indexOf(k) < 0; })[0];
+            if (newJobBadKey) return resolve(__err('VALIDATION_ERROR', 'inputs 键名不匹配目标参数定义: ' + newJobBadKey));
+          }
           if (JOB_BY_NAME[body.name]) return resolve(__err('JOB_NAME_EXISTS', 'Job 名称已存在: ' + body.name));
           var nb = Object.assign({}, body); delete nb.jobId; delete nb.version; delete nb.createdAtMs; delete nb.updatedAtMs;
           var nj = Object.assign({ jobId: __uid32(), version: 1, kind: 'persistent', target: null, trigger: null, enabled: true, inputs: {}, concurrency: 'skip', needsUpdate: false, createdAtMs: String(Date.now()), updatedAtMs: String(Date.now()) }, nb);
@@ -1773,6 +1958,13 @@ function mockFetch(path, options) {
         // mock 从 YAML 文本解析 name / type / description / content / timeoutSeconds（简化行解析）；
         // name 缺失、type 缺失或非法 → 400 VALIDATION_ERROR（crud-02 3.2.8）。
         var ioYaml = (body && body.yaml) || '';
+        // P5 / 二.2（crud-02 3.2.8）：请求体字节数超配置项 op_import_max_bytes → 400 VALIDATION_ERROR
+        // （mock 同样模拟服务端上限校验，与前端 G16 拦截构成双保险）
+        var ioMax = __importMaxBytes('op_import_max_bytes');
+        var ioBytes = __utf8Len(ioYaml);
+        if (ioBytes > ioMax) {
+          return resolve(__err('VALIDATION_ERROR', '导入失败：内容大小 ' + ioBytes + ' 字节，超过上限 op_import_max_bytes（' + ioMax + ' 字节）'));
+        }
         var iopName = String((ioYaml.match(/^name:\s*(.+)$/m) || [])[1] || (body && body.name) || '').trim();
         var iopType = String((ioYaml.match(/^type:\s*(.+)$/m) || [])[1] || (body && body.type) || '').trim();
         var iopTimeout = parseInt((ioYaml.match(/^timeoutSeconds:\s*(\d+)/m) || [])[1], 10);
@@ -1781,12 +1973,20 @@ function mockFetch(path, options) {
         if (!iopType) ioErrs.push('导入的 YAML 缺少 type 字段');
         else if (['prompt', 'bash', 'python', 'powershell'].indexOf(iopType) < 0) ioErrs.push('导入的 YAML type 非法: ' + iopType);
         if (ioErrs.length) return resolve(__err('VALIDATION_ERROR', ioErrs.join('；')));
+        // 二.1（G5 拍板）：YAML 的 timeoutSeconds 为**必填**（crud-02 3.2.3 / 3.2.7 字段表「必填 = 是」，范围 1..86400）——
+        // **缺失或超范围一律 400**（不再缺省 60）；m9：与导入侧同口径。
+        if (isNaN(iopTimeout)) {
+          return resolve(__err('VALIDATION_ERROR', '导入的 YAML 缺少 timeoutSeconds 字段（必填，范围 1..86400 的整数）'));
+        }
+        if (iopTimeout < 1 || iopTimeout > 86400) {
+          return resolve(__err('VALIDATION_ERROR', '导入的 YAML timeoutSeconds 超范围（须为 1..86400 的整数）: ' + iopTimeout));
+        }
         if (OP_BY_NAME[iopName]) return resolve(__err('OP_NAME_EXISTS', '同名 OP 已存在（导入冲突）: ' + iopName));   // X7：crud-02 3.2.8
         var iop = {
           opId: __uid32(), name: iopName, type: iopType, version: 1,
           description: (ioYaml.match(/^description:\s*(.+)$/m) || [])[1] || '导入的 OP',
           content: (ioYaml.match(/^content:\s*(.+)$/m) || [])[1] || (body && body.content) || '',
-          timeoutSeconds: isNaN(iopTimeout) ? 60 : iopTimeout,   // crud-02 3.2.8：缺省 timeoutSeconds=60；YAML 给出时以文件内容为准
+          timeoutSeconds: iopTimeout,   // 二.1（G5）：timeoutSeconds 必填，已在上面校验；此处直接取 YAML 值（不再缺省 60）
           interactive: false, inputs: [], outputs: [], createdAtMs: String(Date.now()), updatedAtMs: String(Date.now())
         };
         OPS.push(iop); OP_BY_ID[iop.opId] = iop; OP_BY_NAME[iop.name] = iop;
@@ -1796,6 +1996,11 @@ function mockFetch(path, options) {
         // crud-03 3.3.9：请求体 { zip: <base64> }（导入请求体只含 zip，再无 yaml），同名 → 409。
         // mock 无法真正解包 ZIP：名称取 body.name（调用方可随请求带出文件名）或默认值，包内依赖复用等行为均为模拟。
         if (!body || !body.zip) return resolve(__err('VALIDATION_ERROR', '导入请求体缺少 zip 字段'));
+        // 二.2 / 拍板 12（crud-03 3.3.9 N7）：ZIP 包体积上限沿用现有键 op_import_max_bytes（不新造键），超限 → 400
+        var iwZipMax = __importMaxBytes('op_import_max_bytes');
+        if (__b64Bytes(body.zip) > iwZipMax) {
+          return resolve(__err('VALIDATION_ERROR', '导入失败：包体积 ' + __b64Bytes(body.zip) + ' 字节，超过上限 op_import_max_bytes（' + iwZipMax + ' 字节）'));
+        }
         var iwfName = (body && body.name) || 'imported_workflow';
         if (WORKFLOW_BY_NAME[iwfName]) return resolve(__err('WORKFLOW_NAME_EXISTS', '同名 Workflow 已存在（导入冲突）: ' + iwfName));   // X7：crud-03 3.3.9
         // 模拟「按 manifest 复用依赖」：以默认骨架（仅 Start + End）创建；依赖复用版本不一致的 warnings 模拟场景略
@@ -1816,6 +2021,11 @@ function mockFetch(path, options) {
         // crud-04 3.4.10：请求体 { zip: <base64> }（导入请求体只含 zip，再无 yaml），同名 → 409。
         // mock 无法真正解包 ZIP：名称取 body.name（调用方可随请求带出文件名）或默认值，依赖复用均为模拟。
         if (!body || !body.zip) return resolve(__err('VALIDATION_ERROR', '导入请求体缺少 zip 字段'));
+        // 二.2 / 拍板 12（crud-04 3.4.10 N7）：ZIP 包体积上限沿用现有键 op_import_max_bytes（不新造键），超限 → 400
+        var ijZipMax = __importMaxBytes('op_import_max_bytes');
+        if (__b64Bytes(body.zip) > ijZipMax) {
+          return resolve(__err('VALIDATION_ERROR', '导入失败：包体积 ' + __b64Bytes(body.zip) + ' 字节，超过上限 op_import_max_bytes（' + ijZipMax + ' 字节）'));
+        }
         var ijobName = (body && body.name) || 'imported_job';
         if (JOB_BY_NAME[ijobName]) return resolve(__err('JOB_NAME_EXISTS', '同名 Job 已存在（导入冲突）: ' + ijobName));   // X7：crud-04 3.4.10
         // 模拟「按 manifest 复用依赖」：target 指向现有首个 Workflow（复用，不自动创建）；Job.version 重置为 1（crud-04 3.4.10）
@@ -1836,6 +2046,12 @@ function mockFetch(path, options) {
         // crud-01 3.1.8：POST /api/clients/import —— 从 YAML 导入 Client（须先于 {clientId} 判断，parts[2]='import'）
         if (parts[2] === 'import' && method === 'POST') {
           var icYaml = (body && body.yaml) || '';
+          // P5 / 二.2（crud-01 3.1.8）：请求体字节数超配置项 client_import_max_bytes → 400 VALIDATION_ERROR
+          var icMax = __importMaxBytes('client_import_max_bytes');
+          var icBytes = __utf8Len(icYaml);
+          if (icBytes > icMax) {
+            return resolve(__err('VALIDATION_ERROR', '导入失败：内容大小 ' + icBytes + ' 字节，超过上限 client_import_max_bytes（' + icMax + ' 字节）'));
+          }
           var icName = (icYaml.match(/^name:\s*(.+)$/m) || [])[1] || 'imported_client';
           var icType = (icYaml.match(/^type:\s*(.+)$/m) || [])[1] || 'prompt';
           if (CLIENT_BY_NAME[icName]) return resolve(__err('CLIENT_NAME_EXISTS', '同名 Client 已存在（导入冲突）: ' + icName));   // crud-01 3.1.8
@@ -1938,7 +2154,14 @@ function mockFetch(path, options) {
       if (parts[1] === 'workflows' && parts[2]) {
         var wf = WORKFLOW_BY_ID[parts[2]];
         if (parts[3] === 'execute') {
-          // crud-03 3.3.6：POST /api/workflows/{workflowId}/execute —— 单次执行（virtual Job）；入参 / 工作区取自请求体
+          // crud-03 3.3.6 / 4.4（proposal-01 §10.9 例外句）：单次执行前对**所引用版本**做拓扑校验，
+          // 不通过 → 400 VALIDATION_ERROR，前端提示「拓扑不合法，无法执行」；类型不匹配 → CLIENT_TYPE_MISMATCH（4.4）
+          if (wf) {
+            var exWfCli = __wfNodeClientErrs(wf);
+            if (exWfCli.mismatch.length) return resolve(__err('CLIENT_TYPE_MISMATCH', exWfCli.mismatch[0]));
+            var exWfChk = validateWorkflowOf(wf);
+            if (!exWfChk.valid) return resolve(__err('VALIDATION_ERROR', '拓扑不合法，无法执行：' + exWfChk.errors.join('；')));
+          }
           var exWfRun = __createVirtualRun('workflow', wf, (body || {}).inputs, (body || {}).workspace);
           if (!exWfRun) return resolve(__err('VALIDATION_ERROR', '单次执行缺少工作区'));
           return resolve({ runId: exWfRun.runId });
@@ -1963,6 +2186,10 @@ function mockFetch(path, options) {
             if (wfUpdErrs.length) return resolve(__err('VALIDATION_ERROR', wfUpdErrs.join('；')));
           }
           if (wfUpd.name && wfUpd.name !== wf.name && WORKFLOW_BY_NAME[wfUpd.name]) return resolve(__err('WORKFLOW_NAME_EXISTS', 'Workflow 名称已存在: ' + wfUpd.name));
+          var wfUpdClientErrs = __wfNodeClientErrs(wfUpd);   // D3/D5：OP 节点 clientId 必填 + 类型匹配
+          // 一.5：类型不匹配 → CLIENT_TYPE_MISMATCH（固定 message 逐字，不合并）；缺失 clientId → VALIDATION_ERROR
+          if (wfUpdClientErrs.mismatch.length) return resolve(__err('CLIENT_TYPE_MISMATCH', wfUpdClientErrs.mismatch[0]));
+          if (wfUpdClientErrs.missing.length) return resolve(__err('VALIDATION_ERROR', wfUpdClientErrs.missing.join('；')));
           delete wfUpd.workflowId; delete wfUpd.version; delete wfUpd.createdAtMs; delete wfUpd.updatedAtMs;
           delete WORKFLOW_BY_NAME[wf.name];
           Object.assign(wf, wfUpd, { updatedAtMs: String(Date.now()) });
@@ -1988,6 +2215,16 @@ function mockFetch(path, options) {
         if (parts[3] === 'run') {
           // crud-04 3.4.9 / 4.8（N4）：手动触发一次 Job 执行——**创建 JobRun 并进入运行历史**
           // （triggeredBy=manual、status=waiting），返回 { runId }，前端随后跳转运行历史查看状态流转。
+          // §10.9 例外句：Job 触发执行（target=workflow）同样在**创建 Run 前**对引用版本做拓扑校验
+          if (job && job.target && job.target.kind === 'workflow') {
+            var jrWf = WORKFLOW_BY_ID[job.target.workflowId];
+            if (jrWf) {
+              var jrCli = __wfNodeClientErrs(jrWf);
+              if (jrCli.mismatch.length) return resolve(__err('CLIENT_TYPE_MISMATCH', jrCli.mismatch[0]));
+              var jrChk = validateWorkflowOf(jrWf);
+              if (!jrChk.valid) return resolve(__err('VALIDATION_ERROR', '拓扑不合法，无法执行：' + jrChk.errors.join('；')));
+            }
+          }
           var nrj = __createJobRun(job);
           if (!nrj) return resolve(__err('JOB_NOT_FOUND', 'Job 不存在: ' + parts[2]));
           return resolve({ runId: nrj.runId });
@@ -2007,6 +2244,10 @@ function mockFetch(path, options) {
             if (jobUpdErrs.length) return resolve(__err('VALIDATION_ERROR', jobUpdErrs.join('；')));
           }
           if (jobUpd.name && jobUpd.name !== job.name && JOB_BY_NAME[jobUpd.name]) return resolve(__err('JOB_NAME_EXISTS', 'Job 名称已存在: ' + jobUpd.name));
+          if (jobUpd.target && jobUpd.target.kind === 'op') {   // 一.5（D5）：target=OP 时 Client 类型必须与 OP 类型一致
+            var jobUpdMm = __clientTypeMismatch(OP_BY_ID[jobUpd.target.opId], CLIENT_BY_ID[jobUpd.target.clientId]);
+            if (jobUpdMm) return resolve(__err('CLIENT_TYPE_MISMATCH', jobUpdMm));   // 码与固定 message 对齐 crud-04 3.4.4
+          }
           delete jobUpd.jobId; delete jobUpd.version; delete jobUpd.createdAtMs; delete jobUpd.updatedAtMs;
           if (!('enabled' in jobUpd)) jobUpd.enabled = true;   // crud-04 3.4.3：enabled 可省略，默认 true
           var jobKeepId = job.jobId, jobKeepVer = parseInt(job.version, 10) || 1;
@@ -2068,7 +2309,7 @@ function mockFetch(path, options) {
             }
             return true;
           });
-          // 后端生成工作簿（原型在浏览器内借 CDN 的 SheetJS 扮演后端生成）
+          // 后端生成工作簿（原型在浏览器内以**本地内置**的轻量 xlsx 写入器 xlsx-lite.js 扮演后端生成，不依赖 CDN）
           var historyHeader = ['runId', 'name', 'jobId', 'jobKind', 'jobVersion', 'triggeredBy', 'workspace', 'status', 'terminatedBy', 'startedAtMs', 'finishedAtMs', 'durationMs'];
           var detailHeader = ['recordId', 'jobId', 'stepId', 'activationSeq', 'retrySeq', 'opId', 'opVersion', 'opName', 'clientId', 'status', 'exitCode', 'inputs', 'bodySnapshot', 'outputs', 'rawOutput', 'timedOut', 'startedAtMs', 'finishedAtMs', 'durationMs'];
           var historyRows = [historyHeader];
@@ -2088,9 +2329,10 @@ function mockFetch(path, options) {
               ]);
             });
           });
-          // M3：导出依赖 CDN 的 SheetJS；不可用时以明确错误返回（不得抛未捕获异常、也不得让 Promise 永不 settle）
-          if (typeof XLSX === 'undefined') {
-            return resolve(__err('EXPORT_UNAVAILABLE', '导出组件未加载（SheetJS CDN 不可达），请检查网络后重试'));
+          // L-9 / 一.4e：导出组件为**本地内置库**（xlsx-lite.js，不依赖 CDN）；不可用时按**内部错误**返回
+          // （本地导出库缺失属内部错误，复用 `proposal-02 §10.1` 总表内的 `INTERNAL_ERROR`，**不新增错误码**）
+          if (typeof XLSX === 'undefined' || !XLSX.utils) {
+            return resolve(__err('INTERNAL_ERROR', '导出组件未加载（请确认已随页面部署 xlsx-lite.js），请检查后重试'));
           }
           var efWb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(efWb, XLSX.utils.aoa_to_sheet(historyRows), '运行历史');
@@ -2117,6 +2359,8 @@ function mockFetch(path, options) {
         if (parts[3] === 'retry') return resolve({ runId: __spawnRun(run, 'retry', false).runId });
         if (parts[3] === 'steps' && parts[4]) return resolve(stepRecordsOf(run, parts[4]));
         if (parts[3] === 'steps') return resolve(run.steps || []);
+        // crud-05 3.5 / proposal-01 §12.10 + §17.5：GET /api/runs/{runId}/status —— 轻量轮询接口，
+        // **仅返回状态与最后更新时间**（不含 steps / inputs 等），供 Run 详情页自动刷新按 general.poll_interval_ms 轮询
         if (parts[3] === 'status') return resolve({ status: run.status, updatedAtMs: run.updatedAtMs });
         // M3：详情响应按 §12.3 附上 result（RunResult；由 steps 末条聚合，无 steps → null）
         return resolve(Object.assign({}, run, { result: runResultOf(run) }));

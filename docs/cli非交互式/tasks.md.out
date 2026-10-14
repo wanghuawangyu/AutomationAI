@@ -1,0 +1,40 @@
+41: | T1.1 | 初始化普通 Rust 二进制工程（bin crate，含 HTTP 服务与静态资源目录） | proposal-02 §1.1 | `cargo run -- start` 可启动 HTTP 服务 |
+42: | T1.2 | 规划并冻结项目目录结构 | proposal-02 §2（二、模块划分） | 目录树落盘并在 README 固化（见下方"目录约定"） |
+43: | T1.3 | 选定依赖并锁定版本 | proposal-02 §1.1 | `Cargo.toml`：`axum`、`tokio`、`sqlx`(或 rusqlite)、`serde`/`serde_json`、`serde_yaml`、`clap`、`tokio-cron-scheduler`、`tracing`/`tracing-subscriber`、`zip`、`rust_xlsxwriter`、`uuid`、**`rust-embed`（或 include_dir，内嵌前端静态资源）**、**`windows-service`（Windows 系统服务，T1.4 `install-service`）** |
+44: | T1.4 | CLI 入口骨架（clap）：`start / run / export / import / version / install-service / uninstall-service / service`，全局 `-c/--config-dir`；`start` 默认端口 `7878`、默认不开浏览器 | proposal-02 §9 | `ai-automation --help` 输出全部子命令；`install-service` 可注册为 Windows 服务 |
+46: | T1.6 | axum HTTP 骨架：`/api` 前缀、统一 JSON、CORS、健康探测；**静态资源路由**（`/` → 释放出的 `ui/`） | proposal-02 §3/§10 | `curl /api/system/version` 返回 `{version}`；浏览器可打开首页 |
+47: | T1.7 | 统一错误响应与错误码基座（`{error:{code,message}}`） | proposal-02 §10 | 400/404/409/500 结构一致 |
+48: | T1.8 | 统一分页/筛选/排序基座（`page/page_size/keyword/sort`） | proposal-02 §11（十一、分页规范） | 所有列表接口复用 |
+49: | T1.9 | 全局单例骨架：`store / Executor / WORKER_POOL / ENGINE / RUNNER / SCHEDULER`（`OnceLock<Arc>`） + `init()` 顺序 | proposal-02 §1.2 | 启动按序初始化、`recover()` 挂点预留 |
+50: | T1.10 | UUID(32 位无连字符) / 毫秒时间戳工具 | proposal-01 §2/§3 | 工具函数 + 单测 |
+84: > **数据源约定（拍板，正式前端代码）**：`原型图/mock-data.js` 仅用于**原型演示**（原型阶段），**不进 `ui/`**。**正式前端代码自 T2.1 起即不经过任何 mock 联调阶段**：T2.1 起 `ui/` 内所有请求一律走后端 HTTP API（`fetch('/api/...')` 直连真实后端、返回真实 DB 数据），**前端不内置任何静态业务数据兜底**。**T2.1 从 `原型图/*` 搬运 DOM/CSS/交互结构时，必须同步删除 `mock-data.js`、把全部 `mockFetch(...)` 改写为 `fetch('/api/...')`**（原型仅作视觉基线，不作运行依赖）；错误展示按后端统一响应 `{error:{code,message}}`（错误码总表 proposal-02 §10.1）映射为提示文案，**不得静默回退到 mock 数据**。
+94: | T2.1 | 前端资源组织与构建：以 `原型图/*` 为**视觉基线**（复用 DOM/CSS/交互结构），整理为可嵌入的静态资源目录；**同步移除原型 mock 层**——删除 `mock-data.js`、把全部 `mockFetch(...)` 改写为 `fetch('/api/...')` | proposal-01 §4；tasks 数据源约定 | 产出 `ui/`（HTML/JS/CSS），**无外部依赖**（不含 `http(s)://` 外链）；机械判据：`grep -c "mockFetch(" ui/*` = 0、`ui/` 内不存在 `mock-data.js`；导出默认文件名 = `client-<name>.yaml`（name **原样**，不做字符替换 / 不做名称改写，见 crud-01 3.1.7） |
+95: | T2.2 | **构建内嵌 + 运行时释放**：`build.rs`/`rust-embed` 将 `ui/` 编入二进制；启动时在**二进制所在目录**把静态文件重写到磁盘（**目录名定稿为 `ui/`**，同名文件覆盖；失败不阻断启动、记 WARN 并回退用内嵌资源响应，见 proposal-02 §9.3） | proposal-02 §2（模块 13）/§9.3；tasks T1.2 目录约定 / T1.6 静态资源路由 | 双击二进制即得完整前端、无需外部文件；释放目录为 `<exe_dir>/ui/`，与 T1.6 静态路由及 proposal-02 §9.3 同口径 |
+96: | T2.3 | 两栏布局 + 左侧固定菜单（五一级项 + 左下角设置）+ 路由 | proposal-01 §4.1 | 启动默认进入运行历史 |
+97: | T2.4 | 通用组件：分页条、搜索框、筛选 chip、二次确认、版本确认对话框、自动刷新开关 | proposal-01 §18.0.1~18.0.3（分页）/§18.1（搜索与筛选）/§19.6（通用组件） | 组件复用 |
+98: | T2.5 | 前端 API 客户端层（base `/api`、分页/筛选参数、错误提示） | proposal-01 §18.1.3 | 统一 fetch 封装；**自 T2.1 起全部请求走后端 HTTP API、不引入 mock 联调（数据源约定）** |
+99: | T2.6 | Client 列表 + 行内展开 + 编辑器(prompt/脚本) + 测试/导入/导出对话框 | proposal-01 §8 | 对齐 T6 接口 |
+100: | T2.7 | OP 列表 + 行内展开 + 编辑器 + 单次执行对话框 + 导入/导出 | proposal-01 §9 | 对齐 T7 接口 |
+101: | T2.8 | 共享画布模块 `workflow-canvas.css/js`（只读 + 编辑模式，三色锚点/箭头/状态色） | proposal-01 §10.6/§19.9 | 三处画布复用同一实现 |
+102: | T2.9 | Workflow 列表 + 行内展开（只读画布） + 三栏编辑器（OP 库/画布/节点详情常驻）+ 校验面板 | proposal-01 §10 | 对齐 T8 接口 |
+103: | T2.10 | Job 列表 + 行内展开 + 编辑器 + 手动运行确认弹窗 + 导入/导出 | proposal-01 §11 | 对齐 T10 接口 |
+104: | T2.11 | 运行历史（首页）：列表 + 筛选（类型/来源/触发/状态/工作区/版本/时间）+ OP 详情 + Workflow 详情（只读画布）+ 终止/重跑/重试 + 全部导出 | proposal-01 §12 | Job 列表不给终止入口（终止仅在运行历史）；**「全部导出」使用打包进 `ui/` 的本地内置 SheetJS（不走 CDN）**，离线/内网环境可用 |
+105: | T2.12 | 设置界面 `settings.html`（分组导航 + 表单 + 只读项 + 恢复默认） | proposal-01 §4.2 / crud-06 | 对齐 T5 接口；`db_version` 不展示 |
+106: | T2.13 | 轮询与自动刷新（读 `general.poll_interval_ms`，默认 2000） | proposal-01 §7.8/§12.10 | 不误读后端 `runner.runner_poll_interval_ms`（Task Runner 调度轮询，crud-06 一） |
+107: | T2.14 | 导入/导出前端交互（YAML/ZIP 选文件、选目录；运行历史导出走后端接口） | proposal-01 §8.10/§17.7 | 与后端 T6/T7/T8/T10/T9 口径一致；导出组件为**打包进 `ui/` 的本地内置库（不走 CDN）** |
+119: | T3.1 | 连接池初始化（SQLite WAL、`foreign_keys=ON`） | proposal-02 §1.1 / schema 头 | 单文件 `{run}/data/data.db` |
+122: | T3.4 | `ClientRepo` / `OpRepo` / `WorkflowRepo` / `JobRepo` / `RunRepo` / `StepRepo` / `EngineEventRepo` trait + 实现 | proposal-02 §6（六、DB 操作层 Repository） | 业务代码零裸 SQL |
+123: | T3.5 | JSON 字段序列化/反序列化（inputs/outputs/target/trigger/bindings/retry/edges；`position` 为 `position_x`/`position_y` 两列，不入 JSON） | proposal-02 §6（六、DB 操作层 Repository） | TEXT 存取一致 |
+125: | T3.7 | 通用列表查询构造（keyword LIKE + 多条件 AND + 排序 + 分页） | proposal-02 §11（十一、分页规范） | 复用于各列表接口 |
+138: | T4.1 | `-c <run-dir>` 解析 + 默认 `~/.ai-automation` | proposal-02 §9 / crud-06 〇 | 未指定走默认 |
+140: | T4.3 | `tracing` + `tracing-subscriber` 结构化日志初始化 | proposal-02 §7（七、日志管理） | `{run}/logs/app-{date}.log` |
+143: | T4.6 | Run 日志 `{run}/logs/runs/{runId}.log`（不滚动、不参与 zip） | proposal-02 §7（七、日志管理） / crud-06 | 每 Run 一份 |
+157: | T5.2 | 配置服务模块：读 `ai-automation.json` → `Arc<RwLock<Config>>`（**不引入 `ConfigRepo` trait**，配置不走 Repository，见 proposal-02 §6） | crud-06 〇 | 唯一事实来源 |
+191: | T6.13 | 子进程启动（`current_dir=workspace`、独立进程组 `setsid/process_group=0`） + **spawn 起算超时** + 超时按进程组 kill 整树 | crud-01 5.1；proposal-01 §14.2 | 排队时长不计入 |
+236: | T8.12 | 全局完成回调冻结：`JobComplete` / `StepComplete`（按 `source=job/step` 分发） | proposal-02 §1.2；crud-03 4.4 | 与 T9 对齐 |
+240: | T8.16 | 循环回跳 + 执行总次数上限 `min(max×3, max_loop_multiplier)`（达上限整个 Run 失败） | crud-03 4.3.1；proposal-01 §15 | 接入 T5 配置 |
+262: | T9.2 | 常驻轮询调度线程：`runner_poll_interval_ms` 扫描、`job_queue_running_max` 并发阈值、`runner_batch_size` 批数、FIFO；OP 直接派 WorkerPool，Job/Workflow 调 `engine.notify(EngineStart)` | crud-05 4.6；proposal-02 §1.2 | waiting→running |
+276: | T9.16 | Runner 常驻 + 启动 `recover`（Engine 事件、WorkerPool running 残留） | proposal-02 §1.2 | 重启重建 |
+297: | T10.11 | Scheduler 单例（`tokio-cron-scheduler`，时区固定 Local，`scheduler_max_jobs` 上限） | proposal-02 §1.1；crud-04 4.5 | 启动加载 cron Job |
+309: | X2 | UUID(32 位) 生成、毫秒时间戳、JSON string 时间字段 | proposal-01 §2/§3 |
+310: | X3 | 全局完成回调接线（`JOB_COMPLETE` / `STEP_COMPLETE`）与单例 `init()` 顺序 | proposal-02 §1.2 |

@@ -1,0 +1,1 @@
+140: | 18 | **出参来源必须有效**：每个 `Workflow.outputs[].from` 的 `workflowNodeId` 必须**存在且为 op 节点**，`outputName` 必须在该节点 OP 定义的 `outputs[].name` 中；任一不满足 → 校验不通过（决策-出参来源校验；与 `proposal-01 §10.14` 同名条一致） | 400 `VALIDATION_ERROR` |

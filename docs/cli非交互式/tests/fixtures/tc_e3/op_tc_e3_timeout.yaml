@@ -1,0 +1,10 @@
+name: op_tc_e3_timeout
+version: 1
+type: bash
+description: TC-E3 超时用例（timeoutSeconds=1 + sleep 5）
+content: |
+  #!/usr/bin/env bash
+  sleep 5
+timeoutSeconds: 1
+inputs: []
+outputs: []

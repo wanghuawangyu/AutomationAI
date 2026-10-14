@@ -41,7 +41,7 @@
 **业务规则**：
 - `type=bash/python/powershell` 时需 `binaryPath`（`exitCodeSuccess` 为通用可选配置，默认 `[0]`）；其余 prompt 专用字段为空。
 - `type=prompt` 时需 `command`；`argsTemplate`（按 inputMode 使用占位符：arg=`{{prompt}}`、file=`{{prompt-file}}`、stdin=无，可选）、`inputMode`（arg/stdin/file）按需配置；`outputMode`/`outputJsonPath` **仅 prompt 类使用**（用于主函数解析 CLI 输出，见 5.4/5.5）。**脚本类（bash / python / powershell）不设 outputMode / outputJsonPath / argsTemplate / inputMode，恒为空（null）**。
-- 删除 Client 前检查是否被 Job 引用，被引用时返回 409。
+- 删除 Client 前检查是否被 **Job.target.clientId（`kind=op`）** 或 **Workflow 节点级 `clientId`** 引用，被引用时返回 409 `CLIENT_REFERENCED`（与 OP / Workflow 的引用检查对称）。
 
 **Client 对象字段说明**：
 
@@ -67,12 +67,14 @@
 
 > 以下为 Client 管理全部 API 的完整 HTTP 定义。通用约定：
 > - 基础路径 `/api`。
-> - 路径参数中的 `clientId` 均为 32 位无连字符 UUID，格式非法返回 400。
+> - 路径参数中的 `clientId` 均为 32 位无连字符 UUID，格式非法返回 400 `VALIDATION_ERROR`。
 > - 时间字段在 JSON 中统一为 string（毫秒时间戳）。
 > - 列表分页参数 `page` / `page_size`（`page_size` ∈ 10 / 50 / 100 / 1000，默认 10）。
 > - 错误响应统一格式 `{"error":{"code":"...","message":"..."}}`。
+>
+> **行内编号对照表（本文件用例）**：行内编号**不构成全局唯一 id**（同一字母在不同章节 / 文件可指不同决策，见 `proposal-01 §20.1`），本文件出现者及出处如下——`D5` = 导出默认文件名的校验范围 = **全部导出**（出处本文件 3.1.7 / crud-05 3.5.10）；`D9` = PUT 携带实体审计字段**一律忽略、不报错**（出处本文件 3.1.4）。**跨文件引用一律具名**（如「crud-04 3.4.6.2「`job_queue_waiting_max` 的语义」」），不使用别文件的小节内编号；**章号 / 节号写法**见 `proposal-02-后端设计.md` 顶部「引用与编号约定」。
 
-**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` §1 clients 全列对齐）：
+**字段命名 ↔ 数据库列映射**（API 字段 camelCase ↔ `schema.sql` 列 snake_case，按 `schema.sql` 第 1 节 clients 全列对齐）：
 
 | API 字段 | 数据库列 | 说明 |
 |-|-|-|
@@ -215,6 +217,8 @@
 | exitCodeSuccess | number[] \| null | 否   | 成功退出码，默认 `[0]`             |
 | binaryPath      | string \| null   | 条件 | type=bash/python/powershell 时必填 |
 
+> **缺省值口径**：`inputMode` / `outputMode` / `outputJsonPath` / `argsTemplate` 缺省为 `null`（**脚本类恒为 `null`**，不参与校验；前端「输入方式 = arg / 输出解析 mode = json」仅为**预填建议值**，非后端默认值）。
+
 **成功响应 `200 OK`**：返回已创建的完整 Client 对象（含后端生成的 `clientId`、`createdAtMs`、`updatedAtMs`）。
 
 **错误响应**：
@@ -228,7 +232,7 @@
 
 ### 3.1.4 PUT /api/clients/{clientId} —— 更新 Client
 
-**功能说明**：整体替换 Client 的可编辑字段。**`createdAtMs`、`updatedAtMs` 为审计字段，不允许在请求中指定，也不能被更新**——`createdAtMs` 在首次创建（POST /api/clients）时由后端生成并固定；`updatedAtMs` 在每次成功更新后由后端自动刷新。更新完成后，后端将本次更新内容写入操作审计日志。
+**功能说明**：整体替换 Client 的可编辑字段。**`clientId`、`createdAtMs`、`updatedAtMs` 为实体审计字段，后端一律忽略、不报错**——`createdAtMs` 在首次创建（POST /api/clients）时由后端生成并固定；`updatedAtMs` 在每次成功更新后由后端自动刷新。更新完成后，后端将本次更新内容写入操作审计日志。
 
 **路径参数**：
 
@@ -268,7 +272,7 @@
 | exitCodeSuccess | number[] \| null | 否   | 成功退出码                         |
 | binaryPath      | string \| null   | 条件 | type=bash/python/powershell 时必填 |
 
-> **审计字段规则**：请求若携带 `clientId` / `createdAtMs` / `updatedAtMs`，后端一律忽略（或返回 400，按实现约定）；`createdAtMs` 保持首次创建值不变，`updatedAtMs` 由后端刷新为当前时间戳。
+> **审计字段规则（D9）**：请求若携带 `clientId` / `createdAtMs` / `updatedAtMs`，后端**一律忽略、不报错**（语义 = 整体替换可编辑字段）；`createdAtMs` 保持首次创建值不变，`updatedAtMs` 由后端刷新为当前时间戳。**与配置只读项的区别**：配置接口（crud-06 3.4）对只读项（`db_path` / `workspace_root` / `config_version` / `db_version`）**明确拒绝并返回 400 `VALIDATION_ERROR`**；实体审计字段则**忽略、不报错**——二者语义不同，不可混用。
 
 **审计日志**：接口完成更新后，将本次更新内容写入操作审计日志（存储位置见后端设计文档第七章「日志管理」——操作审计，DB 或日志文件）。记录内容至少包含：
 
@@ -286,7 +290,7 @@
 
 | 状态码 | code                 | 场景                                             |
 | ------ | -------------------- | ------------------------------------------------ |
-| 400    | `VALIDATION_ERROR`   | 请求体字段非法（含请求携带审计字段时按约定拒绝） |
+| 400    | `VALIDATION_ERROR`   | 请求体字段非法（如 name 超 512 字符、type 非法、type 条件缺字段；**携带审计字段不属于错误**——忽略并正常更新，见上「审计字段规则」） |
 | 404    | `CLIENT_NOT_FOUND`   | clientId 不存在                                        |
 | 409    | `CLIENT_NAME_EXISTS` | 修改后的 name 与其他 Client 冲突                 |
 
@@ -294,7 +298,7 @@
 
 ### 3.1.5 DELETE /api/clients/{clientId} —— 删除 Client
 
-**功能说明**：删除 Client。若该 Client 正被 Job 引用则返回 409 拒绝删除，避免产生悬挂引用。
+**功能说明**：删除 Client。若该 Client 正被 **Job.target.clientId（`kind=op`）** 或 **Workflow 节点级 `clientId`** 引用则返回 409 拒绝删除，避免产生悬挂引用。
 
 **路径参数**：
 
@@ -318,7 +322,7 @@
 | ------ | ------------------- | ----------------------------------- |
 | 400    | `VALIDATION_ERROR`  | clientId 格式非法                         |
 | 404    | `CLIENT_NOT_FOUND`  | clientId 不存在                           |
-| 409    | `CLIENT_REFERENCED` | 该 Client 正被 Job 引用，删除被拒绝 |
+| 409    | `CLIENT_REFERENCED` | 该 Client 正被 **Job.target.clientId（`kind=op`）** 或 **Workflow 节点级 `clientId`** 引用，删除被拒绝 |
 
 ---
 
@@ -364,7 +368,7 @@
 
 | 响应字段   | 类型             | 说明                                                          |
 | ---------- | ---------------- | ------------------------------------------------------------- |
-| success    | boolean          | Executor 调用流程是否正常跑完（run.xxx 退出码 0 且 rc_file 可读） |
+| success    | boolean          | 本次测试是否成功：`ExecuteResult.status == success`（`rc_file` 退出码 ∈ `exitCodeSuccess`，默认 `[0]`；**超时亦为 `false`**） |
 | exitCode   | integer          | 用户脚本/CLI 的退出码（读自 rc_file；测试用例正常应为 0）      |
 | rawOutput  | string \| null   | 测试用例的原始输出（读自 stdout_file）                         |
 | error      | string \| null   | 失败原因（读自 stderr_file，或流程自身错误）                   |
@@ -398,9 +402,14 @@
 |-|-|-|
 | yaml | string | YAML 文本内容（前端写入所选目录） |
 
-**默认文件名（前端预填，允许用户自定义）**：`client-<name>.yaml`（name 为 Client 名称的 slug 形式；Client 无版本字段，文件名不含版本号）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
+**默认文件名（前端预填，允许用户自定义）**：`client-<name>.yaml`（name 为 Client 名称**原样**；Client 无版本字段，文件名不含版本号；**与 OP/Workflow/Job 默认名同口径，不做字符替换 / 不做名称改写**）。前端落盘前仅拒绝含 `/`、`\`、`..` 的文件名——文件名校验规则与运行历史导出一致（D5 适用范围=**全部导出**，见 crud-05 3.5.10）。
 
-**错误响应**：404 `CLIENT_NOT_FOUND`（clientId 不存在）。
+**错误响应**：
+
+| 状态码 | code | 场景 |
+|-|-|-|
+| 400 | `VALIDATION_ERROR` | clientId 格式非法 |
+| 404 | `CLIENT_NOT_FOUND` | clientId 不存在 |
 
 ---
 
@@ -426,7 +435,7 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command、**name 超 512 字符**、**请求体字节数超 settings `client_import_max_bytes`**（默认 1 MiB，见 crud-06 一）等） |
+| 400 | `VALIDATION_ERROR` | YAML 解析失败或字段非法（type 未知、脚本类缺 binaryPath、prompt 类缺 command、**name 超 512 字符**、**请求体字节数超配置项 `client_import_max_bytes`**（`ai-automation.json`，默认 1 MiB，见 crud-06 一）等） |
 | 409 | `CLIENT_NAME_EXISTS` | 同名 Client 已存在（导入冲突） |
 
 **YAML 字段规范（Client 导入 / 导出共用的字段全集，以 3.1「Client 对象」为准）**：
@@ -530,7 +539,7 @@ pub struct ExecuteResult {
 - **scripts 目录**：包装脚本 `run.xxx` 由 APP **在启动时临时生成**到 `<根>/scripts/` 目录。它与前端文件生成的目录同处统一根目录之下——只是专门放在 `scripts` 子目录。
 - **临时结果目录**：每次运行创建 `<根>/.ai_auto_result-<executionId>/`，存放本次的 stdout_file / stderr_file / rc_file，以及（仅 prompt 类）出参结果 JSON 文件 `outputs.json`——即 `W_AI_AUTO_OP_OUTPUTS_FILE` 指向该路径。**程序启动时主动清理所有以 `.ai_auto_result` 开头的残留目录**，防止程序中断导致文件大量残留。
   **创建归属**：临时目录与 main 文件由 `execute` 内部创建、运行结束由 `execute` 清理；调用方仅保证四元标识（`run_id` + `step_id` + `activation_seq` + `retry_seq`）唯一，不参与临时文件创建/清理。全局残留清理（启动时清 `.ai_auto_result*`）由 APP 启动流程负责。
-- **main / origin 文件的生命周期与残留（M20）**：workspace 根目录下的 `.main-<executionId>-<opId>.{bash|py|ps1|prompt}` 与（仅 prompt 类的）`.origin-<executionId>-<opId>.prompt` 均由 `execute` 在本次运行结束时删除。**崩溃残留不做跨启动扫描清理**（启动清理只覆盖 `.ai_auto_result*` 临时目录，不动用户 workspace）：因文件名含 executionId（四元标识唯一）与 opId，残留不会与后续执行冲突（同名即同一执行，不会并行发生），可在该 workspace 下次执行同名文件时被覆盖或被用户手工清理。
+- **main / origin 文件的生命周期与残留（见 5.1 运行目录约定）**：workspace 根目录下的 `.main-<executionId>-<opId>.{bash|py|ps1|prompt}` 与（仅 prompt 类的）`.origin-<executionId>-<opId>.prompt` 均由 `execute` 在本次运行结束时删除。**崩溃残留不做跨启动扫描清理**（启动清理只覆盖 `.ai_auto_result*` 临时目录，不动用户 workspace）：因文件名含 executionId（四元标识唯一）与 opId，残留不会与后续执行冲突（同名即同一执行，不会并行发生），可在该 workspace 下次执行同名文件时被覆盖或被用户手工清理。
 
 ```text
 Executor.execute(req: ExecuteRequest)   # req = {run_id, step_id, activation_seq, retry_seq, client, op, inputs, workspace}

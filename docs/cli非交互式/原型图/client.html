@@ -418,7 +418,7 @@
     <div class="modal-body">
       <div class="field">
         <label>文件名</label>
-        <input type="text" id="exportFileName" value="client-claude_code.yaml" />
+        <input type="text" id="exportFileName" value="client-<name>.yaml" />
       </div>
       <div class="field">
         <label>导出目录</label>
@@ -516,11 +516,11 @@
       var tagClass = 'tag-' + c.type;
       var inputMethod = c.argsTemplate ? '参数模板: ' + c.argsTemplate : '固定调用方式';   // M6：§8.4 —— 无参数模板时显示「固定调用方式」（不再显示 inputMode）
       var detailRows = '';
-      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + escText(c.type) + '</td><td class="dt-k">描述</td><td class="dt-v" colspan="3">' + escText(c.description) + '</td></tr>';   // R6-S1：转义后再拼 HTML
+      detailRows += '<tr><td class="dt-k">类型</td><td class="dt-v">' + escText(c.type) + '</td><td class="dt-k">格式</td><td class="dt-v">' + escText(c.type === 'prompt' ? (c.outputMode || '-') : '-') + '</td><td class="dt-k">描述</td><td class="dt-v">' + escText(c.description) + '</td></tr>';   // G19：第一行=类型+格式+描述（转义后再拼 HTML）
       if (c.type === 'prompt') {
         detailRows += '<tr><td class="dt-k">command</td><td class="dt-v mono" colspan="5">' + escText(c.command || '-') + '</td></tr>';
         detailRows += '<tr><td class="dt-k">inputMode</td><td class="dt-v mono" colspan="5">' + escText(c.inputMode || '-') + '</td></tr>';
-        detailRows += '<tr><td class="dt-k">outputMode</td><td class="dt-v mono" colspan="5">' + escText(c.outputMode || '-') + (c.outputJsonPath ? ' / ' + escText(c.outputJsonPath) : '') + '</td></tr>';
+        detailRows += '<tr><td class="dt-k">jsonPath</td><td class="dt-v mono" colspan="5">' + escText(c.outputJsonPath || '-') + '</td></tr>';
       } else {
         /* 脚本类（bash / python / powershell）无输出模式字段（恒为空） */
         detailRows += '<tr><td class="dt-k">binaryPath</td><td class="dt-v mono" colspan="5">' + escText(c.binaryPath || '-') + '</td></tr>';
@@ -857,6 +857,14 @@
 
   // ---------- 导入文件选择 ----------
   var importFileText = '';
+  /* 二.17（P3）：导入体积上限统一经 GET /api/settings 读取（与 index.html 口径一致，页面**不直读 mock 全局 SETTINGS**）；
+     接口未返回前用常量兜底（与 client.client_import_max_bytes 默认值 1 MiB 一致）。 */
+  var DEFAULT_CLIENT_IMPORT_MAX_BYTES = 1048576;
+  var CLIENT_IMPORT_MAX_BYTES = DEFAULT_CLIENT_IMPORT_MAX_BYTES;
+  mockFetch('/api/settings').then(function (s) {
+    var v = parseInt(((s || {}).client || {}).client_import_max_bytes, 10);
+    if (v > 0) CLIENT_IMPORT_MAX_BYTES = v;
+  });
   function openImportModal() {
     importFileText = '';
     document.getElementById('importFileName').textContent = '未选择文件';
@@ -879,6 +887,15 @@
     /* M2：导入一律提交文件的**真实文本**（crud-01 3.1.8 请求体 yaml = YAML 文本内容），不再按扩展名用文件名伪造 YAML */
     importFileText = '';
     tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）';
+    // 二.17（P3）：Client 导入同样校验文件大小上限（取 CLIENT_IMPORT_MAX_BYTES，经 GET /api/settings 缓存）
+    var maxBytes = CLIENT_IMPORT_MAX_BYTES;
+    if (file.size > maxBytes) {
+      importFileText = '';
+      tree.textContent = file.name + '\n（文件大小 ' + (file.size / 1024).toFixed(1) + ' KB）\n超过上限 client_import_max_bytes（' + maxBytes + ' 字节）';
+      alert('导入失败：文件大小 ' + file.size + ' 字节，超过上限 client_import_max_bytes（' + maxBytes + ' 字节）');
+      document.getElementById('confirmImportBtn').disabled = true;
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function (e) {
       importFileText = (e.target && e.target.result != null) ? String(e.target.result) : '';
@@ -914,8 +931,8 @@
     exportTargetName = name;
     exportTargetType = type;
     exportTargetId = clientId;
-    // G4：默认文件名用**真实 name 的 slug**（crud-01 3.1.7 `client-<name>.yaml`），不再依赖内置名称硬编码映射
-    document.getElementById('exportFileName').value = 'client-' + slugName(name) + '.yaml';
+    // 一.4b / L-7：默认文件名用**真实 name 原样**（crud-01 3.1.7 `client-<name>.yaml`，不再 slug 化；与后端 name 原样口径一致）
+    document.getElementById('exportFileName').value = 'client-' + name + '.yaml';
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');

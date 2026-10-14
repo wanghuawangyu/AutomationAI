@@ -1,0 +1,12 @@
+298: **功能说明**：手动触发一次 Job 执行（即时触发，不受定时计划限制），创建 JobRun 并进入运行历史。**enabled=false（禁用）不影响手动运行**（disable 仅停定时，见 4.5.1/4.5.4）；仅受 needsUpdate / concurrency 约束。
+329: > **enabled 不参与运行校验**（禁用仅停定时，不影响手动运行，见 4.5.1/4.5.4）。
+341: > **约定-全入口生效**：该上限在**所有创建 `job_runs`（status=waiting）的入口统一检查**——手动运行（3.4.6 queue/parallel）、cron 到点（4.5.2）、单次执行（3.2.6 / 3.3.7）、重跑/重试（crud-05）均先判全局 waiting 计数，触顶 → 409 `CONCURRENCY_CONFLICT`（cron 入口则本轮**跳过不触发**）。`parallel` 的「Job 内无上限」仅指同 Job 实例数，**仍受全局上限约束**。
+550: | **导入后的 `enabled`（约定-导入后 enabled）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
+614: **职责**：Scheduler 是独立的后台模块，负责把 `trigger.kind=schedule` 的 Job 按 cron 表达式**到点唤醒**，到点后**触发一次运行**（由 `TaskRunner.add_job` 创建 JobRun，Scheduler **不自行创建**，见 4.5.2）——不亲自执行 OP，也不参与 DAG 调度（执行由 Task Runner / Engine / WorkerPool，见 crud-05 4.6、crud-03 4.3/4.4）。
+616: > **到点触发与手动运行同一套校验**：Scheduler 到点触发前，与 3.4.6 手动运行走**同一套校验**（`needsUpdate` / `CLIENT_TYPE_MISMATCH` / `concurrency` / 全局 waiting 上限；**顺序差异仅影响日志级别**：cron 入口各项均落「跳过」，其中 waiting 上限判定在 `add_job` 事务内、见 4.5.2；手动入口 waiting 上限最先、见 3.4.6「校验顺序」）；命中校验 → 本次触发跳过（**记日志**，不创建 JobRun，见 4.5.2），不阻塞后续调度。
+628: #### 4.5.1 注册与热更新（生命周期）
+648: #### 4.5.2 cron 触发流程（到点）
+673: #### 4.5.3 错过触发与重叠（missed / overlap）
+682: #### 4.5.4 与 needsUpdate / enabled / 版本的交互
+692: #### 4.5.5 nextRunAtMs（下次触发时间）
+698: #### 4.5.6 错误与日志

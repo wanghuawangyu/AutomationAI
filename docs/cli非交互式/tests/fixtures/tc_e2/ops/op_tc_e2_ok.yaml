@@ -1,0 +1,10 @@
+name: op_tc_e2_ok
+version: 1
+type: bash
+description: TC-E2 循环 C 节点（恒定成功）
+content: |
+  #!/usr/bin/env bash
+  exit 0
+timeoutSeconds: 60
+inputs: []
+outputs: []

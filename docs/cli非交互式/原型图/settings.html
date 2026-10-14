@@ -176,15 +176,15 @@ const GROUPS = [
   { id:'history', name:'运行历史', icon:'📜', desc:'运行记录保存策略与队列深度', note:'Job 不设自动重试：任务失败即失败，需人工重跑或在 Workflow 中配置节点重试。',
     items:[
       {key:'job_queue_waiting_max', label:'等待中队列深度上限', type:'num', mode:'dyn', max:1000, desc:'全局 waiting 状态 Job Run 数量上限（默认 20，可调，上限 1000）；达到后拒绝新建运行任务。'},
-      {key:'job_queue_running_max', label:'运行中队列深度上限', type:'num', mode:'dyn', max:10, desc:'全局 running 状态 Job Run 数量上限（默认 10，最大 10）；限制即时生效，仅派生的 Worker 池大小重启后生效（🔄）。'},
+      {key:'job_queue_running_max', label:'运行中队列深度上限', type:'num', mode:'dyn', max:10, min:1, desc:'全局 running 状态 Job Run 数量上限（默认 10，范围 1..10）；限制即时生效，仅派生的 Worker 池大小重启后生效（🔄）。'},
       {key:'history_max_per_job', label:'单 Job 最大保留历史', type:'num', mode:'dyn', desc:'每个 Job 最多保留的历史运行记录条数。'},
       {key:'history_max_total', label:'整体最大保留历史', type:'num', mode:'dyn', desc:'全部 Job 累计最多保留的历史记录总条数。'},
       {key:'history_max_age_days', label:'单条记录最大保存时长', unit:'天', type:'num', mode:'dyn', max:180, desc:'单条运行记录最长保存天数（半年 = 180 天，硬上限 180），超期自动清理。'}
     ]},
   { id:'engine', name:'Engine', icon:'🧠', desc:'编排控制配置（超时只来自 OP，Engine 不设步骤超时）', note:null,
     items:[
-      {key:'max_loop_multiplier', label:'循环执行总次数上限', type:'num', mode:'dyn', desc:'循环节点执行总次数上限；0=不限制（按 max×3），否则与 max×3 取较小值。'},
-      {key:'engine_event_retention_days', label:'失败事件保留时长', unit:'天', type:'num', mode:'dyn', desc:'失败调度事件保留 1 天后软删除、2 天后物理删除。'}
+      {key:'max_loop_multiplier', label:'循环执行总次数上限', type:'num', mode:'dyn', desc:'循环节点执行总次数上限；0 = 不施加绝对上限，仍受 max×3 约束（否则与 max×3 取较小值）。'},
+      {key:'engine_event_retention_days', label:'失败事件保留时长', unit:'天', type:'num', mode:'dyn', desc:'失败调度事件在 engine_event_retention_days 天后软删除，再过 1 天后物理删除（默认 1 天 → 软删、共 2 天 → 物理删，见 crud-06 一）。'}
     ]},
   { id:'worker', name:'Worker', icon:'⚙️', desc:'执行资源池（派生值，只读展示：池大小 = ceil(job_queue_running_max × 1.5)；数值派生自同一配置，语义与 Task Runner 并发阈值不同——阈值为 running 的 JobRun 数上限，池大小为常驻执行体数）', note:'任务排队一律入 DB（step_records waiting）：入队（派发）总是成功，池满（无空闲 Worker）不报错，任务留在 waiting 等调度线程指派；排队中（waiting）的 OP 可直接取消，running 的 OP 不可外部取消（仅等其自然结束或自身超时）。不做本地滞留队列。',
     items:[

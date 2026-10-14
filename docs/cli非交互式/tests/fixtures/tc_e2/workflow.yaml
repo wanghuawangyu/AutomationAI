@@ -1,0 +1,15 @@
+name: wf_tc_e2_loop
+version: 1
+description: TC-E2 循环回跳拓扑（默认 on=failure；E2b 清空 retry、E2c 改 on=success）
+inputs: []
+outputs: []
+nodes:
+  - {workflowNodeId: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0, label: node_start, kind: start, position: {x: 40, y: 120}}
+  - {workflowNodeId: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e1, label: node_loop, kind: op, opName: op_tc_e2_fail, opVersion: 1, clientName: bash-build, bindings: {}, retry: {on: failure, max: 3, backoff: constant, interval: 1000}, position: {x: 240, y: 120}}
+  - {workflowNodeId: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e2, label: node_marker, kind: op, opName: op_tc_e2_ok, opVersion: 1, clientName: bash-build, bindings: {}, position: {x: 240, y: 280}}
+  - {workflowNodeId: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e3, label: node_end, kind: end, position: {x: 460, y: 120}}
+edges:
+  - {from: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0, to: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e1, condition: on_success}
+  - {from: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e1, to: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e3, condition: on_success}
+  - {from: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e1, to: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e2, condition: on_failure}
+  - {from: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e2, to: e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e1, condition: always}

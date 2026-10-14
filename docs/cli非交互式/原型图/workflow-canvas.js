@@ -16,6 +16,7 @@
  *     onNodeClick(id, node),         // 节点点击回调（只读模式必传）
  *     nodeMeta(id, node) -> string,  // OP 节点 meta 行文本，默认 'v<version>'
  *     nodeStatus(id, node) -> {cls,text}|null,  // 状态样式与文本（运行历史）
+ *     nodeTitle(id, node) -> string|null,       // 节点标题覆盖（运行态展示 OP 名称；null → 用 label）
  *     edgeDashed(edge, toNode) -> bool,        // 边是否灰色虚线（未执行）
  *     selectedId,                    // 编辑模式：当前选中节点
  *     beforeAddEdge(from,to,condition) -> bool,// 编辑模式：连线校验（允许才 true）

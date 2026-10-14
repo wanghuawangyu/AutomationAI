@@ -50,6 +50,8 @@
 .dag-node.st-timeout{border-color:#d97706;background:#fdf9f2}
 .dag-node.st-running{border-color:#eab308;background:#fefce8}
 .dag-node.st-wait{border-color:#9ca3af;background:#f9fafb}
+.dag-node.st-cancelled{border-color:#374151;background:#f3f4f6}   /* D7/G9：已取消（深灰框） */
+.dag-node.st-skip{border-color:#9ca3af;background:#f9fafb}        /* D7/G9：未执行 / 跳过（灰框） */
 .dag-node.node-system.st-wait{background:#f3f4f6;border-color:#9ca3af}
 .dag-node.node-system.st-wait .dn-title{color:#6b7280}
 .dag-node.node-system.st-wait .dn-meta{color:#9ca3af}
@@ -59,3 +61,5 @@
 .dag-node.st-timeout .dn-state{color:#d97706}
 .dag-node.st-running .dn-state{color:#ca8a04}
 .dag-node.st-wait .dn-state{color:#9ca3af}
+.dag-node.st-cancelled .dn-state{color:#4b5563}
+.dag-node.st-skip .dn-state{color:#9ca3af}
