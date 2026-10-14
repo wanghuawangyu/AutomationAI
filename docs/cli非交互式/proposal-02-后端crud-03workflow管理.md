@@ -403,12 +403,14 @@ edges:
 workflow-deploy_workflow-v2.zip
 ├── manifest.json
 ├── workflow.yaml
-└── ops/
-    └── check_tests.yaml
+├── ops/
+│   └── check_tests.yaml
+└── clients/
+    └── my-bash.yaml
 ```
 
-> （树仅示意层级，**成员顺序以下条为准**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`）
-> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`（按 `manifest.ops` 顺序）。导入端**不依赖成员顺序**，按 `manifest.ops[].file` 定位。
+> （树仅示意层级，**成员顺序以下条为准**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml` → `clients/<clientName>.yaml`）
+> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`（按 `manifest.ops` 顺序）→ `clients/<clientName>.yaml`（按 `manifest.clients` 顺序，无绑定 Client 时 `clients/` 整体不出现）。导入端**不依赖成员顺序**，按 `manifest.ops[].file` / `manifest.clients[].file` 定位。
 > **与 Job 包的形态差异（拍板：ZIP 目录形态 + `manifest.target`，见 `crud-04` 3.4.9）**：Workflow 包的目标实体就是包根级 `workflow.yaml`（无 `target` 字段）；Job 包因需同时携带 Job + 目标实体，改用 `workflows/` + `ops/` **目录形态**并以 `manifest.target.file` 名称锚定位（见 crud-04 3.4.9）。两者 `manifest` 的 `clients[]` / `ops[]` 字段口径一致。
 
 **`manifest.json`（包描述）**：
@@ -420,8 +422,9 @@ workflow-deploy_workflow-v2.zip
   "appVersion": "0.1.0",
   "exportedAtMs": "1728000000000",
   "workflow": { "name": "deploy_workflow", "version": 2 },
-  "clients": [ { "name": "my-bash", "clientId": "a1b2..." } ],
-  "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
+  "clients": [ { "name": "my-bash", "file": "clients/my-bash.yaml" } ],
+  "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ],
+  "bindings": [ { "opName": "check_tests", "bindings": { "cmd": "./deploy.sh", "dryRun": false }, "clientName": "my-bash" } ]
 }
 ```
 
@@ -431,11 +434,14 @@ workflow-deploy_workflow-v2.zip
 | schemaVersion | integer | 包格式版本，当前 1 |
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
-| workflow | object | 包内 Workflow 的名称与版本（锚定根级 `workflow.yaml`） |
-| clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.3.9）；无节点绑定时为 `[]` |
-| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`） |
+| workflow | object | 包内 Workflow 的名称与版本（锚定根级 `workflow.yaml`）。**导入名称锚一致性校验（3.3.9）**：`manifest.workflow.name` 必须与根级 `workflow.yaml` 的实际 `name` 一致——不一致 → 400 `VALIDATION_ERROR`（`message` 指明位置，如「`manifest.workflow.name=deploy_workflow` 与 `workflow.yaml` 的 `name=deploy_v2` 不一致」，用户修改后重新导入）；`version` 为声明参考，与文件不一致时以文件内容为准（沿用包内值，保真还原） |
+| clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.3.9）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建；无节点绑定时为 `[]`（`clients/` 不出现） |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）——**仅文件清单**，不含绑定信息 |
+| bindings | object[] | **节点级绑定关系清单（权威声明，导出端生成）**：每节点一条 `{opName, bindings, clientName}`——`opName` 为该节点引用的 OP（须在 `ops[]` 中）、`bindings` 为该节点的入参配置值（与 `workflow.yaml` 节点 `bindings` 一致）、`clientName` 为该节点绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。**同一 OP 被多节点以不同配置引用 → 多条**（每条对应一个节点）；`start`/`end` 无绑定不列。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `workflow.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.3.9） |
 
-**`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；仅包含 OP 定义字段，不含 `opId` / 时间戳。
+**`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；**仅包含纯粹 OP 定义字段**（name / type / content / timeoutSeconds / inputs / outputs 等），**不含任何 Client 绑定信息**（绑定关系只存在于 `manifest.bindings[]`），不含 `opId` / 时间戳。
+
+**`clients/*.yaml`（包内 Client 定义）**：与 Client 导出 YAML **同一格式**（字段规范见 crud-01 3.1.7）；仅包含 Client 定义字段，不含 `clientId` / 时间戳。
 
 **`workflow.yaml` 字段说明（对应 Workflow 对象，见 3.3）**：
 
@@ -447,7 +453,7 @@ workflow-deploy_workflow-v2.zip
 | nodes | 节点数组：`workflowNodeId`（短别名 n1/n2/…，导出时按节点顺序生成；导入时重新生成 UUID；**导入端只要求包内别名唯一，不校验形如 `n1`；32 位 UUID 值同样合法**）、`label`、`kind`（start/op/end）、`position`；`kind=op` 时含 `opName`（导出时由 `opId` 反查名称）、`opVersion`（快照）、`clientName`（可选，导出时由 `clientId` 反查）、`bindings`、`retry` |
 | edges | 边数组 `[{from, to, condition}]`（`from`/`to` 引用节点短别名；导入时按节点 UUID 映射重写） |
 
-> 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `workflow.yaml` 的 `opName` / `clientName` 重映射为新 uuid；`workflowNodeId` 不沿用导出环境值——导入时为每个节点生成新的 32 位 UUID，建立 `短别名 → 新UUID` 映射，并同步重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（避免跨环境主键冲突）。
+> 导入端（3.3.9）以 `manifest.json` 的 ops 名称锚 + `manifest.bindings[]`（绑定关系：哪个 OP → 入参配置 → 哪个 Client）为**权威清单**，把 `workflow.yaml` 的 `opName` / `clientName` / `bindings` 重映射为新 uuid；`workflowNodeId` 不沿用导出环境值——导入时为每个节点生成新的 32 位 UUID，建立 `短别名 → 新UUID` 映射，并同步重写 `edges.from/to` 与 `outputs.from.workflowNodeId`（避免跨环境主键冲突）。
 
 **错误响应**：404 `WORKFLOW_NOT_FOUND`。
 
@@ -471,9 +477,9 @@ workflow-deploy_workflow-v2.zip
 
 | 项 | 策略 |
 |-|-|
-| Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10） |
-| 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示） |
-| 节点 `clientName` → `clientId` | **按 name 匹配 Client**：存在 → 重写为新 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**）；`clientName` 为空则不校验 |
+| Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10）。**名称锚一致性校验（#6）**：`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致 → **400 `VALIDATION_ERROR`**（`message` 指明位置），不静默以文件内容为准；用户手动修改包内文件或 manifest 后重新导入 |
+| 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示）。节点**入参配置值（`bindings`）以 `manifest.bindings[]` 对应条目为准**写入（导出端保证与 `workflow.yaml` 节点 `bindings` 一致） |
+| 节点 `clientName` → `clientId` | **按 `manifest.bindings[]` 为权威清单解析绑定关系**（每个节点的 OP 引用 + 入参配置 + Client 绑定均在其中）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），节点 `clientId` 重写为匹配到的 id；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）；**包内无该定义**（旧包 / 手工残缺包）→ **409 `CLIENT_NOT_FOUND`**（响应体列出缺失名称）——`clientName` 为空则不校验 |
 | `workflowNodeId` | **不沿用导出环境 UUID**：导入时为每个节点重新生成 32 位 UUID，建立 `短别名（n1/n2/…）→ 新UUID` 映射表；随后按映射同步重写 `edges.from` / `edges.to` / `outputs.from.workflowNodeId`。短别名在包内唯一即可，跨环境不保留——与 opId/clientId 导入时重新生成同口径 |
 | 原子性 | 整个导入（解析校验 → 创建/复用 OP → 创建 Workflow）在**单一事务**内完成；任一失败 → **整体回滚**，不产生半成品 |
 | 版本差异告警 | 复用的 OP 版本与包内声明不一致 → 计入响应 `warnings`（导入仍成功） |
@@ -482,10 +488,10 @@ workflow-deploy_workflow-v2.zip
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`** 等字段非法） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`**、**`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**等字段非法） |
 | 400 | `CLIENT_TYPE_MISMATCH` | 节点 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理；显式类型校验口径见 3.3.3 / 3.3.4） |
 | 409 | `WORKFLOW_NAME_EXISTS` | 同名 Workflow 已存在（导入冲突） |
-| 409 | `CLIENT_NOT_FOUND` | 节点 `clientName` 在目标环境不存在（响应体列出缺失名称） |
+| 409 | `CLIENT_NOT_FOUND` | 节点 `clientName` 在目标环境不存在**且包内无 `clients/<name>.yaml` 定义**（响应体列出缺失名称）；包内有定义则自动创建，不报此错 |
 
 ---
 
