@@ -379,8 +379,8 @@
 
 | target.kind | ZIP 内容 | 格式依据 |
 |-|-|-|
-| `workflow` | `manifest.json` + `job.yaml` + `workflows/<workflowName>.yaml` + `ops/<opName>.yaml` | `workflows/<workflowName>.yaml` 与 crud-03 3.3.8 `workflow.yaml` 同格式；`ops/<opName>.yaml` 为该 Workflow 节点引用的 OP 定义 |
-| `op` | `manifest.json` + `job.yaml` + `ops/<opName>.yaml` | `ops/<opName>.yaml` 与 crud-02 3.2.7 OP 导出 YAML 同格式；**目标 OP 自身也在 `ops/` 下，不再有根级 `op.yaml`** |
+| `workflow` | `manifest.json` + `job.yaml` + `workflows/<workflowName>.yaml` + `ops/<opName>.yaml` + `clients/<clientName>.yaml` | `workflows/<workflowName>.yaml` 与 crud-03 3.3.8 `workflow.yaml` 同格式；`ops/<opName>.yaml` 为该 Workflow 节点引用的 OP 定义；`clients/<clientName>.yaml` 为节点绑定的 Client 定义（crud-01 3.1.7 同格式） |
+| `op` | `manifest.json` + `job.yaml` + `ops/<opName>.yaml` + `clients/<clientName>.yaml` | `ops/<opName>.yaml` 与 crud-02 3.2.7 OP 导出 YAML 同格式；**目标 OP 自身也在 `ops/` 下，不再有根级 `op.yaml`**；`clients/<clientName>.yaml` 为 `target.clientId` 引用的 Client 定义（crud-01 3.1.7 同格式） |
 
 **target.kind=workflow 的完整 ZIP 目录结构**：
 
@@ -390,8 +390,10 @@ job-hourly_check-v1.zip
 ├── manifest.json
 ├── workflows/             # 目标 Workflow 定义（= crud-03 3.3.8 workflow.yaml 同格式）
 │   └── deploy_workflow.yaml
-└── ops/                   # workflow 节点引用的 OP 定义（= crud-02 3.2.7 OP YAML 同格式；本例仅该 Workflow 引用的 check_tests，与 manifest.ops 一致）
-    └── check_tests.yaml
+├── ops/                   # workflow 节点引用的 OP 定义（= crud-02 3.2.7 OP YAML 同格式；本例仅该 Workflow 引用的 check_tests，与 manifest.ops 一致）
+│   └── check_tests.yaml
+└── clients/               # workflow 节点绑定的 Client 定义（= crud-01 3.1.7 Client YAML 同格式；无绑定时不出现）
+    └── my-bash.yaml
 ```
 
 **target.kind=op 的完整 ZIP 目录结构**：
@@ -400,11 +402,13 @@ job-hourly_check-v1.zip
 job-hourly_check-v1.zip
 ├── job.yaml
 ├── manifest.json
-└── ops/                   # 目标 OP 自身（= crud-02 3.2.7 OP YAML 同格式）
-    └── check_tests.yaml
+├── ops/                   # 目标 OP 自身（= crud-02 3.2.7 OP YAML 同格式）
+│   └── check_tests.yaml
+└── clients/               # target.clientId 引用的 Client 定义（= crud-01 3.1.7 Client YAML 同格式；target 无 clientId 时不出现）
+    └── my-bash.yaml
 ```
 
-> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`job.yaml` → `manifest.json` → [`workflows/<workflowName>.yaml`] → `ops/<opName>.yaml`（`ops/` 内按 `manifest.ops` 顺序）。导入端**不依赖成员顺序**，一律按 `manifest.target.file` / `manifest.ops[].file` 定位。
+> **ZIP 成员顺序（导出端固定，端到端可逐字节比对）**：`job.yaml` → `manifest.json` → [`workflows/<workflowName>.yaml`] → `ops/<opName>.yaml`（`ops/` 内按 `manifest.ops` 顺序）→ `clients/<clientName>.yaml`（按 `manifest.clients` 顺序，无绑定 Client 时 `clients/` 整体不出现）。导入端**不依赖成员顺序**，一律按 `manifest.target.file` / `manifest.ops[].file` / `manifest.clients[].file` 定位。
 
 **`job.yaml`（导出格式，字段与 JobCreateRequest 一致）**：
 
@@ -435,9 +439,10 @@ enabled: true
   "appVersion": "0.1.0",
   "exportedAtMs": "1728000000000",
   "job": { "name": "hourly_check", "version": 1 },
-  "clients": [ { "name": "my-bash", "clientId": "a1b2..." } ],
+  "clients": [ { "name": "my-bash", "file": "clients/my-bash.yaml" } ],
   "target": { "kind": "workflow", "name": "deploy_workflow", "version": 2, "file": "workflows/deploy_workflow.yaml" },
-  "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
+  "ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ],
+  "bindings": [ { "opName": "check_tests", "bindings": { "env": "prod" }, "clientName": "my-bash" } ]
 }
 ```
 
@@ -448,17 +453,19 @@ enabled: true
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
 | job | object | Job 名称与版本（锚定 `job.yaml`） |
-| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, clientId}`——仅记录**名称↔导出时 id** 对应关系，供导入报错时提示需注册的 Client 名（导入不创建 Client，见 3.4.10） |
+| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.4.10）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建；无引用时为 `[]`（`clients/` 不出现） |
 | target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` 为包内相对路径——`workflows/<name>.yaml`（kind=workflow）或 `ops/<name>.yaml`（kind=op） |
-| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: ops/<name>.yaml`） |
+| ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）——**仅文件清单，不含绑定信息**。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: ops/<name>.yaml`） |
+| bindings | object[] | **包内 OP 使用点的绑定关系清单（权威声明，导出端生成）**：每条 `{opName, bindings, clientName}`——`opName` 为绑定的 OP（须在 `ops[]` 中）、`bindings` 为入参配置值、`clientName` 为绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。`kind=op`：**恰好一条**（`job.yaml.target` 的 OP 引用：`bindings`=`target.bindings`、`clientName`=`target.clientId` 反查名）；`kind=workflow`：**按 Workflow 节点列**（与 crud-03 3.3.8 `bindings[]` 口径一致，每节点一条，start/end 不列）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `job.yaml.target` 与 `workflows/<name>.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.4.10） |
 
 > 旧版 `workflows[]` 数组已由 `target` 取代，**包内不出现**；若出现视为字段非法 → 400 `VALIDATION_ERROR`。
 
-**样例（`target.kind=op` 时的 `target` 与 `ops`）**：
+**样例（`target.kind=op` 时的 `target` 与 `ops` / `bindings`）**：
 
 ```json
 "target": { "kind": "op", "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" },
-"ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ]
+"ops": [ { "name": "check_tests", "version": 2, "file": "ops/check_tests.yaml" } ],
+"bindings": [ { "opName": "check_tests", "bindings": { "env": "prod" }, "clientName": "my-bash" } ]
 ```
 
 > 双表达约定（#1）：`workflows/<name>.yaml` / `ops/<name>.yaml` 的**内部引用**以**名称**表达（Workflow 节点 `opName` / `clientName`；OP 无内部引用）；`job.yaml` 的 **target** 则以**导出环境 id** 表达（`opId`/`workflowId`/`clientId`）——导入时由 `manifest.json` 的 `target` / `ops` **名称锚**解析并重映射为新 uuid（见 3.4.10）。
@@ -486,12 +493,12 @@ enabled: true
 | 对象 | 策略 |
 |-|-|
 | Job 本身 | 同名已存在 → 409 `JOB_NAME_EXISTS`；否则新建，`version` **重置为 1**（**理由（#2）**：导入 Job 等同新建，与 3.4.3 创建语义一致——Job.version 为自增修订号，从 1 起） |
-| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：先比对 `job.yaml.target.kind` 与 `manifest.target.kind`（不一致 → 400 `VALIDATION_ERROR`），再读 `manifest.target.file`（`workflows/<name>.yaml` 或 `ops/<name>.yaml`）解析实体——`kind=workflow` → 解析 `workflows/<name>.yaml`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `ops/<name>.yaml`（含 `target.clientId` 重映射）；`manifest.target.name` / `version` 为名称与版本锚（与文件内容不一致时以文件内容为准，见 3.4.9 字段表）。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（#2）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
+| **目标实体（`manifest.target` 名称锚）** | **先按 `manifest.target` 定位唯一目标实体**（Workflow 或 OP）：先比对 `job.yaml.target.kind` 与 `manifest.target.kind`（不一致 → 400 `VALIDATION_ERROR`），再读 `manifest.target.file`（`workflows/<name>.yaml` 或 `ops/<name>.yaml`）解析实体——`kind=workflow` → 解析 `workflows/<name>.yaml`（含其节点 `opName`/`clientName` 重映射）；`kind=op` → 解析 `ops/<name>.yaml`（含 `target.clientId` 重映射）。**名称锚一致性校验（#8）**：`manifest.target.name` 必须与 `manifest.target.file` 指向的包内文件实际 `name` **一致**——不一致 → **400 `VALIDATION_ERROR`**，`message` 指明不一致位置（如「`manifest.target.name=bash-build` 与 `ops/op_bash_build.yaml` 的 `name=op_bash_build` 不一致」），**不静默以文件内容为准**；用户需手动修改包内文件或 manifest 后重新导入。`version` 为**声明参考**，与文件不一致时以文件内容为准（沿用包内版本，保真还原；复用环境已有实体且版本差异 → 计入 `warnings`）。目标实体按 name 匹配：不存在 → 按包内定义创建（沿用包内 `version`）；**已存在 → 复用现有（不覆盖、不改版本）**（**保真理由（#2）**：OP/Workflow 版本是 `needsUpdate` 的快照比对基准且被多处引用，保真才能维持引用一致） |
 | 包内 OP（`manifest.ops` + `ops/<opName>.yaml`） | 目标 Workflow 引用的全部 OP（或目标 OP 本身）**按 name 匹配**：不存在 → 按包内定义创建（沿用包内 `version`）；已存在 → 复用现有（不覆盖）；目标 Workflow 的**节点级 `opName`/`clientName` 按 crud-03 3.3.9 策略重映射**为新 uuid |
-| Job.target | 解析后指向目标实体（见上）；`target.xxxVersion` 取**解析后实际引用的当前版本** |
+| Job.target | 解析后指向目标实体（见上）；`target.xxxVersion` 取**解析后实际引用的当前版本**；`target.bindings` / `target.clientId` 以 `manifest.bindings[]` 对应条目为准写入（导出端保证与 `job.yaml` 一致，导入端重写为解析出的新 clientId） |
 | Job.inputs 键名（#4） | **复用 3.4.3 同一校验**：inputs 的 name 须匹配 target（OP/Workflow）的参数定义；不匹配 → 400 `VALIDATION_ERROR` |
 | 版本差异告警（#5） | 复用的 OP/Workflow 版本与包内/manifest 声明不一致 → 计入响应 `warnings`（导入仍成功，不报错）；相关 Workflow 可能立即 `needsUpdate=true` |
-| 包内 Client（`job.yaml` 的 `target.clientId` 或 `workflows/<name>.yaml` 节点 `clientName`） | **按 name 匹配 Client**：存在 → 用其 `clientId`；不存在 → **409 `CLIENT_NOT_FOUND`**（Client 为本机在线注册，**不自动创建**；需先在目标环境注册同名 Client） |
+| 包内 Client（`manifest.bindings[]` 为权威清单） | 绑定关系（哪个 OP → 入参配置 → 哪个 Client）**一律以 `manifest.bindings[]` 解析**（`kind=op` 一条 target 绑定、`kind=workflow` 按节点）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），用其 `clientId`；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）；**包内无该定义**（旧包 / 手工残缺包）→ **409 `CLIENT_NOT_FOUND`**（响应体列出缺失名称） |
 | **旧 id → 新 id 重映射（#3）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称锚**（含 `target.file` 定位文件）为切入，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
 | **导入后的 `enabled`（#7）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
 
@@ -505,10 +512,10 @@ enabled: true
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**、**`manifest.target.name` 与包内文件实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」） |
 | 400 | `CLIENT_TYPE_MISMATCH` | 包内 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理） |
 | 409 | `JOB_NAME_EXISTS` | 同名 Job 已存在（导入冲突） |
-| 409 | `CLIENT_NOT_FOUND` | 包内引用的 Client（按 name 匹配）在目标环境不存在；响应体列出缺失的 Client 名称（见上表） |
+| 409 | `CLIENT_NOT_FOUND` | 包内引用的 Client（按 name 匹配）在目标环境不存在**且包内无 `clients/<name>.yaml` 定义**；响应体列出缺失的 Client 名称（见上表）；包内有定义则自动创建，不报此错 |
 
 ---
 

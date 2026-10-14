@@ -524,6 +524,8 @@ APP 内部硬编码通用包装脚本，运行时临时生成：
 
 > OP 导入对话框（`.yaml`/`.yml`）交互流程与 Client 完全一致；Workflow / Job 导入对话框（`.zip`）交互流程一致，仅文件过滤类型不同。
 
+> **导入校验约定（#8，适用于 Workflow / Job 的 ZIP 导入）**：提交导入后，后端先做**包完整性校验**——`manifest` 名称锚与包内文件实际 `name` 必须一致（Workflow：`manifest.workflow.name` vs 根级 `workflow.yaml` 的 `name`；Job：`manifest.target.name` vs `manifest.target.file` 指向文件的 `name`，见 crud-03 3.3.9 / crud-04 3.4.10）。**不一致 → 导入校验不通过**，前端弹窗提示失败原因并**指明不一致位置**（如「manifest 声明 `name=bash-build`，包内 `ops/op_bash_build.yaml` 实际 `name=op_bash_build`」）。用户可**手动修改包内文件 / manifest 后重新选择文件导入**；修改成功且校验通过后，[导入] 才提交后端完成导入。Client / OP 为单文件 YAML（无 manifest），不适用该校验。
+
 ### 8.10 导出对话框
 
 每行 Client 操作列新增 [导出] 按钮，点击后弹出导出对话框：
@@ -766,7 +768,7 @@ interface OpOutput {
 | 点击 [导出] | 弹出导出对话框 |
 | 文件名 | 自动带入 `op-<name>-v<version>.yaml`（如 `op-check_tests-v2.yaml`；默认名规则见 crud-02 3.2.7），可修改 |
 | 导出目录 | 点击 [选择] 弹出系统目录选择框，选中目标目录后回填 |
-| 导出内容 | OP 为 YAML 文件，写入所选目录 |
+| 导出内容 | OP 为 YAML 文件，写入所选目录；**仅导出纯粹 OP 定义**（name / type / content / timeoutSeconds / inputs / outputs 等，见 crud-02 3.2.7）——OP 本身不含 Client 绑定（绑定关系只存在于 Workflow / Job 包的 `manifest.bindings[]`，见 §10.13 / §11.7） |
 | 导出按钮 | 未选目录时禁用；选完目录后可用 |
 
 ```text
@@ -1290,17 +1292,19 @@ interface NodeRetry {
 
 ```text
 workflow-deploy_workflow-v2.zip
-├── manifest.json
+├── manifest.json         # 含 bindings[]：节点绑定关系（哪个 OP → 入参配置 → 哪个 Client，见 crud-03 3.3.8）
 ├── workflow.yaml
-└── ops/
-    ├── check_tests.yaml
-    ├── review.yaml
-    ├── deploy.yaml
-    ├── notify_fail.yaml
-    └── notify.yaml
+├── ops/
+│   ├── check_tests.yaml
+│   ├── review.yaml
+│   ├── deploy.yaml
+│   ├── notify_fail.yaml
+│   └── notify.yaml
+└── clients/
+    └── my-bash.yaml        # 节点绑定的 Client 定义（无绑定时不出现）
 ```
 
-> （树仅示意层级；**成员顺序以下条/`crud-03` 3.3.8 声明为准**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml`）
+> （树仅示意层级；**成员顺序以下条/`crud-03` 3.3.8 声明为准**：`workflow.yaml` → `manifest.json` → `ops/<opName>.yaml` → `clients/<clientName>.yaml`；`ops/*.yaml` 为**纯粹 OP 定义**（同 OP 导出，见 §9.7 / crud-02 3.2.7），**不含 Client 绑定**——绑定关系只存在于 `manifest.bindings[]`）
 
 **交互流程**：
 
@@ -1535,22 +1539,28 @@ Cron 触发 → 检查 enabled / needsUpdate → 检查并发策略 → 创建 J
 ```text
 job-manual_deploy-v2.zip        # target.kind=workflow 形态
 ├── job.yaml
-├── manifest.json
+├── manifest.json                # 含 bindings[]：绑定关系（哪个 OP → 入参配置 → 哪个 Client，见 crud-04 3.4.9）
 ├── workflows/                  # 目标 Workflow 定义（= crud-03 3.3.8 workflow.yaml 同格式）
 │   └── deploy_workflow.yaml
-└── ops/                        # workflow 节点引用的 OP 定义（= crud-02 3.2.7 同格式）
-    ├── check_tests.yaml
-    └── ...
+├── ops/                        # workflow 节点引用的 OP 定义（= crud-02 3.2.7 同格式，纯粹 OP、不含 Client 绑定）
+│   ├── check_tests.yaml
+│   └── ...
+└── clients/                    # 节点绑定的 Client 定义（= crud-01 3.1.7 同格式；无绑定时不出现）
+    └── my-bash.yaml
 
 # target.kind=op 形态：workflows/ 不出现，目标 OP 自身放 ops/<opName>.yaml
 job-hourly_check-v1.zip
 ├── job.yaml
-├── manifest.json
-└── ops/
-    └── check_tests.yaml        # 目标 OP 自身（= crud-02 3.2.7 同格式）
+├── manifest.json                # 含 bindings[]：target 绑定（哪个 OP → 入参配置 → 哪个 Client，恰好一条）
+├── ops/
+│   └── check_tests.yaml        # 目标 OP 自身（= crud-02 3.2.7 同格式，纯粹 OP、不含 Client 绑定）
+└── clients/
+    └── my-bash.yaml            # target.clientId 引用的 Client 定义（target 无 clientId 时不出现）
 ```
 
 > `manifest.target.file` 为导入的名称锚（`workflows/<name>.yaml` 或 `ops/<name>.yaml`），导入据此定位目标实体并按名重映射为新 uuid（见 crud-04 3.4.10）。**Workflow 导出包（§10.13）保持根级 `workflow.yaml`**，不套子目录。
+>
+> **导入校验（见 §8.9 通用约定）**：导入时 `manifest.target.name` 必须与 `manifest.target.file` 指向的包内文件实际 `name` 一致；不一致 → 校验不通过，提示不一致位置，用户修改包内文件 / manifest 后重新导入。
 
 **交互流程**：
 
