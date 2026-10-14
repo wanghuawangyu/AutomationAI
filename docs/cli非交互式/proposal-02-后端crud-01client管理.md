@@ -1086,6 +1086,6 @@ exit 0
 - 入参定义：`inputs`（name/type/required/default/description）。
 - 出参定义：`outputs`（name/type/description）。
 - Client 关联**不在 OP 导出/导入内容中**：`OP` 定义不包含任何 Client 字段，也不与 Client 绑定（Client 由执行时选择，见 `proposal-01` 硬约束 4）。上列 `type` / `binaryPath` / `command` / `argsTemplate` / `inputMode` / `outputMode` / `outputJsonPath` / `exitCodeSuccess` 属 **Client YAML**（3.1.7–3.1.8）导出/导入的字段。
-- **导入不创建 Client**：导入包只声明所依赖的 **Client 名称**（Workflow 节点 `clientName` / Job 的 `target.clientId` 按名解析，见 crud-03 3.3.9、crud-04 3.4.10）；目标环境无同名 Client → 409 `CLIENT_NOT_FOUND`（需先在目标环境注册同名 Client），**不做 ID 映射、不自动创建**，因而不存在“悬挂 Client”。
+- **导入的 Client 供给（自足，见 crud-03 3.3.9 / crud-04 3.4.10）**：Workflow / Job 导入包按最新格式**必须携带 `clients/<name>.yaml` 完整定义**（`manifest.clients[]` 声明 + 包内文件，二者缺一 → 400 `VALIDATION_ERROR`）。导入时按 `manifest.bindings[]` 解析绑定：目标环境有同名 Client → **复用**（类型不符 → 400 `CLIENT_TYPE_MISMATCH`）；无同名 → **按包内定义自动创建**（clientId 重新生成）。包内不携带定义即格式不合规，不存在“悬挂 Client”。
 
 > 导入端据此即可重建 `.main-<executionId>-<opId>.xxx` 与五个运行参数，无需补填即可执行；这也是 `OP/Workflow/Job/Client` export/import 接口（3.2.7–3.2.8、3.3.8–3.3.9、3.4.9–3.4.10、3.1.7–3.1.8）的设计依据。

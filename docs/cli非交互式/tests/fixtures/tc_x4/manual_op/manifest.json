@@ -4,7 +4,8 @@
   "appVersion": "0.1.0",
   "exportedAtMs": "0",
   "job": { "name": "tc_x4_manual_op", "version": 1 },
-  "clients": [ { "name": "Claude Code", "clientId": "a1b2c3d4e5f60718293a4b5c6d7e8f90" } ],
+  "clients": [ { "name": "Claude Code", "file": "clients/Claude Code.yaml" } ],
   "target": { "kind": "op", "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" },
-  "ops": [ { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" } ]
+  "ops": [ { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" } ],
+  "bindings": [ { "opName": "op_prompt_review", "bindings": { "code": "sample" }, "clientName": "Claude Code" } ]
 }

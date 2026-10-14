@@ -437,7 +437,7 @@ workflow-deploy_workflow-v2.zip
 | workflow | object | 包内 Workflow 的名称与版本（锚定根级 `workflow.yaml`）。**导入名称锚一致性校验（3.3.9）**：`manifest.workflow.name` 必须与根级 `workflow.yaml` 的实际 `name` 一致——不一致 → 400 `VALIDATION_ERROR`（`message` 指明位置，如「`manifest.workflow.name=deploy_workflow` 与 `workflow.yaml` 的 `name=deploy_v2` 不一致」，用户修改后重新导入）；`version` 为声明参考，与文件不一致时以文件内容为准（沿用包内值，保真还原） |
 | clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.3.9）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建；无节点绑定时为 `[]`（`clients/` 不出现） |
 | ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）——**仅文件清单**，不含绑定信息 |
-| bindings | object[] | **节点级绑定关系清单（权威声明，导出端生成）**：每节点一条 `{opName, bindings, clientName}`——`opName` 为该节点引用的 OP（须在 `ops[]` 中）、`bindings` 为该节点的入参配置值（与 `workflow.yaml` 节点 `bindings` 一致）、`clientName` 为该节点绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。**同一 OP 被多节点以不同配置引用 → 多条**（每条对应一个节点）；`start`/`end` 无绑定不列。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `workflow.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.3.9） |
+| bindings | object[] | **节点级绑定关系清单（权威声明，导出端生成）**：每节点一条 `{opName, bindings, clientName}`——`opName` 为该节点引用的 OP（须在 `ops[]` 中）、`bindings` 为该节点的入参配置值（与 `workflow.yaml` 节点 `bindings` 一致）、`clientName` 为该节点绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。**同一 OP 被多节点以不同配置引用 → 多条**（每条对应一个节点）；**覆盖全部 `kind=op` 节点**（`start`/`end` 不列；未绑定 Client 的节点 `clientName` 为空）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `workflow.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.3.9）。**格式强制（不做兼容）**：`bindings[]` 缺失或与 `workflow.yaml` 节点不一致（手工改动包）→ **400 `VALIDATION_ERROR`**（message 指明缺失/不一致位置，与名称锚校验同一处理，见 3.3.9），不做回退、不静默覆盖 |
 
 **`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；**仅包含纯粹 OP 定义字段**（name / type / content / timeoutSeconds / inputs / outputs 等），**不含任何 Client 绑定信息**（绑定关系只存在于 `manifest.bindings[]`），不含 `opId` / 时间戳。
 
@@ -479,7 +479,7 @@ workflow-deploy_workflow-v2.zip
 |-|-|
 | Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10）。**名称锚一致性校验（#6）**：`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致 → **400 `VALIDATION_ERROR`**（`message` 指明位置），不静默以文件内容为准；用户手动修改包内文件或 manifest 后重新导入 |
 | 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示）。节点**入参配置值（`bindings`）以 `manifest.bindings[]` 对应条目为准**写入（导出端保证与 `workflow.yaml` 节点 `bindings` 一致） |
-| 节点 `clientName` → `clientId` | **按 `manifest.bindings[]` 为权威清单解析绑定关系**（每个节点的 OP 引用 + 入参配置 + Client 绑定均在其中）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），节点 `clientId` 重写为匹配到的 id；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）；**包内无该定义**（旧包 / 手工残缺包）→ **409 `CLIENT_NOT_FOUND`**（响应体列出缺失名称）——`clientName` 为空则不校验 |
+| 节点 `clientName` → `clientId` | **按 `manifest.bindings[]` 为权威清单解析绑定关系**（每个节点的 OP 引用 + 入参配置 + Client 绑定均在其中）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），节点 `clientId` 重写为匹配到的 id；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）。**格式强制（不做兼容）**：`bindings[]` 缺失 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 → **400 `VALIDATION_ERROR`**（message 指明缺失位置）——`clientName` 为空则不校验 |
 | `workflowNodeId` | **不沿用导出环境 UUID**：导入时为每个节点重新生成 32 位 UUID，建立 `短别名（n1/n2/…）→ 新UUID` 映射表；随后按映射同步重写 `edges.from` / `edges.to` / `outputs.from.workflowNodeId`。短别名在包内唯一即可，跨环境不保留——与 opId/clientId 导入时重新生成同口径 |
 | 原子性 | 整个导入（解析校验 → 创建/复用 OP → 创建 Workflow）在**单一事务**内完成；任一失败 → **整体回滚**，不产生半成品 |
 | 版本差异告警 | 复用的 OP 版本与包内声明不一致 → 计入响应 `warnings`（导入仍成功） |
@@ -488,10 +488,9 @@ workflow-deploy_workflow-v2.zip
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`**、**`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**等字段非法） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`**、**`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**、**`bindings[]` 缺失 / 与 `workflow.yaml` 节点不一致 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失**等字段非法——格式强制、不做兼容回退） |
 | 400 | `CLIENT_TYPE_MISMATCH` | 节点 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理；显式类型校验口径见 3.3.3 / 3.3.4） |
 | 409 | `WORKFLOW_NAME_EXISTS` | 同名 Workflow 已存在（导入冲突） |
-| 409 | `CLIENT_NOT_FOUND` | 节点 `clientName` 在目标环境不存在**且包内无 `clients/<name>.yaml` 定义**（响应体列出缺失名称）；包内有定义则自动创建，不报此错 |
 
 ---
 

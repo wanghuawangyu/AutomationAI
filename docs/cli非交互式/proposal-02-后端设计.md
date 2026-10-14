@@ -335,7 +335,6 @@ ai-automation version
 | `CLIENT_TYPE_MISMATCH` | 400 | Client 类型与 OP 类型不匹配（bash/python/powershell/prompt 须同类对应） | crud-02 3.2.6（口径基准）；crud-03 3.3/3.3.3/3.3.4/3.3.7/4.4；crud-04 3.4.3/3.4.4/3.4.6/4.5 |
 | `OP_NOT_FOUND` | 404 | OP 不存在 | crud-02 |
 | `CLIENT_NOT_FOUND` | 404 | Client 不存在（按 `clientId` 引用时） | crud-01/02/04 |
-| `CLIENT_NOT_FOUND` | 409 | Client 不存在（**导入时按名称匹配不到**，Client 不自动创建；响应体列出缺失名称） | crud-03 3.3.9 / crud-04 3.4.10 |
 | `WORKFLOW_NOT_FOUND` | 404 | Workflow 不存在 | crud-03 |
 | `JOB_NOT_FOUND` | 404 | Job 不存在 | crud-04 |
 | `RUN_NOT_FOUND` | 404 | 运行记录不存在 | crud-05 |

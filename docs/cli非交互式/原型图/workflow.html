@@ -1950,13 +1950,15 @@
     document.getElementById('exportFileName').value = 'workflow-' + name + '-' + version + '.zip';   // D4：默认名带 workflow- 前缀（crud-03 3.3.8）
     document.getElementById('exportTree').textContent =
       'workflow-' + name + '-' + version + '.zip\n' +
-      '├── manifest.json\n' +
+      '├── manifest.json   # 含 clients[]（{name,file}）与 bindings[]（绑定关系）\n' +
       '├── workflow.yaml\n' +
-      '└── ops/\n' +
-      '    ├── check_tests.yaml\n' +
-      '    ├── review.yaml\n' +
-      '    ├── deploy.yaml\n' +
-      '    └── notify.yaml';
+      '├── ops/\n' +
+      '│   ├── check_tests.yaml\n' +
+      '│   ├── review.yaml\n' +
+      '│   ├── deploy.yaml\n' +
+      '│   └── notify.yaml\n' +
+      '└── clients/          # 绑定 Client 的完整定义（{name,file} 对应）\n' +
+      '    └── <clientName>.yaml';
     document.getElementById('exportDir').value = '';
     document.getElementById('confirmExportBtn').disabled = true;
     openModal('exportModal');

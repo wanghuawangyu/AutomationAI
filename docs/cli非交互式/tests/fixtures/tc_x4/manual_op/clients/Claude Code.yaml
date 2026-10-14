@@ -1,0 +1,9 @@
+name: Claude Code
+type: prompt
+description: Claude Code CLI
+command: claude
+argsTemplate: --print --output-format json --model sonnet
+inputMode: stdin
+outputMode: json
+outputJsonPath: $.result
+exitCodeSuccess: [0]

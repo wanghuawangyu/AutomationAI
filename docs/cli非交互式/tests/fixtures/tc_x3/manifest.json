@@ -5,11 +5,15 @@
   "exportedAtMs": "0",
   "workflow": { "name": "wf_tc_x3_multi", "version": 1 },
   "clients": [
-    { "name": "Claude Code", "clientId": "a1b2c3d4e5f60718293a4b5c6d7e8f90" },
-    { "name": "bash-build", "clientId": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1" }
+    { "name": "Claude Code", "file": "clients/Claude Code.yaml" },
+    { "name": "bash-build", "file": "clients/bash-build.yaml" }
   ],
   "ops": [
     { "name": "op_prompt_review", "version": 1, "file": "ops/op_prompt_review.yaml" },
     { "name": "op_bash_build", "version": 1, "file": "ops/op_bash_build.yaml" }
+  ],
+  "bindings": [
+    { "opName": "op_prompt_review", "bindings": { "code": { "kind": "literal", "value": "sample" } }, "clientName": "Claude Code" },
+    { "opName": "op_bash_build", "bindings": { "target": { "kind": "workflow_input", "inputName": "env" } }, "clientName": "bash-build" }
   ]
 }

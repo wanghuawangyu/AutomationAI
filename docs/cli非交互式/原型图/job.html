@@ -1084,19 +1084,23 @@
     document.getElementById('exportFileName').value = 'job-' + name + '-' + version + '.zip';   // D4：默认名带 job- 前缀（crud-04 3.4.9）
 
     var tree = 'job-' + name + '-' + version + '.zip\n' +
-      '├── manifest.json\n' +
+      '├── manifest.json   # 含 clients[]（{name,file}）与 bindings[]（绑定关系）\n' +
       '├── job.yaml\n';
 
     if (type === 'workflow') {
       tree += '├── workflows/\n' +
               '│   └── deploy_workflow.yaml\n' +
-              '└── ops/\n' +
-              '    ├── check_tests.yaml\n' +
-              '    └── ...';
+              '├── ops/\n' +
+              '│   ├── check_tests.yaml\n' +
+              '│   └── ...\n' +
+              '└── clients/          # 绑定 Client 的完整定义\n' +
+              '    └── <clientName>.yaml';
     } else {
-      tree += '└── ops/\n' +
-              '    ├── clean_logs.yaml\n' +
-              '    └── ...';
+      tree += '├── ops/\n' +
+              '│   ├── clean_logs.yaml\n' +
+              '│   └── ...\n' +
+              '└── clients/          # 绑定 Client 的完整定义\n' +
+              '    └── <clientName>.yaml';
     }
 
     document.getElementById('exportTree').textContent = tree;

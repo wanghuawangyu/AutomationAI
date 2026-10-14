@@ -227,8 +227,8 @@ docs/cli非交互式/           # 本设计文档与 tasks.md
 | T8.5 | `DELETE /api/workflows/{workflowId}`（被 Job 引用 → 409 `WORKFLOW_REFERENCED`） | crud-03 3.3.5 | — |
 | T8.6 | `POST /validate`：Start/End 唯一、start→end 可达、允许回跳环、Start 无 on_failure、op 节点绑定 opId+opVersion、bindings 引用存在 | crud-03 3.3.6/校验规则 | `{valid,errors[]}` |
 | T8.7 | `POST /execute`（组装 `WorkflowRunRequest` → `add_workflow`，`needsUpdate` 拦截） | crud-03 3.3.7/§4.2 | 投递即结束 |
-| T8.8 | `POST /export`（ZIP：manifest（含 `clients[]`）+ 根级 workflow.yaml + ops/*.yaml；依赖以 **名称** 表达） | crud-03 3.3.8 | `{zip:base64}` |
-| T8.9 | `POST /import`（按 name 重映射 opName→opId / clientName→clientId；节点 workflowNodeId 重新生成 UUID 并重写 edges/outputs.from；同名 409；单事务原子；`warnings`） | crud-03 3.3.9 | 缺 client → 409 `CLIENT_NOT_FOUND`；同名 client 类型不符 → 400 `CLIENT_TYPE_MISMATCH`；节点数 > settings `workflow_max_nodes` → 400 `VALIDATION_ERROR` |
+| T8.8 | `POST /export`（ZIP：manifest（含 `clients[]` / `bindings[]`）+ 根级 workflow.yaml + ops/*.yaml + clients/*.yaml；依赖以 **名称** 表达） | crud-03 3.3.8 | `{zip:base64}` |
+| T8.9 | `POST /import`（按 name 重映射 opName→opId / clientName→clientId；节点 workflowNodeId 重新生成 UUID 并重写 edges/outputs.from；同名 409；单事务原子；`warnings`） | crud-03 3.3.9 | 包格式不合规（缺 `bindings[]` / `clients[]` 声明 / `clients/<name>.yaml` 文件）→ 400 `VALIDATION_ERROR`；同名 client 类型不符 → 400 `CLIENT_TYPE_MISMATCH`；节点数 > settings `workflow_max_nodes` → 400 `VALIDATION_ERROR` |
 | T8.10 | needs-update 内核 + `GET /needs-update` / `GET /outdated-nodes`（落后/超前/悬挂） | crud-03 3.3.10/3.3.11 | 动态计算不落库 |
 | T8.11 | Engine 事件模型：`engine_events` 七类事件 + `process_event` **写即处理**（无循环/无信号） | crud-03 §4.3 | 事件先落库再处理 |
 | T8.12 | 全局完成回调冻结：`JobComplete` / `StepComplete`（按 `source=job/step` 分发） | proposal-02 §1.2；crud-03 4.4 | 与 T9 对齐 |

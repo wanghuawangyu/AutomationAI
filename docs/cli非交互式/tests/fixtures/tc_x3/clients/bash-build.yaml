@@ -1,0 +1,5 @@
+name: bash-build
+type: bash
+description: 本地 Bash Shell（TC-X3 测试暂定名）
+binaryPath: /usr/bin/bash
+exitCodeSuccess: [0]

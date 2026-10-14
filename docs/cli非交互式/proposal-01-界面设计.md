@@ -1292,7 +1292,7 @@ interface NodeRetry {
 
 ```text
 workflow-deploy_workflow-v2.zip
-├── manifest.json         # 含 bindings[]：节点绑定关系（哪个 OP → 入参配置 → 哪个 Client，见 crud-03 3.3.8）
+├── manifest.json         # 含 bindings[]：节点绑定关系（哪个 OP → 入参配置 → 哪个 Client，覆盖全部 op 节点、未绑定 Client 的 clientName 为空，见 crud-03 3.3.8）
 ├── workflow.yaml
 ├── ops/
 │   ├── check_tests.yaml
