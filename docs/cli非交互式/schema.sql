@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS workflow_nodes (
     -- kind = op 时使用
     op_id           TEXT,
     op_version      INTEGER,
-    client_id       TEXT,                                -- 可为空, 执行时再选
+    client_id       TEXT,                                -- kind=op 必填: 节点必须绑定 Client (Workflow/Job 场景不支持未绑定; start/end 为 NULL)
+                    CHECK (kind != 'op' OR client_id IS NOT NULL),
     -- bindings: {"paramName": {"kind":"node_output"|"workflow_input"|"literal", ...}}
     bindings        TEXT,                                -- JSON object
     -- retry: {"on":"failure","max":3,"backoff":"exponential","interval":1000}

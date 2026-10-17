@@ -404,7 +404,7 @@ job-hourly_check-v1.zip
 ├── manifest.json
 ├── ops/                   # 目标 OP 自身（= crud-02 3.2.7 OP YAML 同格式）
 │   └── check_tests.yaml
-└── clients/               # target.clientId 引用的 Client 定义（= crud-01 3.1.7 Client YAML 同格式；target 无 clientId 时不出现）
+└── clients/               # target.clientId 引用的 Client 定义（= crud-01 3.1.7 Client YAML 同格式；恒出现——kind=op 的 target.clientId 必填，kind=workflow 时 Workflow 节点必绑定 Client）
     └── my-bash.yaml
 ```
 
@@ -453,10 +453,10 @@ enabled: true
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
 | job | object | Job 名称与版本（锚定 `job.yaml`） |
-| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.4.10）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建；无引用时为 `[]`（`clients/` 不出现） |
+| clients | object[] | 包内出现的 Client（`kind=op` 的 `target.clientId`，或 `kind=workflow` 时 `workflows/<name>.yaml` 节点的 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.4.10）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建。**节点必须绑定 Client（crud-03 3.3.3），正常 Job 包（kind=op 或 kind=workflow）的 `clients[]` 恒非空**（仅理论空包兜底为 `[]`，此时 `clients/` 不出现） |
 | target | object | **目标实体声明（导入的名称锚）**：`{kind:"workflow", name, version, file}` 或 `{kind:"op", name, version, file}`；`file` 为包内相对路径——`workflows/<name>.yaml`（kind=workflow）或 `ops/<name>.yaml`（kind=op） |
 | ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）——**仅文件清单，不含绑定信息**。`kind=workflow` 时 = 该 Workflow 节点引用的全部 OP（与 Workflow 导出 `manifest.ops` 一致，见 crud-03 3.3.8）；`kind=op` 时 = 目标 OP 本身（`file: ops/<name>.yaml`） |
-| bindings | object[] | **包内 OP 使用点的绑定关系清单（权威声明，导出端生成）**：每条 `{opName, bindings, clientName}`——`opName` 为绑定的 OP（须在 `ops[]` 中）、`bindings` 为入参配置值、`clientName` 为绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。`kind=op`：**恰好一条**（`job.yaml.target` 的 OP 引用：`bindings`=`target.bindings`、`clientName`=`target.clientId` 反查名）；`kind=workflow`：**按 Workflow 节点列**（与 crud-03 3.3.8 `bindings[]` 口径一致，覆盖全部 `kind=op` 节点、start/end 不列、未绑定 Client 的节点 `clientName` 为空）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `job.yaml.target` 与 `workflows/<name>.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.4.10）。**格式强制（不做兼容）**：`bindings[]` 缺失或与 `job.yaml` / `workflows/<name>.yaml` 不一致（手工改动包）→ **400 `VALIDATION_ERROR`**（message 指明缺失/不一致位置，与名称锚校验同一处理，见 3.4.10），不做回退、不静默覆盖 |
+| bindings | object[] | **包内 OP 使用点的绑定关系清单（权威声明，导出端生成）**：每条 `{opName, bindings, clientName}`——`opName` 为绑定的 OP（须在 `ops[]` 中）、`bindings` 为入参配置值、`clientName` 为绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。`kind=op`：**恰好一条**（`job.yaml.target` 的 OP 引用：`bindings`=`target.bindings`、`clientName`=`target.clientId` 反查名）；`kind=workflow`：**按 Workflow 节点列**（与 crud-03 3.3.8 `bindings[]` 口径一致，覆盖全部 `kind=op` 节点、start/end 不列、**节点必须绑定 Client、`clientName` 恒非空（不支持未绑定）**）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `job.yaml.target` 与 `workflows/<name>.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.4.10）。**格式强制（不做兼容）**：`bindings[]` 缺失或与 `job.yaml` / `workflows/<name>.yaml` 不一致（手工改动包）→ **400 `VALIDATION_ERROR`**（message 指明缺失/不一致位置，与名称锚校验同一处理，见 3.4.10），不做回退、不静默覆盖 |
 
 > 旧版 `workflows[]` 数组已由 `target` 取代，**包内不出现**；若出现视为字段非法 → 400 `VALIDATION_ERROR`。
 
@@ -498,7 +498,7 @@ enabled: true
 | Job.target | 解析后指向目标实体（见上）；`target.xxxVersion` 取**解析后实际引用的当前版本**；`target.bindings` / `target.clientId` 以 `manifest.bindings[]` 对应条目为准写入（导出端保证与 `job.yaml` 一致，导入端重写为解析出的新 clientId） |
 | Job.inputs 键名（#4） | **复用 3.4.3 同一校验**：inputs 的 name 须匹配 target（OP/Workflow）的参数定义；不匹配 → 400 `VALIDATION_ERROR` |
 | 版本差异告警（#5） | 复用的 OP/Workflow 版本与包内/manifest 声明不一致 → 计入响应 `warnings`（导入仍成功，不报错）；相关 Workflow 可能立即 `needsUpdate=true` |
-| 包内 Client（`manifest.bindings[]` 为权威清单） | 绑定关系（哪个 OP → 入参配置 → 哪个 Client）**一律以 `manifest.bindings[]` 解析**（`kind=op` 一条 target 绑定、`kind=workflow` 按节点）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），用其 `clientId`；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）。**格式强制（不做兼容）**：`bindings[]` 缺失 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 → **400 `VALIDATION_ERROR`**（message 指明缺失位置） |
+| 包内 Client（`manifest.bindings[]` 为权威清单） | 绑定关系（哪个 OP → 入参配置 → 哪个 Client）**一律以 `manifest.bindings[]` 解析**（`kind=op` 一条 target 绑定、`kind=workflow` 按节点）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），用其 `clientId`；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）。**格式强制（不做兼容）**：`bindings[]` 缺失 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 / **`clientName` 缺失或为空（Job 与 Workflow 场景节点必须绑定 Client，不支持未绑定）** → **400 `VALIDATION_ERROR`**（message 指明缺失位置） |
 | **旧 id → 新 id 重映射（#3）** | `job.yaml` 中的 target 存的是**导出环境 id**；导入以 `manifest.json` 的 **`target` / `ops` 名称锚**（含 `target.file` 定位文件）为切入，按上述策略解析出目标环境实体，再把 target 的 id 字段（`opId`/`workflowId`/`clientId`）**重写为新 id**、版本取实际引用版本； 名称在目标环境重名 → 按 name 视为同一实体（复用） |
 | **导入后的 `enabled`（#7）** | **沿用包内 `enabled` 值**（不重置）；若为 schedule 且 `enabled=true` → **按 4.5.1 注册定时触发**（与创建一致）；`enabled=false` 则不注册 |
 
@@ -512,7 +512,7 @@ enabled: true
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**、**`manifest.target.name` 与包内文件实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**、**`bindings[]` 缺失 / 与 `job.yaml` 或 `workflows/<name>.yaml` 不一致 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」——格式强制、不做兼容回退） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或字段非法（**name 超 512 字符**、**`manifest.target.file` 指向的成员缺失**、**`job.yaml.target.kind` 与 `manifest.target.kind` 不一致**、**`manifest.target.name` 与包内文件实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**、**`bindings[]` 缺失 / 与 `job.yaml` 或 `workflows/<name>.yaml` 不一致 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 / **`clientName` 缺失或为空（必须绑定 Client）**等；**包内 `job.yaml` 缺 `workspace`** 亦归「字段非法」——格式强制、不做兼容回退） |
 | 400 | `CLIENT_TYPE_MISMATCH` | 包内 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理） |
 | 409 | `JOB_NAME_EXISTS` | 同名 Job 已存在（导入冲突） |
 

@@ -70,7 +70,7 @@
 | position | object \| null | 否 | 画布坐标 `{x, y}`。**创建 API 必填**（前端画布布局后传入，缺失报 400）；**导入 API 可空**（manifest 无坐标时后端生成默认排布并持久化）；更新时随节点整体提交 |
 | opId | string(32 位 UUID) | op 时必填 | 绑定的 OP |
 | opVersion | integer | op 时必填 | 绑定的 OP 版本 |
-| clientId | string(32 位 UUID) | 否 | 执行所用 Client，可为空（执行时再选） |
+| clientId | string(32 位 UUID) | op 时必填 | 执行所用 Client——**必须绑定**（Workflow / Job 场景不支持未绑定，缺失 → 400 `VALIDATION_ERROR`，见 3.3.3） |
 | bindings | object | op 时可空 | 入参绑定，见下 |
 | retry | object \| null | 否 | 重试策略，见下 |
 
@@ -106,8 +106,8 @@
 - 从 start 出发可达 end。
 - **允许环路**：回跳边形成的环由 Engine 在运行时以计数终止（循环回跳上限 min(max × 3, max_loop_multiplier)，见 4.3.0），拓扑校验不拒绝环。
 - **Start 出边约束**：Start 无失败语义，不允许 `on_failure` 出边（恒 `on_success` / `always`；Start 仅 🟢 单出边锚点）。
-- 每个 op 节点必须绑定 opId + opVersion。
-- **op 节点绑定 `clientId` 时，Client 类型须与节点 OP 类型匹配**（bash/python/powershell/prompt 须同类对应；不匹配 → 400 `CLIENT_TYPE_MISMATCH`，与 crud-02 3.2.6 同一校验口径）；`clientId` 为空则不在此处校验——运行前由 Engine 组装 ExecuteRequest 时回退 `Job.target.clientId`（仅 Job target=op 时存在；单次执行无 Job → 回退为空），仍空则走 `run_failed`；运行期类型不匹配由 Worker 执行前校验拦截（step 落 `failed`，`error=CLIENT_TYPE_MISMATCH`，见 4.4）。
+- 每个 op 节点必须绑定 opId + opVersion + clientId（**Client 必须绑定，缺失 → 400 `VALIDATION_ERROR`**）。
+- **op 节点绑定的 Client 类型须与节点 OP 类型匹配**（bash/python/powershell/prompt 须同类对应；不匹配 → 400 `CLIENT_TYPE_MISMATCH`，与 crud-02 3.2.6 同一校验口径；Client 可被编辑更换类型，故提交时按定义再校一次）；运行期类型不匹配由 Worker 执行前校验拦截（step 落 `failed`，`error=CLIENT_TYPE_MISMATCH`，见 4.4）。
 - bindings 引用的前置节点出参必须存在。
 
 ---
@@ -340,8 +340,8 @@
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | workspace 缺失、inputs 含未定义参数 |
-| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点显式绑定 `clientId`，且该 Client 类型与节点 OP 类型不匹配**（Client 可被编辑更换类型，故提交时按定义再校一次；同一校验口径见 3.3.3）；**节点未绑定 `clientId` 的情形不在提交时校验**——运行前由 Engine 组装 ExecuteRequest 时回退 `Job.target.clientId`（仅 Job target=op 时存在；单次执行无 Job），仍空则走 `run_failed`，类型不匹配则执行前校验失败、该 step 落 `failed`（`error=CLIENT_TYPE_MISMATCH`，不启动子进程、不消耗超时，见 4.4） |
+| 400 | `VALIDATION_ERROR` | workspace 缺失、inputs 含未定义参数、**op 节点缺 `clientId`（节点必须绑定 Client）** |
+| 400 | `CLIENT_TYPE_MISMATCH` | **op 节点绑定的 `clientId` 类型与节点 OP 类型不匹配**（Client 可被编辑更换类型，故提交时按定义再校一次；同一校验口径见 3.3.3；**节点 Client 必须绑定**，缺失属 `VALIDATION_ERROR`）；运行期类型不匹配由 Worker 执行前校验拦截、该 step 落 `failed`（`error=CLIENT_TYPE_MISMATCH`，不启动子进程、不消耗超时，见 4.4） |
 | 404 | `WORKFLOW_NOT_FOUND` | workflowId 不存在 |
 | 409 | `WORKFLOW_NEEDS_UPDATE` | needsUpdate=true，需更新后才能执行 |
 | 409 | `CONCURRENCY_CONFLICT` | 全局 waiting 队列达 settings `job_queue_waiting_max`（默认 20、可调、上限 1000）上限（单次执行也走创建 job_runs 入口，统一检查；见 crud-04 3.4.6 #3） |
@@ -435,9 +435,9 @@ workflow-deploy_workflow-v2.zip
 | appVersion | string | 导出 APP 版本（迁移兼容判断用） |
 | exportedAtMs | string | 导出时间（毫秒时间戳字符串） |
 | workflow | object | 包内 Workflow 的名称与版本（锚定根级 `workflow.yaml`）。**导入名称锚一致性校验（3.3.9）**：`manifest.workflow.name` 必须与根级 `workflow.yaml` 的实际 `name` 一致——不一致 → 400 `VALIDATION_ERROR`（`message` 指明位置，如「`manifest.workflow.name=deploy_workflow` 与 `workflow.yaml` 的 `name=deploy_v2` 不一致」，用户修改后重新导入）；`version` 为声明参考，与文件不一致时以文件内容为准（沿用包内值，保真还原） |
-| clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.3.9）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建；无节点绑定时为 `[]`（`clients/` 不出现） |
+| clients | object[] | 包内出现的 Client（`workflow.yaml` 节点 `clientName`）：`{name, file}`——**以 name 表达、不含 `clientId`**（clientId 属导出环境 id，导入时重新生成 / 按名重映射，见 3.3.9）；**携带 Client 完整定义**（`file` 恒为 `clients/<name>.yaml`），保证导入自足：目标环境缺失时按包内定义创建。**节点必须绑定 Client（3.3.3），正常 Workflow 的 `clients[]` 恒非空**（仅理论空包兜底为 `[]`，此时 `clients/` 不出现） |
 | ops | object[] | 包内 OP 依赖：`{name, version, file}`（`file` 恒为 `ops/<name>.yaml`）——**仅文件清单**，不含绑定信息 |
-| bindings | object[] | **节点级绑定关系清单（权威声明，导出端生成）**：每节点一条 `{opName, bindings, clientName}`——`opName` 为该节点引用的 OP（须在 `ops[]` 中）、`bindings` 为该节点的入参配置值（与 `workflow.yaml` 节点 `bindings` 一致）、`clientName` 为该节点绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。**同一 OP 被多节点以不同配置引用 → 多条**（每条对应一个节点）；**覆盖全部 `kind=op` 节点**（`start`/`end` 不列；未绑定 Client 的节点 `clientName` 为空）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `workflow.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.3.9）。**格式强制（不做兼容）**：`bindings[]` 缺失或与 `workflow.yaml` 节点不一致（手工改动包）→ **400 `VALIDATION_ERROR`**（message 指明缺失/不一致位置，与名称锚校验同一处理，见 3.3.9），不做回退、不静默覆盖 |
+| bindings | object[] | **节点级绑定关系清单（权威声明，导出端生成）**：每节点一条 `{opName, bindings, clientName}`——`opName` 为该节点引用的 OP（须在 `ops[]` 中）、`bindings` 为该节点的入参配置值（与 `workflow.yaml` 节点 `bindings` 一致）、`clientName` 为该节点绑定的 Client（**以 name 表达、不含 `clientId`**——导入时按名匹配 / 按包内定义创建并重映射为新 id）。**同一 OP 被多节点以不同配置引用 → 多条**（每条对应一个节点）；**覆盖全部 `kind=op` 节点**（`start`/`end` 不列；**节点必须绑定 Client，不支持未绑定——`clientName` 恒非空**）。**导入端以此段解析「哪个 OP 配置了哪些入参、绑定哪个 Client」**，并据此重写 `workflow.yaml` 节点的 `bindings` / `clientName` → `clientId`（见 3.3.9）。**格式强制（不做兼容）**：`bindings[]` 缺失或与 `workflow.yaml` 节点不一致（手工改动包）→ **400 `VALIDATION_ERROR`**（message 指明缺失/不一致位置，与名称锚校验同一处理，见 3.3.9），不做回退、不静默覆盖 |
 
 **`ops/*.yaml`（包内 OP 定义）**：与 OP 导出 YAML **同一格式**（字段规范与样例见 crud-02 3.2.7）；**仅包含纯粹 OP 定义字段**（name / type / content / timeoutSeconds / inputs / outputs 等），**不含任何 Client 绑定信息**（绑定关系只存在于 `manifest.bindings[]`），不含 `opId` / 时间戳。
 
@@ -479,7 +479,7 @@ workflow-deploy_workflow-v2.zip
 |-|-|
 | Workflow 本身 | 同名已存在 → 409 `WORKFLOW_NAME_EXISTS`；否则新建，`version` 沿用包内值（**保真还原**：版本是 `needsUpdate` 快照比对基准且可能被 Job 引用，保真以维持引用一致；对比 Job 导入的重置为 1，见 crud-04 3.4.10）。**名称锚一致性校验（#6）**：`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致 → **400 `VALIDATION_ERROR`**（`message` 指明位置），不静默以文件内容为准；用户手动修改包内文件或 manifest 后重新导入 |
 | 节点 `opName` → `opId` | **按 name 匹配 ops**：不存在 → 按包内 `ops/*.yaml` 创建；已存在 → 复用现有（不覆盖）；节点 `opId` 重写为匹配到的 id；`opVersion` 保留包内快照（复用时若落后由 3.3.10 `needsUpdate` 提示）。节点**入参配置值（`bindings`）以 `manifest.bindings[]` 对应条目为准**写入（导出端保证与 `workflow.yaml` 节点 `bindings` 一致） |
-| 节点 `clientName` → `clientId` | **按 `manifest.bindings[]` 为权威清单解析绑定关系**（每个节点的 OP 引用 + 入参配置 + Client 绑定均在其中）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），节点 `clientId` 重写为匹配到的 id；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）。**格式强制（不做兼容）**：`bindings[]` 缺失 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 → **400 `VALIDATION_ERROR`**（message 指明缺失位置）——`clientName` 为空则不校验 |
+| 节点 `clientName` → `clientId` | **按 `manifest.bindings[]` 为权威清单解析绑定关系**（每个节点的 OP 引用 + 入参配置 + Client 绑定均在其中）：`clientName` 按 name 匹配 Client：存在 → 复用现有（校验类型与其绑定 OP 的类型相符，不符 → 400 `CLIENT_TYPE_MISMATCH`），节点 `clientId` 重写为匹配到的 id；不存在 → **按包内 `clients/<name>.yaml` 定义创建 Client**（`clientId` 由后端重新生成，保证导入自足）。**格式强制（不做兼容）**：`bindings[]` 缺失 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 / **`clientName` 缺失或为空（节点必须绑定 Client，不支持未绑定）** → **400 `VALIDATION_ERROR`**（message 指明缺失位置） |
 | `workflowNodeId` | **不沿用导出环境 UUID**：导入时为每个节点重新生成 32 位 UUID，建立 `短别名（n1/n2/…）→ 新UUID` 映射表；随后按映射同步重写 `edges.from` / `edges.to` / `outputs.from.workflowNodeId`。短别名在包内唯一即可，跨环境不保留——与 opId/clientId 导入时重新生成同口径 |
 | 原子性 | 整个导入（解析校验 → 创建/复用 OP → 创建 Workflow）在**单一事务**内完成；任一失败 → **整体回滚**，不产生半成品 |
 | 版本差异告警 | 复用的 OP 版本与包内声明不一致 → 计入响应 `warnings`（导入仍成功） |
@@ -488,7 +488,7 @@ workflow-deploy_workflow-v2.zip
 
 | 状态码 | code | 场景 |
 |-|-|-|
-| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`**、**`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**、**`bindings[]` 缺失 / 与 `workflow.yaml` 节点不一致 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失**等字段非法——格式强制、不做兼容回退） |
+| 400 | `VALIDATION_ERROR` | ZIP 解析失败或拓扑非法（**name 超 512 字符**、**节点总数超过 settings `workflow_max_nodes`**、**`manifest.workflow.name` 与根级 `workflow.yaml` 实际 `name` 不一致（`message` 指明位置，用户修改后重新导入）**、**`bindings[]` 缺失 / 与 `workflow.yaml` 节点不一致 / `clientName` 未在 `manifest.clients[]` 声明 / 声明的 `clients/<name>.yaml` 文件缺失 / **`clientName` 缺失或为空（节点必须绑定 Client）**等字段非法——格式强制、不做兼容回退） |
 | 400 | `CLIENT_TYPE_MISMATCH` | 节点 `clientName` 按名匹配到同名 Client 但**类型与其绑定 OP 的类型不符**（导入不复用类型不符的 Client，按 400 处理；显式类型校验口径见 3.3.3 / 3.3.4） |
 | 409 | `WORKFLOW_NAME_EXISTS` | 同名 Workflow 已存在（导入冲突） |
 
@@ -591,7 +591,7 @@ outdatedNodes = evaluateWorkflowOutdated(workflow)   # 3.3.11 直接返回此结
 ```text
 POST /api/workflows/{workflowId}/execute {inputs, workspace}
   │
-  ├─ 1. 校验 workflow: needsUpdate=true → 409 WORKFLOW_NEEDS_UPDATE；显式绑定 clientId 的 op 节点类型不匹配 → 400 CLIENT_TYPE_MISMATCH（同 3.3.3）
+  ├─ 1. 校验 workflow: needsUpdate=true → 409 WORKFLOW_NEEDS_UPDATE；op 节点绑定的 clientId 类型不匹配 → 400 CLIENT_TYPE_MISMATCH（节点必须绑定 Client；同 3.3.3）
   ├─ 2. 解析 workflow 入参: 校验 required, 缺省项应用 default → 最终入参集
   ├─ 3. 组装 WorkflowRunRequest (结构见 crud-05 4.6 Task Runner):
   │     run_id       = 后端生成的 runId (workflow 单次执行, virtual JobRun)
@@ -665,7 +665,7 @@ Engine 采用**事件驱动 + 调度事件流**：每次"节点完成 → 决定
 | `dispatch_step` | `retry_seq` | integer | pending=false 时必填 | 即将执行的 attempt 序号 | |
 | `dispatch_step` | `not_before_ms` | string \| null | 否 | 最早可执行时间（重试退避）；null=立即 | 落库为 step_records.not_before_ms |
 | `dispatch_step` | `inputs` | object | pending=false 时必填 | 解析 bindings 后组装的 OP 入参快照 | |
-| `dispatch_step` | `client_id` | string \| null | 否 | 执行 Client（节点级；空则走 Job.target.clientId 回退） | |
+| `dispatch_step` | `client_id` | string | 是 | 执行 Client（节点级，必填——节点必须绑定 Client，恒非空） | |
 | `workflow_done` | `status` | enum | 是 | `success` / `failed` | 决定 job_runs 终态；failed 时 terminated_by=error |
 | `workflow_done` | `reason` | string \| null | 否 | 失败原因简述（如 end_not_activated / run_failed / loop_limit） | 审计用 |
 | `terminate` | `reason` | enum | 是 | `user_terminate` / `timeout` / `run_failed` / `loop_limit` | 对应 job_runs.terminated_by 的语义来源 |
@@ -816,7 +816,7 @@ process_event(event)  # 同步；按 run 串行（见 4.3.3）。
 - 若该 run 的 `job_runs.status` 已是终态（success / failed / cancelled / timeout）→ **直接置本事件 processed=1 返回**，不再进决策链（避免终止后被终止步骤的 `step_completed` 再次触发 terminate / JobComplete）。
 - 处理阶段内产生的后续事件（apply_retry / walk_edge / dispatch_step / workflow_done）在本调用栈内继续 process_event；**其中 apply_retry 的处理即写 dispatch_step**（见事件表）。
 
-**派发前组装 ExecuteRequest（Engine）**：`dispatch_step` 前由 Engine 构造 ExecuteRequest：遍历 `node.bindings` 解析 `inputs`（`node_output` → 上游节点出参（RunContext / step_records.outputs）；`workflow_input` → RunContext 入参；`literal` → 值）；`clientId` 取 `node.clientId`（空则回退 `Job.target.clientId`——**Job 顶层不设 clientId（Client 为 OP 专有）**，该回退仅当 Job target=op 时存在；仍空则报错）；`op` **取 RunContext 中该节点已快照的 OP 定义**（engine_start 时按 `node.op_version` 快照，含正文），正文写 `step_records.body_snapshot`；连同 `run_id` / `step_id` / `activation_seq` / `retry_seq` / `workspace` 组成 ExecuteRequest（见 crud-01 5.1）。**Engine 不另建 OP 历史版本表**：op 定义随 workflow 定义在 engine_start 一并快照冻结，运行期 OP 更新 / 删除不影响本 Run。**组装失败属确定性数据错误（clientId 缺失 / op 快照缺失 / 定义非法）→ 正常失败路径：置 `run_failed=true`（不 abort 在飞，等收敛后落 `workflow_done(failed)`，processed=1），不返回 Err**（U8/W7）。
+**派发前组装 ExecuteRequest（Engine）**：`dispatch_step` 前由 Engine 构造 ExecuteRequest：遍历 `node.bindings` 解析 `inputs`（`node_output` → 上游节点出参（RunContext / step_records.outputs）；`workflow_input` → RunContext 入参；`literal` → 值）；`clientId` 取 `node.clientId`（**节点必须绑定 Client，恒非空**——提交时已校验，见 3.3.3；不存在回退逻辑）；`op` **取 RunContext 中该节点已快照的 OP 定义**（engine_start 时按 `node.op_version` 快照，含正文），正文写 `step_records.body_snapshot`；连同 `run_id` / `step_id` / `activation_seq` / `retry_seq` / `workspace` 组成 ExecuteRequest（见 crud-01 5.1）。**Engine 不另建 OP 历史版本表**：op 定义随 workflow 定义在 engine_start 一并快照冻结，运行期 OP 更新 / 删除不影响本 Run。**组装失败属确定性数据错误（clientId 缺失（数据损坏）/ op 快照缺失 / 定义非法）→ 正常失败路径：置 `run_failed=true`（不 abort 在飞，等收敛后落 `workflow_done(failed)`，processed=1），不返回 Err**（U8/W7）。
 
 **状态机**：
 - 节点级（`step_records.status`）：`waiting → running → success/failed/timeout/cancelled`（cancelled = 被终止/取消）。同一节点**重试**重入 running（同 activation，`retry_seq+1`）；**循环回跳**开启新 activation（`activation_seq+1`，`retry_seq` 重置为 1）。

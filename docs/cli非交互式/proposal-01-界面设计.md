@@ -1292,7 +1292,7 @@ interface NodeRetry {
 
 ```text
 workflow-deploy_workflow-v2.zip
-├── manifest.json         # 含 bindings[]：节点绑定关系（哪个 OP → 入参配置 → 哪个 Client，覆盖全部 op 节点、未绑定 Client 的 clientName 为空，见 crud-03 3.3.8）
+├── manifest.json         # 含 bindings[]：节点绑定关系（哪个 OP → 入参配置 → 哪个 Client，覆盖全部 op 节点、节点必须绑定 Client、clientName 恒非空，见 crud-03 3.3.8）
 ├── workflow.yaml
 ├── ops/
 │   ├── check_tests.yaml
@@ -1555,7 +1555,7 @@ job-hourly_check-v1.zip
 ├── ops/
 │   └── check_tests.yaml        # 目标 OP 自身（= crud-02 3.2.7 同格式，纯粹 OP、不含 Client 绑定）
 └── clients/
-    └── my-bash.yaml            # target.clientId 引用的 Client 定义（target 无 clientId 时不出现）
+    └── my-bash.yaml            # target.clientId 引用的 Client 定义（恒出现——kind=op 的 target.clientId 必填）
 ```
 
 > `manifest.target.file` 为导入的名称锚（`workflows/<name>.yaml` 或 `ops/<name>.yaml`），导入据此定位目标实体并按名重映射为新 uuid（见 crud-04 3.4.10）。**Workflow 导出包（§10.13）保持根级 `workflow.yaml`**，不套子目录。

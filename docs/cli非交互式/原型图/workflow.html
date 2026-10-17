@@ -1441,7 +1441,7 @@
     html += '<div class="panel-section" style="margin-top:16px">';
     html += '<label class="ps-label">Client</label>';
     html += '<select class="ps-select" onchange="setNodeClient(this.value)">';
-    html += '<option value="">— 未指定（执行时回退 Job.target.clientId） —</option>';
+    html += '<option value="">— 请选择 Client（必填） —</option>';
     CLIENTS.forEach(function (c) {
       html += '<option value="' + escText(c.clientId) + '"' + (draft.clientId === c.clientId ? ' selected' : '') + '>' + escText(c.name) + '</option>';
     });
